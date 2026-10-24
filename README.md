@@ -20,7 +20,13 @@ You (and staff) manage everything; each client logs in and sees only their own d
 
 **One-click portal login** — with the included Chrome extension, **Login** opens the portal and fills the user ID and password (and TAN on TRACES; on Income Tax it fills the password after you click Continue). You enter CAPTCHA / OTP and sign in. Without the extension, Login opens the portal and copies the password.
 
-## Setup (about 15 minutes)
+## Local mode (no login)
+Until `firebase-config.js` has real keys, the app opens straight into the dashboard with no login and saves everything in the browser (IndexedDB) on that computer. A "Local mode" tag and banner show at the top. Client/staff logins are hidden.
+- **Back up regularly:** Settings → Download full backup (a .json file). Clearing browser data deletes local data.
+- **Restore / move to another computer:** Settings → Restore from backup.
+- **Switch on logins later:** fill in `firebase-config.js` (steps below). The same backup file can be loaded into Firebase.
+
+## Setup with logins (about 15 minutes)
 
 ### 1. Firebase project
 1. Go to <https://console.firebase.google.com> → **Add project** (e.g. `ca-desk`). Analytics not needed.

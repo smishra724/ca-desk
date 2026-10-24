@@ -2,15 +2,18 @@ import { firebaseConfig } from './firebase-config.js';
 import { PORTALS, portalByKey } from './portals.js';
 import { extractFromFile, toISO } from './extract.js';
 import { dueItems, fmtDate } from './compliance.js';
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
-import {
-  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
-  createUserWithEmailAndPassword, sendPasswordResetEmail
-} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import {
+
+// Local mode (no login, data in this browser) until firebase-config.js has real keys.
+const LOCAL = !firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith('PASTE');
+const FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
+const M = LOCAL ? await import('./local-db.js')
+  : Object.assign({}, ...(await Promise.all(['firebase-app.js', 'firebase-auth.js', 'firebase-firestore.js'].map(f => import(FB + f)))));
+const {
+  initializeApp, getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
+  createUserWithEmailAndPassword, sendPasswordResetEmail,
   getFirestore, doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc, collection, collectionGroup,
   getDocs, query, where, writeBatch, serverTimestamp, arrayUnion
-} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+} = M;
 
 /* ================= setup ================= */
 const fbApp = initializeApp(firebaseConfig);
@@ -77,13 +80,6 @@ let settingUp = false;
 onAuthStateChanged(auth, async u => { if (!settingUp) await boot(u); });
 
 async function boot(u) {
-  if (!firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith('PASTE')) {
-    $('#app').innerHTML = `<div class="auth-wrap"><div class="auth card"><div class="logo">₹</div><h1>Almost ready</h1>
-      <p>This app isn't connected to Firebase yet. Paste your Firebase web-app keys into <code>firebase-config.js</code>
-      (Firebase console → Project settings → Your apps → Web app), then reload this page.</p>
-      <p class="muted small">After that, a “First-time setup” box will appear here to create your owner login.</p></div></div>`;
-    return;
-  }
   try {
     const s = await getDoc(doc(db, 'meta', 'setup'));
     S.setup = s.exists(); S.firm = s.exists() ? s.data().firmName || '' : '';
@@ -167,8 +163,9 @@ function render() {
   <header class="top">
     <div class="brand"><span class="logo sm">₹</span>${esc(S.firm || 'CA Desk')}</div>
     <nav>${nav}</nav>
-    <div class="who"><span class="muted small">${esc(S.profile.email)}</span><button class="ghost" data-act="logout">Sign out</button></div>
+    <div class="who">${LOCAL ? '<span class="tag amber">Local mode</span>' : `<span class="muted small">${esc(S.profile.email)}</span><button class="ghost" data-act="logout">Sign out</button>`}</div>
   </header>
+  ${LOCAL ? `<div class="localbar">Data is saved in this browser on this computer only. Take a backup from <a href="#" data-act="go" data-v="settings">Settings</a> regularly. Client and staff logins switch on once Firebase is connected.</div>` : ''}
   <main>${body()}</main>`;
 }
 function body() {
@@ -357,6 +354,7 @@ function tCompliance() {
 }
 
 function tAccess() {
+  if (LOCAL) return `<h2>Client access</h2><p class="muted">Client logins switch on once the app is connected to Firebase. Until then, use “Download my data (Excel)” to send a client their master data, portal logins and compliance status.</p>`;
   const users = S.client?.portalUsers || [];
   return `
   <h2>Client access</h2>
@@ -425,6 +423,13 @@ function vSettings() {
       <div class="span2"><button class="primary">Save</button></div></form>
   </section>
   <section class="card">
+    <h2>Backup &amp; restore</h2>
+    ${LOCAL ? '<p class="muted small">In local mode everything lives in this browser. Download a backup regularly and keep it safe — clearing browser data deletes it. The backup also moves your data to another computer or into Firebase later.</p>'
+      : '<p class="muted small">Your data is stored in Firebase. A backup file is still useful as an offline copy.</p>'}
+    <div class="btns"><button class="primary" data-act="backup">Download full backup</button>
+    ${LOCAL ? '<label class="filebtn ghostbtn">Restore from backup<input type="file" accept=".json" data-change="restore"></label>' : ''}</div>
+  </section>
+  ${LOCAL ? '' : `<section class="card">
     <h2>Staff logins</h2>
     <p class="muted small">Staff get full access to all clients (same as you).</p>
     <div id="staffList" class="muted small">Loading…</div>
@@ -434,7 +439,7 @@ function vSettings() {
       <label>Temporary password<input name="pw" required minlength="8" value="${genPw()}"></label>
       <div class="span2"><button class="primary">Create staff login</button></div>
     </form>
-  </section>
+  </section>`}
   <section class="card">
     <h2>Autofill extension</h2>
     <p>${extOn() ? '<span class="tag green">Installed and active</span>' : '<span class="tag">Not detected</span>'}</p>
@@ -442,7 +447,7 @@ function vSettings() {
   </section>`;
 }
 async function loadStaff() {
-  const el = $('#staffList'); if (!el) return;
+  const el = $('#staffList'); if (!el || LOCAL) return;
   const snap = await getDocs(query(collection(db, 'users'), where('role', '==', 'admin')));
   el.innerHTML = snap.docs.map(d => `<div>${esc(d.data().name || '')} — ${esc(d.data().email)}${d.id === S.profile.uid ? ' (you)' : ''}</div>`).join('');
 }
@@ -450,6 +455,21 @@ async function loadStaff() {
 /* ================= actions ================= */
 const A = {
   logout: () => signOut(auth),
+  backup: () => guard(async () => {
+    let json;
+    if (LOCAL) json = M.exportAll();
+    else {
+      const docs = {};
+      const add = snap => snap.forEach(d => docs[d.ref.path] = d.data());
+      add(await getDocs(collection(db, 'clients')));
+      for (const c of S.clients) for (const sub of ['credentials', 'filings', 'docs']) {
+        const sn = await getDocs(collection(db, 'clients', c.id, sub)); add(sn);
+        if (sub === 'docs') for (const d of sn.docs) add(await getDocs(collection(db, 'clients', c.id, 'docs', d.id, 'chunks')));
+      }
+      json = JSON.stringify({ app: 'ca-desk', version: 1, exportedAt: new Date().toISOString(), docs });
+    }
+    saveBlob(new Blob([json], { type: 'application/json' }), `CA-Desk-backup-${todayISO()}.json`);
+  }, 'Backup downloaded'),
   forgot: async () => {
     const email = prompt('Enter your login email. A password reset link will be sent.');
     if (email) guard(() => sendPasswordResetEmail(auth, email.trim()), 'Reset link sent — check your inbox.');
@@ -692,6 +712,11 @@ const F = {
 
 /* ================= change handlers ================= */
 const C = {
+  restore: el => {
+    const f = el.files[0]; if (!f) return;
+    if (!confirm('Replace ALL data in this browser with the backup? Current data will be overwritten.')) return;
+    guard(async () => { await M.importAll(await f.text()); location.reload(); });
+  },
   dashDays: el => { S.dashDays = +el.value; render(); },
   portalPick: el => { const u = el.form.elements.url; u.value = portalByKey(el.value).url; },
   uploadDocs: el => guard(async () => {

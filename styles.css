@@ -99,3 +99,6 @@ main{max-width:1180px;margin:20px auto;padding:0 16px}
   .dl{grid-template-columns:1fr} .dl dt{margin-top:6px}
   .tbl{display:block;overflow-x:auto} main{padding:0 12px}
 }
+.localbar{background:var(--amber-bg);color:var(--amber);font-size:12.5px;text-align:center;padding:6px 16px}
+.localbar a{color:inherit;font-weight:600}
+.filebtn.ghostbtn{background:#fff;color:var(--ink);border:1px solid var(--line)}
