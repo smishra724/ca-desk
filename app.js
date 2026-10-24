@@ -77,6 +77,13 @@ let settingUp = false;
 onAuthStateChanged(auth, async u => { if (!settingUp) await boot(u); });
 
 async function boot(u) {
+  if (!firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith('PASTE')) {
+    $('#app').innerHTML = `<div class="auth-wrap"><div class="auth card"><div class="logo">₹</div><h1>Almost ready</h1>
+      <p>This app isn't connected to Firebase yet. Paste your Firebase web-app keys into <code>firebase-config.js</code>
+      (Firebase console → Project settings → Your apps → Web app), then reload this page.</p>
+      <p class="muted small">After that, a “First-time setup” box will appear here to create your owner login.</p></div></div>`;
+    return;
+  }
   try {
     const s = await getDoc(doc(db, 'meta', 'setup'));
     S.setup = s.exists(); S.firm = s.exists() ? s.data().firmName || '' : '';
