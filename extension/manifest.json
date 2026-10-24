@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "CA Desk Autofill",
+  "version": "1.0.0",
+  "description": "When you click Login in CA Desk, opens the compliance portal and fills the saved user ID and password. You enter the CAPTCHA/OTP.",
+  "permissions": ["storage"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://smishra724.github.io/*", "http://localhost/*", "http://127.0.0.1/*"],
+      "js": ["bridge.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://*.gst.gov.in/*",
+        "https://ewaybillgst.gov.in/*",
+        "https://*.incometax.gov.in/*",
+        "https://www.tdscpc.gov.in/*",
+        "https://*.mca.gov.in/*",
+        "https://*.epfindia.gov.in/*",
+        "https://*.esic.gov.in/*",
+        "https://udyamregistration.gov.in/*",
+        "https://*.dgft.gov.in/*"
+      ],
+      "js": ["fill.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}

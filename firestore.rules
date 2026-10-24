@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function me() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function hasProfile() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function isAdmin() { return hasProfile() && me().role == 'admin'; }
+    function isClientOf(cid) { return hasProfile() && me().role == 'client' && me().clientId == cid; }
+
+    // Firm settings. Readable by anyone so the login page can show the firm name.
+    // Created exactly once, together with the owner's admin profile (first-time setup).
+    match /meta/setup {
+      allow read: if true;
+      allow create: if signedIn()
+        && !exists(/databases/$(database)/documents/meta/setup)
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Login profiles: role = admin | client | revoked
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if isAdmin()
+        || (signedIn() && request.auth.uid == uid
+            && request.resource.data.role == 'admin'
+            && !exists(/databases/$(database)/documents/meta/setup)
+            && existsAfter(/databases/$(database)/documents/meta/setup));
+      allow update, delete: if isAdmin();
+    }
+
+    // Each client and everything under it: CA/staff full access, the client read-only.
+    match /clients/{cid} {
+      allow read: if isAdmin() || isClientOf(cid);
+      allow write: if isAdmin();
+      match /{sub=**} {
+        allow read: if isAdmin() || isClientOf(cid);
+        allow write: if isAdmin();
+      }
+    }
+
+    // Dashboard and "Export all" query across clients — CA/staff only.
+    match /{path=**}/filings/{f} { allow read: if isAdmin(); }
+    match /{path=**}/credentials/{c} { allow read: if isAdmin(); }
+  }
+}
