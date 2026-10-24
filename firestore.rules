@@ -40,6 +40,18 @@ service cloud.firestore {
       }
     }
 
+    // Task manager masters (workflow, staff, counters)
+    match /meta/{d} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // Tasks: CA/staff full access; a client can read only tasks for its own client record
+    match /tasks/{t} {
+      allow read: if isAdmin() || (hasProfile() && me().role == 'client' && resource.data.clientId == me().clientId);
+      allow write: if isAdmin();
+    }
+
     // Dashboard and "Export all" query across clients — CA/staff only.
     match /{path=**}/filings/{f} { allow read: if isAdmin(); }
     match /{path=**}/credentials/{c} { allow read: if isAdmin(); }

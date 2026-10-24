@@ -2,6 +2,7 @@ import { firebaseConfig } from './firebase-config.js';
 import { PORTALS, portalByKey } from './portals.js';
 import { extractFromFile, toISO } from './extract.js';
 import { dueItems, fmtDate } from './compliance.js';
+import { initTasks } from './tasks.js';
 
 // Local mode (no login, data in this browser) until firebase-config.js has real keys.
 const LOCAL = !firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith('PASTE');
@@ -90,8 +91,8 @@ async function boot(u) {
   const role = p?.exists() ? p.data().role : null;
   if (role !== 'admin' && role !== 'client') return renderNoAccess(u);
   S.profile = { uid: u.uid, email: u.email, ...p.data() };
-  if (isAdmin()) { await loadClients(); await loadAllFilings(); S.view = 'dashboard'; }
-  else { await openClient(S.profile.clientId, 'master'); }
+  if (isAdmin()) { await loadClients(); await loadAllFilings(); await T.load(); S.view = 'dashboard'; }
+  else { await openClient(S.profile.clientId, 'master'); await T.loadForClient(S.profile.clientId).catch(() => {}); }
   render();
 }
 
@@ -157,8 +158,8 @@ async function openClient(cid, tab) {
 /* ================= rendering ================= */
 function render() {
   if (!S.profile) return;
-  const nav = isAdmin() ? [['dashboard', 'Dashboard'], ['clients', 'Clients'], ['import', 'Excel import'], ['settings', 'Settings']]
-    .map(([v, l]) => `<button class="nav ${S.view === v ? 'on' : ''}" data-act="go" data-v="${v}">${l}</button>`).join('') : '';
+  const nav = isAdmin() ? [['dashboard', 'Dashboard'], ['tasks', 'Tasks'], ['clients', 'Clients'], ['import', 'Excel import'], ['settings', 'Settings']]
+    .map(([v, l]) => `<button class="nav ${(S.view === v || (v === 'tasks' && ['task', 'workflow'].includes(S.view))) ? 'on' : ''}" data-act="go" data-v="${v}">${l}</button>`).join('') : '';
   $('#app').innerHTML = `
   <header class="top">
     <div class="brand"><span class="logo sm">₹</span>${esc(S.firm || 'CA Desk')}</div>
@@ -175,6 +176,9 @@ function body() {
     case 'client': return vClient();
     case 'import': return vImport();
     case 'settings': return vSettings();
+    case 'tasks': return T.vTasks();
+    case 'task': return T.vTask();
+    case 'workflow': return T.vWorkflow();
   }
   return '';
 }
@@ -212,7 +216,8 @@ function vDashboard() {
     <div class="stat amber"><b>${week.length}</b><span>Due in 7 days</span></div>
     <div class="stat"><b>${up.length}</b><span>Due in ${S.dashDays} days</span></div>
   </div>
-  <section class="card"><h2>Overdue</h2>${tbl(od)}</section>
+  ${T.dashCard()}
+  <section class="card"><h2>Overdue returns</h2>${tbl(od)}</section>
   <section class="card"><div class="row-between"><h2>Upcoming</h2>
     <select data-change="dashDays">${[15, 30, 45, 60, 90].map(d => `<option ${d === S.dashDays ? 'selected' : ''} value="${d}">Next ${d} days</option>`).join('')}</select></div>
     ${tbl(up)}
@@ -247,7 +252,7 @@ function vClients() {
 /* ---------- single client ---------- */
 function vClient() {
   const c = S.client || {};
-  const tabs = [['master', 'Master data'], ['logins', 'Portal logins'], ['docs', 'Documents'], ['compliance', 'Compliance'], ...(isAdmin() ? [['access', 'Client access']] : [])];
+  const tabs = [['master', 'Master data'], ['logins', 'Portal logins'], ['docs', 'Documents'], ['compliance', 'Compliance'], ['tasks', 'Tasks'], ...(isAdmin() ? [['access', 'Client access']] : [])];
   return `
   ${isAdmin() ? `<button class="link back" data-act="go" data-v="clients">← All clients</button>` : ''}
   <section class="card head">
@@ -264,7 +269,7 @@ function vClient() {
       ${S.creds.map(cr => `<button class="sm pill" data-act="login" data-id="${cr.id}">${esc(portalByKey(cr.portal).short)} ↗</button>`).join('')}</div>` : ''}
   </section>
   <div class="tabs">${tabs.map(([t, l]) => `<button class="${S.tab === t ? 'on' : ''}" data-act="tab" data-t="${t}">${l}</button>`).join('')}</div>
-  <section class="card">${({ master: tMaster, logins: tLogins, docs: tDocs, compliance: tCompliance, access: tAccess })[S.tab]?.() || ''}</section>`;
+  <section class="card">${({ master: tMaster, logins: tLogins, docs: tDocs, compliance: tCompliance, access: tAccess, tasks: T.tClientTasks })[S.tab]?.() || ''}</section>`;
 }
 
 function fieldInput([k, l, type, opts], v) {
@@ -462,6 +467,8 @@ const A = {
       const docs = {};
       const add = snap => snap.forEach(d => docs[d.ref.path] = d.data());
       add(await getDocs(collection(db, 'clients')));
+      add(await getDocs(collection(db, 'tasks')));
+      for (const m of ['workflow', 'counters']) { const d = await getDoc(doc(db, 'meta', m)); if (d.exists()) docs['meta/' + m] = d.data(); }
       for (const c of S.clients) for (const sub of ['credentials', 'filings', 'docs']) {
         const sn = await getDocs(collection(db, 'clients', c.id, sub)); add(sn);
         if (sub === 'docs') for (const d of sn.docs) add(await getDocs(collection(db, 'clients', c.id, 'docs', d.id, 'chunks')));
@@ -485,6 +492,7 @@ const A = {
       for (const sub of ['credentials', 'filings']) for (const d of (await getDocs(collection(db, 'clients', cid, sub))).docs) await deleteDoc(d.ref);
       for (const d of S.docs) await deleteDocFile(cid, d.id);
       for (const u of S.client.portalUsers || []) await updateDoc(doc(db, 'users', u.uid), { role: 'revoked' }).catch(() => {});
+      await T.deleteForClient(cid);
       await deleteDoc(doc(db, 'clients', cid));
       await loadClients(); S.view = 'clients'; render();
     }, 'Client deleted');
@@ -822,6 +830,10 @@ function saveBlob(blob, name) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
+
+/* ================= task manager ================= */
+const T = initTasks({ S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render: () => render(), db,
+  fs: { doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, where } });
 
 /* ================= event wiring ================= */
 document.addEventListener('click', e => {

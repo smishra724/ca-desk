@@ -20,6 +20,16 @@ You (and staff) manage everything; each client logs in and sees only their own d
 
 **One-click portal login** — with the included Chrome extension, **Login** opens the portal and fills the user ID and password (and TAN on TRACES; on Income Tax it fills the password after you click Continue). You enter CAPTCHA / OTP and sign in. Without the extension, Login opens the portal and copies the password.
 
+## Task manager
+Inspired by ERPCA's workflow model.
+- **Workflow masters** (Tasks → Workflow & staff): departments → work categories, each with *documents required from client*, *activities with % weight* (drives progress) and *outcome documents*. Ships with GST, Income Tax, TDS, ROC/LLP, Payroll, Accounting defaults; fully editable. Staff list and default assignee per department.
+- **Tasks**: create manually, or **Generate from compliance calendar** (one task per client per return in a date range; filed returns and existing tasks are skipped).
+- **Board** (drag between statuses), **List**, filters by staff / department / status / due / bookmarked, search by task no. or client.
+- **Task page**: checklist ticks, status, assignee, due date, priority, ARN, fee / received / bill raised, **Forward / reassign** with note, notes, time log, full change history.
+- Completing a task generated from the calendar **marks that return as filed** with the ARN.
+- **Timesheet** report by staff / client / department; **Billing** view of fees, unbilled and outstanding.
+- Client tab shows the client's tasks and the **documents still pending from them** (also visible to clients once logins are on).
+
 ## Local mode (no login)
 Until `firebase-config.js` has real keys, the app opens straight into the dashboard with no login and saves everything in the browser (IndexedDB) on that computer. A "Local mode" tag and banner show at the top. Client/staff logins are hidden.
 - **Back up regularly:** Settings → Download full backup (a .json file). Clearing browser data deletes local data.
