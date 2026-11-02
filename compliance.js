@@ -33,12 +33,20 @@ export const activeRegs = c => regsOf(c).filter(r => r.gstin && r.status !== 'Ca
 // filing record for an item: new per-GSTIN key, or the old single-GSTIN key for the legacy registration
 export const filingFor = (map, it, prefix = '') => map[prefix + it.key] || (it.altKey ? map[prefix + it.altKey] : undefined);
 
+// "ITR only" clients (individuals filing just the yearly return): explicit category, or an
+// individual with no GST registration when no category has been chosen yet.
+export function isItrOnly(c) {
+  if (c?.category) return c.category === 'itr';
+  return (c?.constitution === 'Individual' || (!c?.constitution && (c?.pan || '')[3] === 'P')) && !activeRegs(c).length;
+}
+
 export function dueItems(c, from, to) {
   const out = [];
+  if (isItrOnly(c)) c = { ...c, gstRegs: [], gstin: '', tds: false, pfesic: false, constitution: c.constitution || 'Individual', _itr: true };
   const add = (key, form, period, due, note = '') => {
     if (due >= from && due <= to) out.push({ key, form, period, due, note });
   };
-  const kind = entityKind(c);
+  const kind = c._itr ? 'individual' : entityKind(c);
   const regs = activeRegs(c), multi = regs.length > 1;
   // GST items are added once per registration; key gets "@GSTIN", label gets the state when there are several
   const gstAdd = (r, key, form, period, due, note) => {

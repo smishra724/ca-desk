@@ -1,7 +1,7 @@
 import { firebaseConfig } from './firebase-config.js';
 import { PORTALS, portalByKey } from './portals.js';
 import { extractFromFile, toISO, STATE_CODES } from './extract.js';
-import { dueItems, fmtDate, regsOf, activeRegs, filingFor } from './compliance.js';
+import { dueItems, fmtDate, regsOf, activeRegs, filingFor, isItrOnly } from './compliance.js';
 import { initTasks } from './tasks.js';
 import { initSend } from './send.js';
 import { initDriveImport } from './drive-import.js';
@@ -358,29 +358,61 @@ function vDue() {
 }
 
 /* ---------- clients list ---------- */
+const itrFy = () => { const t = new Date(); return t.getMonth() >= 3 ? t.getFullYear() - 1 : t.getFullYear() - 2; }; // FY of the latest ITR due
 function vClients() {
+  const tab = S.clientTab ||= 'business';
   const q = S.search.toLowerCase();
-  const list = S.clients.filter(c => !q || [c.name, c.tradeName, c.pan, c.gstin, c.code, c.mobile, ...(c.gstins || []), ...regsOf(c).map(r => r.state)].some(v => (v || '').toLowerCase().includes(q)));
+  const itr = S.clients.filter(isItrOnly), biz = S.clients.filter(c => !isItrOnly(c));
+  const base = tab === 'itr' ? itr : biz;
+  const list = base.filter(c => !q || [c.name, c.tradeName, c.pan, c.gstin, c.code, c.mobile, c.email, ...(c.gstins || []), ...regsOf(c).map(r => r.state)].some(v => (v || '').toLowerCase().includes(q)));
+  const sel = S.sel ||= new Set();
+  const fy = itrFy(), fyL = `FY ${fy}-${String(fy + 1).slice(2)}`;
+  const itrStatus = c => { const f = S.allFilings[`${c.id}|ITR-${fy}`]; return f?.status === 'filed' ? `<span class="tag green">Filed${f.filedOn ? ' ' + isoToDisp(f.filedOn) : ''}</span>` : '<span class="tag amber">Pending</span>'; };
+  const cb = c => isAdmin() ? `<td class="cbx" data-stop="1"><input type="checkbox" data-change="selClient" value="${c.id}" ${sel.has(c.id) ? 'checked' : ''}></td>` : '';
+  const filedCount = itr.filter(c => S.allFilings[`${c.id}|ITR-${fy}`]?.status === 'filed').length;
+  const head = tab === 'itr'
+    ? `<tr>${isAdmin() ? '<th class="cbx"><input type="checkbox" data-change="selAll"></th>' : ''}<th>Name</th><th>PAN</th><th>Date of birth</th><th>Mobile / email</th><th>ITR ${fyL}</th><th></th></tr>`
+    : `<tr>${isAdmin() ? '<th class="cbx"><input type="checkbox" data-change="selAll"></th>' : ''}<th>Code</th><th>Name</th><th>Constitution</th><th>PAN</th><th>GSTIN</th><th>Client login</th></tr>`;
+  const row = c => tab === 'itr'
+    ? `<tr class="click" data-act="open" data-id="${c.id}">${cb(c)}<td><b>${esc(c.name || '—')}</b></td><td class="mono">${esc(c.pan) || '<span class="tag amber">No PAN</span>'}</td>
+        <td class="nowrap">${isoToDisp(c.doi)}</td><td class="small">${esc(c.mobile)}${c.email ? `<div class="muted tiny">${esc(c.email)}</div>` : ''}</td><td>${itrStatus(c)}</td>
+        <td class="nowrap" data-stop="1">${isAdmin() && S.allFilings[`${c.id}|ITR-${fy}`]?.status !== 'filed' ? `<button class="sm" data-act="markFiled" data-cid="${c.id}" data-key="ITR-${fy}">Mark filed</button>` : ''}</td></tr>`
+    : `<tr class="click" data-act="open" data-id="${c.id}">${cb(c)}<td>${esc(c.code)}</td>
+        <td><b>${esc(c.name || '—')}</b>${c.tradeName ? `<div class="muted small">${esc(c.tradeName)}</div>` : ''}</td>
+        <td>${esc(c.constitution)}</td><td class="mono">${esc(c.pan)}</td><td class="mono">${esc(regsOf(c)[0]?.gstin || '')}${regsOf(c).length > 1 ? ` <span class="tag blue">+${regsOf(c).length - 1} more</span>` : ''}</td>
+        <td>${(c.portalUsers || []).filter(p => !p.revoked).length ? '<span class="tag green">Active</span>' : '<span class="tag">—</span>'}</td></tr>`;
+  const nSel = [...sel].filter(id => base.some(c => c.id === id)).length;
   return `
   <section class="card">
     <div class="row-between wrap">
       <h2>Clients <span class="muted">(${S.clients.length})</span></h2>
       <div class="btns">
         <button class="primary" data-act="fromDoc" data-mode="new">+ New client from documents</button>
-        <button data-act="newClient">+ Blank client</button>
+        <button data-act="newClient" data-cat="${tab}">+ Blank client</button>
         <button data-act="driveOpen">Import from Google Drive</button>
         <button data-act="exportAll">Export all (Excel)</button>
       </div>
     </div>
-    <input id="search" class="search" placeholder="Search name, PAN, any GSTIN, state, code, mobile…" value="${esc(S.search)}">
-    <table class="tbl"><thead><tr><th>Code</th><th>Name</th><th>Constitution</th><th>PAN</th><th>GSTIN</th><th>Client login</th></tr></thead><tbody>
-    ${list.map(c => `<tr class="click" data-act="open" data-id="${c.id}"><td>${esc(c.code)}</td>
-      <td><b>${esc(c.name || '—')}</b>${c.tradeName ? `<div class="muted small">${esc(c.tradeName)}</div>` : ''}</td>
-      <td>${esc(c.constitution)}</td><td class="mono">${esc(c.pan)}</td><td class="mono">${esc(regsOf(c)[0]?.gstin || '')}${regsOf(c).length > 1 ? ` <span class="tag blue">+${regsOf(c).length - 1} more</span>` : ''}</td>
-      <td>${(c.portalUsers || []).filter(p => !p.revoked).length ? '<span class="tag green">Active</span>' : '<span class="tag">—</span>'}</td></tr>`).join('')
-    || `<tr><td colspan="6" class="muted empty">No clients yet. Upload a GST certificate or PAN to create one, or import your Excel list.</td></tr>`}
+    <div class="tabs inner seg">
+      <button class="${tab === 'business' ? 'on' : ''}" data-act="clientTab" data-t="business">Business clients <span class="cnt">${biz.length}</span></button>
+      <button class="${tab === 'itr' ? 'on' : ''}" data-act="clientTab" data-t="itr">Individual – ITR only <span class="cnt">${itr.length}</span></button>
+    </div>
+    ${tab === 'itr' ? `<p class="muted small">Clients here get only the yearly income tax return in their compliance calendar (plus advance tax if ticked). ITR ${fyL}: <b>${filedCount}</b> of ${itr.length} filed.</p>` : ''}
+    <input id="search" class="search" placeholder="${tab === 'itr' ? 'Search name, PAN, mobile, email…' : 'Search name, PAN, any GSTIN, state, code, mobile…'}" value="${esc(S.search)}">
+    ${isAdmin() && nSel ? `<div class="selbar"><b>${nSel} selected</b>
+      <button class="sm primary" data-act="moveSel" data-to="${tab === 'itr' ? 'business' : 'itr'}">Move to ${tab === 'itr' ? 'Business clients' : 'Individual – ITR only'}</button>
+      <button class="sm" data-act="selClear">Clear</button></div>` : ''}
+    <table class="tbl"><thead>${head}</thead><tbody>
+    ${list.map(row).join('') || `<tr><td colspan="7" class="muted empty">${q ? 'No match.' : tab === 'itr' ? 'No ITR-only clients. Move individuals here from Business clients.' : 'No clients yet.'}</td></tr>`}
     </tbody></table>
   </section>`;
+}
+async function moveClients(ids, to) {
+  let b = writeBatch(db), n = 0;
+  for (const id of ids) { b.update(doc(db, 'clients', id), { category: to, updatedAt: serverTimestamp() }); if (++n % 400 === 0) { await b.commit(); b = writeBatch(db); } }
+  await b.commit();
+  for (const c of S.clients) if (ids.includes(c.id)) c.category = to;
+  if (S.client && ids.includes(S.client.id)) S.client.category = to;
 }
 
 /* ---------- single client ---------- */
@@ -388,13 +420,14 @@ function vClient() {
   const c = S.client || {};
   const tabs = [['master', 'Master data'], ['gst', `GST registrations${regsOf(c).length ? ` (${regsOf(c).length})` : ''}`], ['logins', 'Portal logins'], ['docs', 'Documents'], ['compliance', 'Compliance'], ['tasks', 'Tasks'], ...(isAdmin() ? [['access', 'Client access']] : [])];
   return `
-  ${isAdmin() ? `<button class="link back" data-act="go" data-v="clients">← All clients</button>` : ''}
+  ${isAdmin() ? `<button class="link back" data-act="go" data-v="clients">← ${isItrOnly(S.client || {}) && S.cid ? 'ITR clients' : 'All clients'}</button>` : ''}
   <section class="card head">
     <div class="row-between wrap">
       <div><h1>${esc(c.name || 'New client')}</h1>
-        <div class="chips">${c.tradeName ? `<span>${esc(c.tradeName)}</span>` : ''}${c.constitution ? `<span>${esc(c.constitution)}</span>` : ''}
+        <div class="chips">${S.cid ? (isItrOnly(c) ? '<span class="cat itr">Individual – ITR only</span>' : '<span class="cat biz">Business client</span>') : ''}${c.tradeName ? `<span>${esc(c.tradeName)}</span>` : ''}${c.constitution ? `<span>${esc(c.constitution)}</span>` : ''}
         ${c.pan ? `<span class="mono">PAN ${esc(c.pan)}</span>` : ''}${regsOf(c).length === 1 ? `<span class="mono">GSTIN ${esc(regsOf(c)[0].gstin)}</span>` : regsOf(c).length > 1 ? `<span>${regsOf(c).length} GSTINs · ${esc([...new Set(regsOf(c).map(r => r.state).filter(Boolean))].join(', '))}</span>` : ''}</div></div>
       <div class="btns">
+        ${isAdmin() && S.cid ? `<button data-act="moveOne" data-to="${isItrOnly(c) ? 'business' : 'itr'}">Move to ${isItrOnly(c) ? 'Business clients' : 'ITR only'}</button>` : ''}
         ${isAdmin() && S.cid ? `<button class="primary wa" data-act="sendOpen">Send to client</button>` : ''}
         ${isAdmin() ? `<button class="primary" data-act="fromDoc" data-mode="update">Fill from document</button>` : ''}
         <button data-act="downloadClient">Download my data (Excel)</button>
@@ -673,7 +706,14 @@ const A = {
   go: ({ v }) => { S.view = v; S.importRows = v === 'import' ? S.importRows : null; render(); if (v === 'settings') loadStaff(); },
   open: ({ id, tab }) => guard(async () => { await openClient(id, tab || 'master'); render(); }),
   tab: ({ t }) => { S.tab = t; render(); },
-  newClient: () => { S.client = { id: null }; S.cid = null; S.creds = []; S.docs = []; S.filings = {}; S.tab = 'master'; S.view = 'client'; render(); },
+  clientTab: ({ t }) => { S.clientTab = t; S.sel = new Set(); render(); },
+  selClear: () => { S.sel = new Set(); render(); },
+  moveSel: ({ to }) => {
+    const ids = [...S.sel]; if (!ids.length) return;
+    guard(async () => { await moveClients(ids, to); S.sel = new Set(); render(); }, `${ids.length} client(s) moved to ${to === 'itr' ? 'Individual – ITR only' : 'Business clients'}`);
+  },
+  moveOne: ({ to }) => guard(async () => { await moveClients([S.cid], to); render(); }, `Moved to ${to === 'itr' ? 'Individual – ITR only' : 'Business clients'}`),
+  newClient: ({ cat } = {}) => { S.client = { id: null, ...(cat === 'itr' ? { category: 'itr', constitution: 'Individual' } : {}) }; S.cid = null; S.creds = []; S.docs = []; S.filings = {}; S.tab = 'master'; S.view = 'client'; render(); },
   delClient: () => {
     if (!confirm(`Delete ${S.client.name} with all logins, documents and filing records? This cannot be undone.`)) return;
     guard(async () => {
@@ -916,7 +956,7 @@ const F = {
     if (data.pan && !/^[A-Z]{5}\d{4}[A-Z]$/.test(data.pan)) throw new Error('PAN format looks wrong (e.g. ABCDE1234F).');
     data.updatedAt = serverTimestamp();
     if (S.cid) await updateDoc(doc(db, 'clients', S.cid), data);
-    else { S.cid = (await addDoc(collection(db, 'clients'), { ...data, ...regMirror([]), portalUsers: [], createdAt: serverTimestamp() })).id; S.tab = 'gst'; }
+    else { const itr = S.client?.category === 'itr'; S.cid = (await addDoc(collection(db, 'clients'), { ...data, ...regMirror([]), ...(S.client?.category ? { category: S.client.category } : {}), portalUsers: [], createdAt: serverTimestamp() })).id; S.tab = itr ? 'master' : 'gst'; }
     await loadClients(); await openClient(S.cid); render();
   }, 'Saved'),
   cred: (fd, form) => guard(async () => {
@@ -1030,6 +1070,8 @@ const C = {
     guard(async () => { await M.importAll(await f.text()); location.reload(); });
   },
   dashDays: el => { S.dashDays = +el.value; render(); },
+  selClient: el => { el.checked ? S.sel.add(el.value) : S.sel.delete(el.value); render(); },
+  selAll: el => { document.querySelectorAll('[data-change=selClient]').forEach(i => el.checked ? S.sel.add(i.value) : S.sel.delete(i.value)); render(); },
   dueF: el => { S.dueF[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; render(); },
   portalPick: el => { const u = el.form.elements.url; u.value = portalByKey(el.value).url; },
   uploadDocs: el => guard(async () => {
@@ -1221,6 +1263,7 @@ initSend({ S, A, C, esc, toast, modal, closeModal, regsOf, stateOf, isoToDisp, f
 
 /* ================= event wiring ================= */
 document.addEventListener('click', e => {
+  if (e.target.closest('[data-stop]') && !e.target.closest('button')) return;
   const el = e.target.closest('[data-act]'); if (!el) return;
   if (e.target.closest('input,select,textarea') && el.tagName === 'TR') return;
   const fn = A[el.dataset.act]; if (!fn) return;
