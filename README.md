@@ -20,6 +20,17 @@ You (and staff) manage everything; each client logs in and sees only their own d
 
 **One-click portal login** — with the included Chrome extension, **Login** opens the portal and fills the user ID and password (and TAN on TRACES; on Income Tax it fills the password after you click Continue). You enter CAPTCHA / OTP and sign in. Without the extension, Login opens the portal and copies the password.
 
+## Import from Google Drive
+Settings (or Clients) → **Import from Google Drive** → paste the folder link (e.g. DATA MANAGEMENT) → sign in with Google (read-only) → tick the client folders → **Import selected**.
+- Reads GST certificates, PAN, TAN, Aadhaar, incorporation certificates and deeds in each client folder (and its sub-folders); scanned files are OCR'd.
+- Creates the client, fills master data, adds every GSTIN as a registration, adds directors/partners, and copies the KYC documents into the client's Documents.
+- Folders like CLIENTS are opened one level; a generic folder of PAN cards becomes one client per PAN; card/bank-card folders are always skipped.
+- Re-running only fills blank fields and adds new documents — it never overwrites your edits.
+- Needs the Google Drive API enabled on the Firebase project (Google Cloud console → APIs → Google Drive API → Enable).
+
+## Install as an app
+Open the site in Chrome / Edge → address bar **Install** icon (or ⋮ → Cast, save and share → Install page as app). On a phone: Share → Add to Home Screen.
+
 ## Send to client (WhatsApp / Email)
 - **Send to client** on any client page (or tick documents on the Documents tab → **Send selected**).
 - Message is pre-filled with the client's master details (name, constitution, PAN, every GSTIN with state, TAN, CIN, address) and the list of documents; edit it before sending.

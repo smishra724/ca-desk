@@ -153,7 +153,8 @@ async function ocr(img, onProgress) {
   return res.data.text;
 }
 
-export async function extractText(file, onProgress = () => {}) {
+export async function extractText(file, onProgress = () => {}, opts = {}) {
+  const maxOcr = opts.maxOcrPages ?? 4;
   const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
   if (isPdf) {
     const lib = window.pdfjsLib;
@@ -161,7 +162,7 @@ export async function extractText(file, onProgress = () => {}) {
     onProgress('Opening PDF…');
     const pdf = await lib.getDocument({ data: await file.arrayBuffer() }).promise;
     let text = '';
-    for (let i = 1; i <= pdf.numPages; i++) {
+    for (let i = 1; i <= Math.min(pdf.numPages, opts.maxTextPages ?? 999); i++) {
       const tc = await (await pdf.getPage(i)).getTextContent();
       // rebuild lines from y-positions
       let lastY = null;
@@ -176,7 +177,8 @@ export async function extractText(file, onProgress = () => {}) {
     if (text.replace(/\s/g, '').length > 60) return text;
     // scanned PDF → OCR the first pages
     let out = '';
-    for (let i = 1; i <= Math.min(pdf.numPages, 4); i++) {
+    if (!maxOcr) return text;
+    for (let i = 1; i <= Math.min(pdf.numPages, maxOcr); i++) {
       onProgress(`Scanning page ${i}…`);
       const pg = await pdf.getPage(i);
       const vp = pg.getViewport({ scale: 2.2 });

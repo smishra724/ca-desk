@@ -4,6 +4,7 @@ import { extractFromFile, toISO, STATE_CODES } from './extract.js';
 import { dueItems, fmtDate, regsOf, activeRegs, filingFor } from './compliance.js';
 import { initTasks } from './tasks.js';
 import { initSend } from './send.js';
+import { initDriveImport } from './drive-import.js';
 
 // Local mode (no login, data in this browser) until firebase-config.js has real keys.
 const LOCAL = !firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith('PASTE');
@@ -256,6 +257,7 @@ function vClients() {
       <div class="btns">
         <button class="primary" data-act="fromDoc" data-mode="new">+ New client from documents</button>
         <button data-act="newClient">+ Blank client</button>
+        <button data-act="driveOpen">Import from Google Drive</button>
         <button data-act="exportAll">Export all (Excel)</button>
       </div>
     </div>
@@ -483,6 +485,11 @@ function vSettings() {
     <h2>Firm</h2>
     <form data-form="firm" class="grid narrow"><label>Firm name<input name="firm" value="${esc(S.firm)}" required></label>
       <div class="span2"><button class="primary">Save</button></div></form>
+  </section>
+  <section class="card">
+    <h2>Google Drive</h2>
+    <p class="muted small">Fill master data from a Drive folder that has one sub-folder per client (GST certificate, PAN, TAN, incorporation, deed). Read-only access; re-running only fills blanks and adds new documents.</p>
+    <button class="primary" data-act="driveOpen">Import from Google Drive</button>
   </section>
   <section class="card">
     <h2>Backup &amp; restore</h2>
@@ -1057,6 +1064,8 @@ async function afterImport(n) {
 const T = initTasks({ S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render: () => render(), db,
   fs: { doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, where } });
 
+initDriveImport({ S, A, C, esc, toast, modal, closeModal, db, M, firebaseConfig, LOCAL, regsOf, regMirror, mergeReg, newRegId, stateOf, GSTIN_RE,
+  saveFile, loadClients, render: () => render(), fs: { doc, getDoc, setDoc, updateDoc, addDoc, collection, serverTimestamp } });
 initSend({ S, A, C, esc, toast, modal, closeModal, regsOf, stateOf, isoToDisp, fmtDate, db, saveBlob,
   fs: { doc, getDocs, collection, updateDoc, arrayUnion } });
 
