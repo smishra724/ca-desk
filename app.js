@@ -1,7 +1,7 @@
 import { firebaseConfig } from './firebase-config.js';
 import { PORTALS, portalByKey } from './portals.js';
-import { extractFromFile, toISO } from './extract.js';
-import { dueItems, fmtDate } from './compliance.js';
+import { extractFromFile, toISO, STATE_CODES } from './extract.js';
+import { dueItems, fmtDate, regsOf, activeRegs, filingFor } from './compliance.js';
 import { initTasks } from './tasks.js';
 
 // Local mode (no login, data in this browser) until firebase-config.js has real keys.
@@ -45,6 +45,25 @@ const FIELDS = [
 ];
 const label = k => (FIELDS.find(f => f[0] === k) || [k, k])[1];
 const UPPER = new Set(['pan', 'gstin', 'tan', 'cin']);
+// GST details live in the client's registrations list (one entry per GSTIN), not in the master form
+const GST_KEYS = new Set(['gstin', 'gstRegDate', 'gstFreq']);
+const GST_PORTALS = new Set(['gst', 'ewb', 'einv']);
+const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+const stateOf = g => STATE_CODES[(g || '').slice(0, 2)] || '';
+const regLabel = r => r ? `${r.state || stateOf(r.gstin) || 'GSTIN'} · ${r.gstin}` : '';
+const newRegId = () => 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+// fields stored on the client so lists/search work without opening each record
+const regMirror = regs => {
+  const act = regs.filter(r => r.gstin && r.status !== 'Cancelled');
+  return { gstRegs: regs, gstins: regs.map(r => r.gstin).filter(Boolean), gstin: (act[0] || regs[0])?.gstin || '' };
+};
+function mergeReg(regs, r) {
+  const i = regs.findIndex(x => x.gstin === r.gstin);
+  if (i < 0) return [...regs, { id: newRegId(), status: 'Active', gstFreq: 'Monthly', ...r }];
+  const out = [...regs]; const cur = out[i];
+  for (const [k, v] of Object.entries(r)) if (v && !cur[k]) cur[k] = v; // fill blanks only
+  return out;
+}
 
 const S = {
   setup: true, firm: '', profile: null, clients: [], view: 'dashboard', cid: null, client: null, tab: 'master',
@@ -149,7 +168,7 @@ async function openClient(cid, tab) {
   ]);
   S.client = c.exists() ? { id: c.id, ...c.data() } : { id: cid };
   S.creds = cr.docs.map(d => ({ id: d.id, ...d.data() }))
-    .sort((a, b) => PORTALS.findIndex(p => p.key === a.portal) - PORTALS.findIndex(p => p.key === b.portal));
+    .sort((a, b) => PORTALS.findIndex(p => p.key === a.portal) - PORTALS.findIndex(p => p.key === b.portal) || (a.gstin || '').localeCompare(b.gstin || ''));
   S.docs = dc.docs.map(d => ({ id: d.id, ...d.data() }))
     .sort((a, b) => (b.uploadedAt?.seconds || 0) - (a.uploadedAt?.seconds || 0));
   S.filings = {}; fl.forEach(d => S.filings[d.id] = d.data());
@@ -192,7 +211,7 @@ function dashRows() {
   const rows = [];
   for (const c of S.clients) {
     for (const it of dueItems(c, from, to)) {
-      const f = S.allFilings[`${c.id}|${it.key}`];
+      const f = filingFor(S.allFilings, it, `${c.id}|`);
       if (f?.status === 'filed') continue;
       if (it.note === 'Optional' && it.due < today) continue;
       rows.push({ ...it, c, overdue: it.due < today });
@@ -228,7 +247,7 @@ function vDashboard() {
 /* ---------- clients list ---------- */
 function vClients() {
   const q = S.search.toLowerCase();
-  const list = S.clients.filter(c => !q || [c.name, c.tradeName, c.pan, c.gstin, c.code, c.mobile].some(v => (v || '').toLowerCase().includes(q)));
+  const list = S.clients.filter(c => !q || [c.name, c.tradeName, c.pan, c.gstin, c.code, c.mobile, ...(c.gstins || []), ...regsOf(c).map(r => r.state)].some(v => (v || '').toLowerCase().includes(q)));
   return `
   <section class="card">
     <div class="row-between wrap">
@@ -239,11 +258,11 @@ function vClients() {
         <button data-act="exportAll">Export all (Excel)</button>
       </div>
     </div>
-    <input id="search" class="search" placeholder="Search name, PAN, GSTIN, code, mobile…" value="${esc(S.search)}">
+    <input id="search" class="search" placeholder="Search name, PAN, any GSTIN, state, code, mobile…" value="${esc(S.search)}">
     <table class="tbl"><thead><tr><th>Code</th><th>Name</th><th>Constitution</th><th>PAN</th><th>GSTIN</th><th>Client login</th></tr></thead><tbody>
     ${list.map(c => `<tr class="click" data-act="open" data-id="${c.id}"><td>${esc(c.code)}</td>
       <td><b>${esc(c.name || '—')}</b>${c.tradeName ? `<div class="muted small">${esc(c.tradeName)}</div>` : ''}</td>
-      <td>${esc(c.constitution)}</td><td class="mono">${esc(c.pan)}</td><td class="mono">${esc(c.gstin)}</td>
+      <td>${esc(c.constitution)}</td><td class="mono">${esc(c.pan)}</td><td class="mono">${esc(regsOf(c)[0]?.gstin || '')}${regsOf(c).length > 1 ? ` <span class="tag blue">+${regsOf(c).length - 1} more</span>` : ''}</td>
       <td>${(c.portalUsers || []).filter(p => !p.revoked).length ? '<span class="tag green">Active</span>' : '<span class="tag">—</span>'}</td></tr>`).join('')
     || `<tr><td colspan="6" class="muted empty">No clients yet. Upload a GST certificate or PAN to create one, or import your Excel list.</td></tr>`}
     </tbody></table>
@@ -253,24 +272,24 @@ function vClients() {
 /* ---------- single client ---------- */
 function vClient() {
   const c = S.client || {};
-  const tabs = [['master', 'Master data'], ['logins', 'Portal logins'], ['docs', 'Documents'], ['compliance', 'Compliance'], ['tasks', 'Tasks'], ...(isAdmin() ? [['access', 'Client access']] : [])];
+  const tabs = [['master', 'Master data'], ['gst', `GST registrations${regsOf(c).length ? ` (${regsOf(c).length})` : ''}`], ['logins', 'Portal logins'], ['docs', 'Documents'], ['compliance', 'Compliance'], ['tasks', 'Tasks'], ...(isAdmin() ? [['access', 'Client access']] : [])];
   return `
   ${isAdmin() ? `<button class="link back" data-act="go" data-v="clients">← All clients</button>` : ''}
   <section class="card head">
     <div class="row-between wrap">
       <div><h1>${esc(c.name || 'New client')}</h1>
         <div class="chips">${c.tradeName ? `<span>${esc(c.tradeName)}</span>` : ''}${c.constitution ? `<span>${esc(c.constitution)}</span>` : ''}
-        ${c.pan ? `<span class="mono">PAN ${esc(c.pan)}</span>` : ''}${c.gstin ? `<span class="mono">GSTIN ${esc(c.gstin)}</span>` : ''}</div></div>
+        ${c.pan ? `<span class="mono">PAN ${esc(c.pan)}</span>` : ''}${regsOf(c).length === 1 ? `<span class="mono">GSTIN ${esc(regsOf(c)[0].gstin)}</span>` : regsOf(c).length > 1 ? `<span>${regsOf(c).length} GSTINs · ${esc([...new Set(regsOf(c).map(r => r.state).filter(Boolean))].join(', '))}</span>` : ''}</div></div>
       <div class="btns">
         ${isAdmin() ? `<button class="primary" data-act="fromDoc" data-mode="update">Fill from document</button>` : ''}
         <button data-act="downloadClient">Download my data (Excel)</button>
       </div>
     </div>
     ${S.creds.length ? `<div class="quick"><span class="muted small">Quick login:</span>
-      ${S.creds.map(cr => `<button class="sm pill" data-act="login" data-id="${cr.id}">${esc(portalByKey(cr.portal).short)} ↗</button>`).join('')}</div>` : ''}
+      ${S.creds.map(cr => `<button class="sm pill" data-act="login" data-id="${cr.id}">${esc(portalByKey(cr.portal).short)}${cr.gstin && regsOf(c).length > 1 ? ' ' + esc(stateOf(cr.gstin) || cr.gstin.slice(0, 2)) : ''} ↗</button>`).join('')}</div>` : ''}
   </section>
   <div class="tabs">${tabs.map(([t, l]) => `<button class="${S.tab === t ? 'on' : ''}" data-act="tab" data-t="${t}">${l}</button>`).join('')}</div>
-  <section class="card">${({ master: tMaster, logins: tLogins, docs: tDocs, compliance: tCompliance, access: tAccess, tasks: T.tClientTasks })[S.tab]?.() || ''}</section>`;
+  <section class="card">${({ master: tMaster, logins: tLogins, docs: tDocs, compliance: tCompliance, access: tAccess, tasks: T.tClientTasks, gst: tGst })[S.tab]?.() || ''}</section>`;
 }
 
 function fieldInput([k, l, type, opts], v) {
@@ -285,22 +304,56 @@ function fieldInput([k, l, type, opts], v) {
 function tMaster() {
   const c = S.client || {};
   if (!isAdmin()) {
-    return `<dl class="dl">${FIELDS.filter(f => c[f[0]] !== undefined && c[f[0]] !== '' && f[0] !== 'notes').map(([k, l, t]) => `<dt>${l}</dt><dd>${
+    return `<dl class="dl">${FIELDS.filter(f => c[f[0]] !== undefined && c[f[0]] !== '' && f[0] !== 'notes' && !GST_KEYS.has(f[0])).map(([k, l, t]) => `<dt>${l}</dt><dd>${
       t === 'bool' ? (c[k] ? 'Yes' : 'No') : t === 'date' ? isoToDisp(c[k]) : k === 'aadhaar' ? 'XXXX XXXX ' + esc(String(c[k]).slice(-4)) : esc(c[k]).replace(/\n/g, '<br>')}</dd>`).join('')}</dl>`;
   }
   return `<form data-form="master" class="grid">
-    ${FIELDS.filter(f => f[2] !== 'bool').map(f => fieldInput(f, c[f[0]])).join('')}
+    ${FIELDS.filter(f => f[2] !== 'bool' && !GST_KEYS.has(f[0])).map(f => fieldInput(f, c[f[0]])).join('')}
+    <p class="span2 muted small">GSTINs are managed in the <a href="#" data-act="tab" data-t="gst">GST registrations</a> tab — add one per state.</p>
     <div class="span2 bools">${FIELDS.filter(f => f[2] === 'bool').map(f => fieldInput(f, c[f[0]])).join('')}</div>
     <div class="span2 btns"><button class="primary">Save master data</button>
       ${S.client?.createdAt ? `<button type="button" class="danger" data-act="delClient">Delete client</button>` : ''}</div>
   </form>`;
 }
 
+function tGst() {
+  const regs = regsOf(S.client), adm = isAdmin();
+  const creds = g => S.creds.filter(cr => cr.gstin === g || (!cr.gstin && cr.portal === 'gst' && regs.length === 1));
+  return `
+  <div class="row-between wrap"><h2>GST registrations</h2>
+    ${adm ? `<div class="btns"><button class="primary" data-act="editReg">+ Add GSTIN</button><button data-act="fromDoc" data-mode="update">Add from GST certificate</button></div>` : ''}</div>
+  <p class="muted small">One entry per GSTIN (state / branch). Each gets its own GSTR-1, GSTR-3B and annual return in the compliance calendar, and its own portal login.</p>
+  ${S.cid ? '' : '<p class="warn">Save the master data first, then add registrations.</p>'}
+  <table class="tbl"><thead><tr><th>State</th><th>GSTIN</th><th>Trade name / address</th><th>Filing</th><th>Since</th><th>Status</th><th>Logins</th>${adm ? '<th></th>' : ''}</tr></thead><tbody>
+  ${regs.map(r => `<tr><td><b>${esc(r.state || stateOf(r.gstin))}</b>${r.label ? `<div class="muted tiny">${esc(r.label)}</div>` : ''}</td>
+    <td class="mono nowrap">${esc(r.gstin)}</td>
+    <td>${esc(r.tradeName)}<div class="muted tiny">${esc(r.address)}</div></td>
+    <td>${esc(r.gstFreq || 'Monthly')}</td><td class="nowrap">${isoToDisp(r.regDate)}</td>
+    <td>${r.status === 'Cancelled' ? '<span class="tag red">Cancelled</span>' : '<span class="tag green">Active</span>'}</td>
+    <td class="nowrap">${creds(r.gstin).map(cr => `<button class="sm pill" data-act="login" data-id="${cr.id}">${esc(portalByKey(cr.portal).short)} ↗</button>`).join(' ') || (adm ? `<button class="sm" data-act="editCred" data-gstin="${esc(r.gstin)}">+ Login</button>` : '—')}</td>
+    ${adm ? `<td class="nowrap"><button class="sm" data-act="editReg" data-id="${r.id}">Edit</button> <button class="sm danger" data-act="delReg" data-id="${r.id}">Delete</button></td>` : ''}</tr>`).join('')
+    || `<tr><td colspan="8" class="muted empty">No GST registration.${adm ? ' Add a GSTIN or upload a GST certificate.' : ''}</td></tr>`}
+  </tbody></table>`;
+}
+// an older single-GSTIN client: link its existing GST / E-Way Bill / E-Invoice logins to that GSTIN
+async function tagLegacyCreds(cid, base) {
+  if (!base || Array.isArray(base.gstRegs) || !base.gstin) return;
+  for (const d of (await getDocs(collection(db, 'clients', cid, 'credentials'))).docs) {
+    const c = d.data();
+    if (GST_PORTALS.has(c.portal) && !c.gstin) await updateDoc(d.ref, { gstin: base.gstin });
+  }
+}
+async function saveRegs(regs) {
+  await tagLegacyCreds(S.cid, S.client);
+  await updateDoc(doc(db, 'clients', S.cid), { ...regMirror(regs), updatedAt: serverTimestamp() });
+  await loadClients(); await openClient(S.cid, 'gst'); render();
+}
+
 function tLogins() {
   const rows = S.creds.map(cr => {
     const p = portalByKey(cr.portal), shown = S.reveal.has(cr.id);
     return `<div class="cred">
-      <div class="cred-h"><b>${esc(cr.label || p.name)}</b>
+      <div class="cred-h"><div><b>${esc(cr.label || p.name)}</b>${cr.gstin ? `<div class="muted tiny mono">${esc(regLabel(regsOf(S.client).find(r => r.gstin === cr.gstin) || { gstin: cr.gstin, state: stateOf(cr.gstin) }))}</div>` : ''}</div>
         <button class="primary sm" data-act="login" data-id="${cr.id}">Login ↗</button></div>
       <div class="kv"><span>User ID</span><code>${esc(cr.username)}</code><button class="icon" title="Copy" data-act="copy" data-v="u" data-id="${cr.id}">⧉</button></div>
       <div class="kv"><span>Password</span><code>${shown ? esc(cr.password) : '••••••••'}</code>
@@ -339,7 +392,7 @@ function complianceRows() {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const from = new Date(today.getFullYear(), today.getMonth() - 6, 1);
   const to = new Date(today.getFullYear(), today.getMonth() + 4, 0);
-  return dueItems(S.client || {}, from, to).map(it => ({ ...it, f: S.filings[it.key], overdue: it.due < today }));
+  return dueItems(S.client || {}, from, to).map(it => ({ ...it, f: filingFor(S.filings, it), overdue: it.due < today }));
 }
 function tCompliance() {
   const rows = complianceRows();
@@ -352,9 +405,9 @@ function tCompliance() {
       : r.overdue ? (r.note === 'Optional' ? '<span class="tag">Not filed</span>' : '<span class="tag red">Overdue</span>') : '<span class="tag amber">Pending</span>';
     return `<tr><td class="nowrap">${fmtDate(r.due)}</td><td>${esc(r.form)}${r.note ? ` <span class="tag">${esc(r.note)}</span>` : ''}</td>
       <td>${esc(r.period)}</td><td>${st}</td>
-      <td>${isAdmin() ? (filed ? `<button class="sm" data-act="unfile" data-key="${r.key}">Undo</button>`
+      <td>${isAdmin() ? (filed ? `<button class="sm" data-act="unfile" data-key="${r.key}" data-alt="${r.altKey || ''}">Undo</button>`
         : `<button class="sm" data-act="markFiled" data-cid="${S.cid}" data-key="${r.key}">Mark filed</button>`) : ''}</td></tr>`;
-  }).join('') || '<tr><td colspan="5" class="muted empty">Fill GSTIN, constitution and the applicability ticks in master data to see due dates.</td></tr>'}
+  }).join('') || '<tr><td colspan="5" class="muted empty">Add GST registrations, constitution and the applicability ticks in master data to see due dates.</td></tr>'}
   </tbody></table>
   <p class="muted small">Statutory due dates; government extensions are not applied automatically.</p>`;
 }
@@ -405,18 +458,19 @@ function vImport() {
   <section class="card">
     <h2>Import clients from Excel</h2>
     <ol class="steps">
-      <li><button data-act="xlTemplate">Download the template</button> — one row per client (one row per GSTIN if a PAN has several registrations).</li>
+      <li><button data-act="xlTemplate">Download the template</button> — one row per GSTIN. For a client with several states, add one row per GSTIN with the same PAN; they are combined into one client.</li>
       <li>Fill master data and the user ID / password columns for each portal. Leave blanks where not applicable.</li>
-      <li>Upload it below. Existing clients are matched by GSTIN, then PAN, then client code, and updated; others are created.</li>
+      <li>Upload it below. Existing clients are matched by PAN, then GSTIN, then client code, and updated (new GSTINs are added); others are created.</li>
     </ol>
     <label class="filebtn">Choose Excel file<input type="file" accept=".xlsx,.xls,.csv" data-change="xlFile"></label>
     <p class="muted small">Tip: “Export all” on the Clients page produces the same format — use it as a backup or to bulk-edit and re-import.</p>
-    ${r ? `<hr><p><b>${r.length}</b> rows read: <b>${r.filter(x => x._match).length}</b> will update existing clients, <b>${r.filter(x => !x._match).length}</b> will be new.</p>
-      <table class="tbl"><thead><tr><th>Name</th><th>PAN</th><th>GSTIN</th><th>Logins</th><th>Action</th></tr></thead><tbody>
-      ${r.slice(0, 200).map(x => `<tr><td>${esc(x.f.name)}</td><td class="mono">${esc(x.f.pan)}</td><td class="mono">${esc(x.f.gstin)}</td>
-        <td>${x.creds.map(c => portalByKey(c.portal).short).join(', ')}</td><td>${x._match ? 'Update' : 'New'}</td></tr>`).join('')}
+    ${r ? `<hr><p><b>${r.length}</b> client(s) found: <b>${r.filter(x => x._match).length}</b> will update existing clients, <b>${r.filter(x => !x._match).length}</b> will be new. Rows with the same PAN are combined into one client with several GSTINs.</p>
+      <table class="tbl"><thead><tr><th>Name</th><th>PAN</th><th>GSTINs</th><th>Logins</th><th>Action</th></tr></thead><tbody>
+      ${r.slice(0, 300).map(x => `<tr><td>${esc(x.f.name)}</td><td class="mono">${esc(x.f.pan)}</td>
+        <td>${x.regs.map(g => `<div class="mono small">${esc(g.gstin)} <span class="muted">${esc(g.state)}</span></div>`).join('') || '—'}</td>
+        <td>${x.creds.map(c => portalByKey(c.portal).short + (c.gstin && x.regs.length > 1 ? ' ' + esc(stateOf(c.gstin) || '') : '')).join(', ')}</td><td>${x._match ? 'Update' : 'New'}</td></tr>`).join('')}
       </tbody></table>
-      <button class="primary" data-act="xlImport">Import ${r.length} rows</button>` : ''}
+      <button class="primary" data-act="xlImport">Import ${r.length} client(s)</button>` : ''}
   </section>`;
 }
 
@@ -528,12 +582,35 @@ const A = {
     navigator.clipboard.writeText(v === 'p' ? c.password || '' : c.username || '').then(() => toast(v === 'p' ? 'Password copied' : 'User ID copied'));
   },
   reveal: ({ id }) => { S.reveal.has(id) ? S.reveal.delete(id) : S.reveal.add(id); render(); },
-  editCred: ({ id }) => {
-    const c = S.creds.find(x => x.id === id) || { portal: 'gst' };
+  editReg: ({ id }) => {
+    if (!S.cid) return toast('Save the master data first.');
+    const r = regsOf(S.client).find(x => x.id === id) || { gstFreq: 'Monthly', status: 'Active' };
+    modal(`<h2>${id ? 'Edit' : 'Add'} GST registration</h2>
+    <form data-form="saveReg" data-id="${id || ''}" class="grid">
+      <label>GSTIN<input name="gstin" class="mono up" value="${esc(r.gstin)}" required maxlength="15" ${id ? '' : 'autofocus'}></label>
+      <label>State<input name="state" value="${esc(r.state)}" placeholder="Filled from GSTIN if blank"></label>
+      <label>Trade name<input name="tradeName" value="${esc(r.tradeName)}"></label>
+      <label>Branch label (optional)<input name="label" value="${esc(r.label)}" placeholder="e.g. Head office, Warehouse"></label>
+      <label class="span2">Principal place of business<textarea name="address" rows="2">${esc(r.address)}</textarea></label>
+      <label>GST filing<select name="gstFreq">${['Monthly', 'QRMP', 'Composition', 'Not registered'].map(o => `<option ${o === r.gstFreq ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
+      <label>Registration date<input type="date" name="regDate" value="${esc(r.regDate)}"></label>
+      <label>Status<select name="status">${['Active', 'Cancelled'].map(o => `<option ${o === (r.status || 'Active') ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
+      <div class="span2 btns"><button class="primary">Save</button><button type="button" data-act="closeModal">Cancel</button></div>
+    </form>`);
+  },
+  delReg: ({ id }) => {
+    const r = regsOf(S.client).find(x => x.id === id);
+    if (!confirm(`Delete GSTIN ${r.gstin}? Filing records already marked are kept; its portal logins stay on the Portal logins tab.`)) return;
+    guard(() => saveRegs(regsOf(S.client).filter(x => x.id !== id)), 'Registration deleted');
+  },
+  editCred: ({ id, gstin }) => {
+    const c = S.creds.find(x => x.id === id) || { portal: 'gst', gstin: gstin || '' };
     modal(`<h2>${id ? 'Edit' : 'Add'} portal login</h2>
     <form data-form="cred" class="grid" data-id="${id || ''}">
       <label>Portal<select name="portal" data-change="portalPick">${PORTALS.map(p => `<option value="${p.key}" ${p.key === c.portal ? 'selected' : ''}>${p.name}</option>`).join('')}</select></label>
       <label>Label (optional)<input name="label" value="${esc(c.label)}" placeholder="e.g. GST – Delhi branch"></label>
+      ${regsOf(S.client).length ? `<label class="span2">GST registration (for GST, E-Way Bill, E-Invoice)<select name="gstin"><option value="">— Not specific to a GSTIN —</option>
+        ${regsOf(S.client).map(r => `<option value="${esc(r.gstin)}" ${r.gstin === (c.gstin || (!id && regsOf(S.client).length === 1 ? r.gstin : '')) ? 'selected' : ''}>${esc(regLabel(r))}</option>`).join('')}</select></label>` : ''}
       <label class="span2">Login URL<input name="url" value="${esc(c.url || portalByKey(c.portal).url)}"></label>
       <label>User ID<input name="username" value="${esc(c.username)}" required autocomplete="off"></label>
       <label>Password<input name="password" value="${esc(c.password)}" autocomplete="off"></label>
@@ -569,8 +646,11 @@ const A = {
       <label class="span2">Remarks<input name="remarks"></label>
       <div class="span2 btns"><button class="primary">Save</button><button type="button" data-act="closeModal">Cancel</button></div></form>`);
   },
-  unfile: ({ key }) => guard(async () => {
-    await deleteDoc(doc(db, 'clients', S.cid, 'filings', key)); delete S.filings[key]; delete S.allFilings[`${S.cid}|${key}`]; render();
+  unfile: ({ key, alt }) => guard(async () => {
+    for (const k of [key, alt].filter(Boolean)) {
+      await deleteDoc(doc(db, 'clients', S.cid, 'filings', k)); delete S.filings[k]; delete S.allFilings[`${S.cid}|${k}`];
+    }
+    render();
   }),
 
   /* access */
@@ -589,21 +669,32 @@ const A = {
 
   /* excel */
   xlTemplate: () => {
-    const ws = XLSX.utils.aoa_to_sheet([xlHeaders(), ['C001', 'ABC Traders', 'ABC', 'Proprietorship', 'ABCPE1234F', '09ABCPE1234F1Z5', '', '', '01-04-1985', '01-07-2017', '', 'abc@example.com', '9876543210', 'Shop 1, Main Road, Dadri', 'Uttar Pradesh', '203207', 'Monthly', 'N', 'N', 'N', 'Y', '', '']]);
+    const ws = XLSX.utils.aoa_to_sheet([xlHeaders(),
+      ['C001', 'ABC Traders', 'ABC', 'Proprietorship', 'ABCPE1234F', '09ABCPE1234F1Z5', '', '', '01-04-1985', '01-07-2017', '', 'abc@example.com', '9876543210', 'Shop 1, Main Road, Dadri', 'Uttar Pradesh', '203207', 'Monthly', 'N', 'N', 'N', 'Y', '', 'Head office'],
+      ['C001', 'ABC Traders', 'ABC', 'Proprietorship', 'ABCPE1234F', '07ABCPE1234F1Z9', '', '', '01-04-1985', '15-08-2022', '', 'abc@example.com', '9876543210', 'Plot 4, Okhla Phase 2, New Delhi', 'Delhi', '110020', 'QRMP', 'N', 'N', 'N', 'Y', '', 'Delhi branch — same PAN, second GSTIN']]);
     ws['!cols'] = xlHeaders().map(h => ({ wch: Math.max(12, h.length + 2) }));
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Clients');
     XLSX.writeFile(wb, 'CA-Desk-client-import-template.xlsx');
   },
   xlImport: () => guard(async () => {
     let n = 0;
-    for (const r of S.importRows) {
+    for (const g of S.importRows) {
       busy(true, `Importing ${++n} of ${S.importRows.length}…`);
-      let cid = r._match;
-      if (cid) await updateDoc(doc(db, 'clients', cid), { ...r.f, updatedAt: serverTimestamp() });
-      else cid = (await addDoc(collection(db, 'clients'), { ...r.f, portalUsers: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp() })).id;
-      if (r.creds.length) {
+      let cid = g._match;
+      if (cid) {
+        const ex = S.clients.find(c => c.id === cid);
+        let regs = regsOf(ex).map(r => ({ ...r }));
+        for (const r of g.regs) { const e = regs.find(x => x.gstin === r.gstin); if (e) Object.assign(e, r); else regs = mergeReg(regs, r); }
+        await tagLegacyCreds(cid, ex);
+        await updateDoc(doc(db, 'clients', cid), { ...g.f, ...regMirror(regs), updatedAt: serverTimestamp() });
+      } else {
+        const regs = g.regs.map(r => ({ id: newRegId(), status: 'Active', ...r }));
+        cid = (await addDoc(collection(db, 'clients'), { ...g.f, ...regMirror(regs), portalUsers: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp() })).id;
+      }
+      if (g.creds.length) {
         const b = writeBatch(db);
-        for (const c of r.creds) b.set(doc(db, 'clients', cid, 'credentials', c.portal), { ...c, url: portalByKey(c.portal).url, updatedAt: serverTimestamp(), updatedBy: S.profile.email }, { merge: true });
+        for (const c of g.creds) b.set(doc(db, 'clients', cid, 'credentials', c.gstin ? `${c.portal}@${c.gstin}` : c.portal),
+          { ...c, url: portalByKey(c.portal).url, updatedAt: serverTimestamp(), updatedBy: S.profile.email }, { merge: true });
         await b.commit();
       }
     }
@@ -615,9 +706,18 @@ const A = {
     creds.forEach(d => { (byClient[d.ref.parent.parent.id] ||= []).push(d.data()); });
     const rows = [xlHeaders()];
     for (const c of S.clients) {
-      const row = XL_FIELDS.map(([, k]) => BOOLS.has(k) ? (c[k] ? 'Y' : 'N') : (k === 'doi' || k === 'gstRegDate') ? isoToDisp(c[k]) : c[k] || '');
-      for (const p of XL_PORTALS) { const cr = (byClient[c.id] || []).find(x => x.portal === p.key); row.push(cr?.username || '', cr?.password || ''); }
-      rows.push(row);
+      const regs = regsOf(c), cl = byClient[c.id] || [];
+      for (const r of regs.length ? regs : [null]) {
+        const v = { ...c, ...(r ? { gstin: r.gstin, gstRegDate: r.regDate, gstFreq: r.gstFreq, state: r.state || c.state, address: r.address || c.address, tradeName: r.tradeName || c.tradeName } : { gstin: '', gstFreq: 'Not registered' }) };
+        const row = XL_FIELDS.map(([, k]) => BOOLS.has(k) ? (v[k] ? 'Y' : 'N') : (k === 'doi' || k === 'gstRegDate') ? isoToDisp(v[k]) : v[k] || '');
+        for (const p of XL_PORTALS) {
+          const cr = GST_PORTALS.has(p.key)
+            ? cl.find(x => x.portal === p.key && r && (x.gstin === r.gstin || (!x.gstin && regs.length === 1)))
+            : cl.find(x => x.portal === p.key);
+          row.push(cr?.username || '', cr?.password || '');
+        }
+        rows.push(row);
+      }
     }
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Clients');
     XLSX.writeFile(wb, `CA-Desk-all-clients-${todayISO()}.xlsx`);
@@ -625,11 +725,13 @@ const A = {
   downloadClient: () => {
     const c = S.client || {};
     const wb = XLSX.utils.book_new();
-    const m = [['Field', 'Value'], ...FIELDS.filter(f => f[0] !== 'notes' || isAdmin())
+    const m = [['Field', 'Value'], ...FIELDS.filter(f => (f[0] !== 'notes' || isAdmin()) && !GST_KEYS.has(f[0]))
       .map(([k, l, t]) => [l, t === 'bool' ? (c[k] ? 'Yes' : 'No') : t === 'date' ? isoToDisp(c[k]) : c[k] || ''])];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(m), 'Master data');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Portal', 'Login URL', 'User ID', 'Password', 'Notes'],
-      ...S.creds.map(cr => [cr.label || portalByKey(cr.portal).name, cr.url || portalByKey(cr.portal).url, cr.username || '', cr.password || '', cr.notes || ''])]), 'Portal logins');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['State', 'GSTIN', 'Trade name', 'Address', 'GST filing', 'Registration date', 'Status'],
+      ...regsOf(c).map(r => [r.state || stateOf(r.gstin), r.gstin, r.tradeName || '', r.address || '', r.gstFreq || '', isoToDisp(r.regDate), r.status || 'Active'])]), 'GST registrations');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Portal', 'GSTIN', 'Login URL', 'User ID', 'Password', 'Notes'],
+      ...S.creds.map(cr => [cr.label || portalByKey(cr.portal).name, cr.gstin || '', cr.url || portalByKey(cr.portal).url, cr.username || '', cr.password || '', cr.notes || ''])]), 'Portal logins');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Due date', 'Return / form', 'Period', 'Status', 'Filed on', 'ARN / Ack'],
       ...complianceRows().map(r => [fmtDate(r.due), r.form, r.period, r.f?.status === 'filed' ? 'Filed' : r.overdue ? 'Overdue' : 'Pending', isoToDisp(r.f?.filedOn), r.f?.ack || ''])]), 'Compliance');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Document', 'Category', 'Uploaded'],
@@ -664,26 +766,39 @@ const F = {
   master: (fd, form) => guard(async () => {
     const data = {};
     for (const [k, , t] of FIELDS) {
+      if (GST_KEYS.has(k)) continue;
       if (t === 'bool') data[k] = form.elements[k].checked;
       else { let v = (fd.get(k) || '').trim(); if (UPPER.has(k)) v = v.toUpperCase(); data[k] = v; }
     }
     if (!data.name) throw new Error('Legal name is required.');
     if (data.pan && !/^[A-Z]{5}\d{4}[A-Z]$/.test(data.pan)) throw new Error('PAN format looks wrong (e.g. ABCDE1234F).');
-    if (data.gstin && !/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(data.gstin)) throw new Error('GSTIN format looks wrong.');
     data.updatedAt = serverTimestamp();
     if (S.cid) await updateDoc(doc(db, 'clients', S.cid), data);
-    else S.cid = (await addDoc(collection(db, 'clients'), { ...data, portalUsers: [], createdAt: serverTimestamp() })).id;
+    else { S.cid = (await addDoc(collection(db, 'clients'), { ...data, ...regMirror([]), portalUsers: [], createdAt: serverTimestamp() })).id; S.tab = 'gst'; }
     await loadClients(); await openClient(S.cid); render();
   }, 'Saved'),
   cred: (fd, form) => guard(async () => {
     if (!S.cid) throw new Error('Save the client master data first.');
-    const data = Object.fromEntries(['portal', 'label', 'url', 'username', 'password', 'notes'].map(k => [k, (fd.get(k) || '').trim()]));
+    const data = Object.fromEntries(['portal', 'label', 'url', 'username', 'password', 'notes', 'gstin'].map(k => [k, (fd.get(k) || '').trim()]));
+    if (!GST_PORTALS.has(data.portal)) data.gstin = '';
     data.updatedAt = serverTimestamp(); data.updatedBy = S.profile.email;
     const id = form.dataset.id;
     if (id) await setDoc(doc(db, 'clients', S.cid, 'credentials', id), data, { merge: true });
     else await addDoc(collection(db, 'clients', S.cid, 'credentials'), data);
     closeModal(); await openClient(S.cid); render();
   }, 'Login saved'),
+  saveReg: (fd, form) => guard(async () => {
+    const id = form.dataset.id;
+    const r = Object.fromEntries(['gstin', 'state', 'tradeName', 'label', 'address', 'gstFreq', 'regDate', 'status'].map(k => [k, (fd.get(k) || '').trim()]));
+    r.gstin = r.gstin.toUpperCase().replace(/\s/g, '');
+    if (!GSTIN_RE.test(r.gstin)) throw new Error('GSTIN format looks wrong (15 characters, e.g. 09ABCDE1234F1Z5).');
+    if (S.client.pan && r.gstin.slice(2, 12) !== S.client.pan) { if (!confirm(`This GSTIN is for PAN ${r.gstin.slice(2, 12)}, but the client's PAN is ${S.client.pan}. Save anyway?`)) return; }
+    if (!r.state) r.state = stateOf(r.gstin);
+    const regs = regsOf(S.client).map(x => ({ ...x }));
+    if (regs.some(x => x.gstin === r.gstin && x.id !== id)) throw new Error('This GSTIN is already added for this client.');
+    if (id) Object.assign(regs.find(x => x.id === id), r); else regs.push({ id: newRegId(), ...r });
+    closeModal(); await saveRegs(regs);
+  }, 'GST registration saved'),
   filed: (fd, form) => guard(async () => {
     const { cid, key } = form.dataset;
     const data = { status: 'filed', filedOn: fd.get('filedOn'), ack: fd.get('ack').trim(), remarks: fd.get('remarks').trim(), by: S.profile.email, at: serverTimestamp() };
@@ -712,20 +827,35 @@ const F = {
   }, 'Saved'),
   applyOcr: (fd, form) => guard(async () => {
     const { res, file, mode } = S.pending;
+    const val = k => { let v = (fd.get('f_' + k) || '').trim(); if (UPPER.has(k)) v = v.toUpperCase(); return v; };
     const upd = {};
-    for (const k of Object.keys(res.fields)) if (form.elements['use_' + k]?.checked) {
-      let v = (fd.get('f_' + k) || '').trim(); if (UPPER.has(k)) v = v.toUpperCase();
-      if (v) upd[k] = v;
+    for (const k of Object.keys(res.fields)) if (!GST_KEYS.has(k) && form.elements['use_' + k]?.checked && val(k)) upd[k] = val(k);
+    let reg = null;
+    if (res.fields.gstin && val('gstin')) {
+      const g = val('gstin').replace(/\s/g, '');
+      if (!GSTIN_RE.test(g)) throw new Error('The GSTIN read from the document looks wrong — correct it in the box.');
+      reg = Object.fromEntries(Object.entries({ gstin: g, state: val('state') || stateOf(g), tradeName: val('tradeName'), address: val('address'),
+        regDate: res.fields.gstRegDate ? val('gstRegDate') : '', gstFreq: res.fields.gstFreq ? val('gstFreq') : '' }).filter(([, v]) => v));
     }
-    let cid = mode === 'update' ? S.cid : null;
-    if (mode === 'new' && fd.get('target')) cid = fd.get('target');
-    if (cid) { if (Object.keys(upd).length) await updateDoc(doc(db, 'clients', cid), { ...upd, updatedAt: serverTimestamp() }); }
-    else {
+    let cid = mode === 'update' ? S.cid : (fd.get('target') || null);
+    if (cid) {
+      const base = cid === S.cid ? S.client : S.clients.find(c => c.id === cid);
+      const data = { ...upd, updatedAt: serverTimestamp() };
+      if (reg) {
+        let regs = regsOf(base).map(r => ({ ...r }));
+        const ex = regs.find(r => r.gstin === reg.gstin);
+        if (ex) Object.assign(ex, reg); else regs = mergeReg(regs, reg);
+        Object.assign(data, regMirror(regs));
+      }
+      if (reg) await tagLegacyCreds(cid, base);
+      await updateDoc(doc(db, 'clients', cid), data);
+    } else {
       if (!upd.name) throw new Error('Legal name is needed to create the client.');
-      cid = (await addDoc(collection(db, 'clients'), { gstFreq: upd.gstin ? 'Monthly' : 'Not registered', ...upd, portalUsers: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp() })).id;
+      const regs = reg ? [{ id: newRegId(), status: 'Active', gstFreq: 'Monthly', ...reg }] : [];
+      cid = (await addDoc(collection(db, 'clients'), { ...upd, ...regMirror(regs), portalUsers: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp() })).id;
     }
     if (form.elements.saveDoc?.checked) await saveFile(cid, file, fd.get('cat'));
-    closeModal(); await loadClients(); await openClient(cid, 'master'); render();
+    closeModal(); await loadClients(); await openClient(cid, reg ? 'gst' : 'master'); render();
   }, 'Master data updated'),
 };
 
@@ -763,7 +893,7 @@ const C = {
     try {
       const wb = XLSX.read(await file.arrayBuffer(), { cellDates: true });
       const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '', raw: false, dateNF: 'dd-mm-yyyy' });
-      S.importRows = raw.map(parseXlRow).filter(r => r.f.name || r.f.pan || r.f.gstin);
+      S.importRows = groupXlRows(raw.map(parseXlRow).filter(r => r.f.name || r.f.pan || r.reg));
       render();
     } catch (e) { toast('Could not read the Excel file: ' + e.message, 6000); }
   },
@@ -782,40 +912,72 @@ function parseXlRow(row) {
     if (k === 'constitution' && v) v = CONSTS.find(c => norm(c) === norm(v)) || v;
     if (v) f[k] = v;
   }
+  if (!f.pan && f.gstin && GSTIN_RE.test(f.gstin)) f.pan = f.gstin.slice(2, 12);
+  const reg = f.gstin ? Object.fromEntries(Object.entries({ gstin: f.gstin, state: f.state || stateOf(f.gstin), tradeName: f.tradeName, address: f.address,
+    regDate: f.gstRegDate, gstFreq: f.gstFreq || 'Monthly', label: get('Branch') }).filter(([, v]) => v)) : null;
+  for (const k of GST_KEYS) delete f[k];
   const creds = [];
   for (const p of XL_PORTALS) {
     const u = get(`${p.short} User`), pw = get(`${p.short} Password`);
-    if (u || pw) creds.push({ portal: p.key, username: u, password: pw });
+    if (u || pw) creds.push({ portal: p.key, username: u, password: pw, gstin: GST_PORTALS.has(p.key) && reg ? reg.gstin : '' });
   }
-  const match = (f.gstin && S.clients.find(c => c.gstin === f.gstin))
-    || (f.pan && !f.gstin && S.clients.find(c => c.pan === f.pan && !c.gstin))
-    || (f.code && S.clients.find(c => c.code && c.code === f.code));
-  return { f, creds, _match: match?.id || null };
+  return { f, reg, creds };
+}
+// rows with the same PAN (or client code / name) become one client with several GST registrations
+function groupXlRows(rows) {
+  const groups = new Map();
+  for (const r of rows) {
+    const key = r.f.pan ? 'pan:' + r.f.pan : r.f.code ? 'code:' + r.f.code : 'name:' + norm(r.f.name);
+    const g = groups.get(key) || { f: {}, regs: [], creds: [] };
+    for (const [k, v] of Object.entries(r.f)) if (g.f[k] === undefined || g.f[k] === '' || g.f[k] === false) g.f[k] = v;
+    if (r.reg) g.regs = mergeReg(g.regs, r.reg);
+    for (const c of r.creds) if (!g.creds.some(x => x.portal === c.portal && (x.gstin || '') === (c.gstin || ''))) g.creds.push(c);
+    groups.set(key, g);
+  }
+  for (const g of groups.values()) {
+    const gs = g.regs.map(r => r.gstin);
+    const m = (g.f.pan && S.clients.find(c => c.pan === g.f.pan))
+      || S.clients.find(c => gs.some(x => (c.gstins || []).includes(x) || c.gstin === x))
+      || (g.f.code && S.clients.find(c => c.code && c.code === g.f.code));
+    g._match = m?.id || null;
+  }
+  return [...groups.values()];
 }
 
+function ocrTarget(res) {
+  const { mode } = S.pending, g = res.fields.gstin, pan = res.fields.pan;
+  if (mode === 'update') return S.client;
+  return S.clients.find(c => (g && ((c.gstins || []).includes(g) || c.gstin === g)) || (pan && c.pan === pan)) || null;
+}
 function ocrReview(res) {
   const { mode } = S.pending;
-  const cur = mode === 'update' ? S.client || {} : {};
+  const target = ocrTarget(res);
+  const g = res.fields.gstin;
+  const reg = g && target ? regsOf(target).find(r => r.gstin === g) : null;
+  const REGMAP = { gstin: 'gstin', gstRegDate: 'regDate', gstFreq: 'gstFreq' };
+  const cur = k => !target ? '' : REGMAP[k] ? (reg ? reg[REGMAP[k]] || '' : '') : target[k] ?? '';
   const keys = Object.keys(res.fields);
-  // When creating, offer to merge into an existing client with the same PAN/GSTIN
-  const dupe = mode === 'new' && S.clients.find(c => (res.fields.gstin && c.gstin === res.fields.gstin) || (res.fields.pan && c.pan === res.fields.pan));
   if (!keys.length) return `<p class="warn">No details could be read. Try a clearer scan or a digitally downloaded PDF. You can still save the document from the client's Documents tab.</p>`;
+  const showCur = !!target;
   return `<form data-form="applyOcr">
-    ${dupe ? `<p class="warn">A client with this PAN/GSTIN exists: <b>${esc(dupe.name)}</b>.
-      <label class="chk"><input type="checkbox" name="target" value="${dupe.id}" checked> Update that client instead of creating a new one</label></p>` : ''}
-    <table class="tbl review"><thead><tr><th></th><th>Field</th><th>Read from document</th>${mode === 'update' ? '<th>Currently saved</th>' : ''}</tr></thead><tbody>
+    ${mode === 'new' && target ? `<p class="warn">A client with this PAN/GSTIN exists: <b>${esc(target.name)}</b>.
+      <label class="chk"><input type="checkbox" name="target" value="${target.id}" checked> Add to that client instead of creating a new one</label></p>` : ''}
+    ${g ? `<p class="ok small">GSTIN <b class="mono">${esc(g)}</b> (${esc(res.fields.state || stateOf(g))}) will be ${reg ? 'updated in' : 'added to'} the client's GST registrations, with this certificate's trade name, address and date.</p>` : ''}
+    <table class="tbl review"><thead><tr><th></th><th>Field</th><th>Read from document</th>${showCur ? '<th>Currently saved</th>' : ''}</tr></thead><tbody>
     ${keys.map(k => {
-      const differs = cur[k] && String(cur[k]) !== String(res.fields[k]);
+      const cv = cur(k);
+      const differs = cv && String(cv) !== String(res.fields[k]);
       const tag = k === 'people' || k === 'address' ? 'textarea' : 'input';
       const input = tag === 'textarea' ? `<textarea name="f_${k}" rows="2">${esc(res.fields[k])}</textarea>` : `<input name="f_${k}" value="${esc(res.fields[k])}">`;
-      return `<tr><td><input type="checkbox" name="use_${k}" ${!cur[k] ? 'checked' : ''}></td><td>${label(k)}${differs ? ' <span class="tag amber">differs</span>' : ''}</td>
-        <td>${input}</td>${mode === 'update' ? `<td class="muted small">${esc(cur[k] ?? '')}</td>` : ''}</tr>`;
+      return `<tr><td><input type="checkbox" name="use_${k}" ${!cv ? 'checked' : ''}></td><td>${label(k)}${differs ? ' <span class="tag amber">differs</span>' : ''}</td>
+        <td>${input}</td>${showCur ? `<td class="muted small">${esc(cv)}</td>` : ''}</tr>`;
     }).join('')}</tbody></table>
+    <p class="muted tiny">Ticked fields update the client's master data. The GST registration always takes this certificate's GSTIN, state, trade name, address and date.</p>
     <div class="row wrap">
       <label class="chk"><input type="checkbox" name="saveDoc" checked> Also save this document to the client's Documents as</label>
       <select name="cat">${DOC_CATS.map(c => `<option ${c === res.type ? 'selected' : ''}>${c}</option>`).join('')}</select>
     </div>
-    <div class="btns"><button class="primary">${mode === 'new' ? 'Create / update client' : 'Apply ticked fields'}</button>
+    <div class="btns"><button class="primary">${mode === 'new' && !target ? 'Create client' : 'Apply to client'}</button>
       <button type="button" data-act="closeModal">Cancel</button></div>
   </form>`;
 }

@@ -20,6 +20,14 @@ You (and staff) manage everything; each client logs in and sees only their own d
 
 **One-click portal login** — with the included Chrome extension, **Login** opens the portal and fills the user ID and password (and TAN on TRACES; on Income Tax it fills the password after you click Continue). You enter CAPTCHA / OTP and sign in. Without the extension, Login opens the portal and copies the password.
 
+## Multiple GSTINs per client
+- Each client (one PAN) has a **GST registrations** tab: one entry per GSTIN with state, trade name, address, filing type (Monthly / QRMP / Composition), registration date and status.
+- The compliance calendar, dashboard and task generation create **GSTR-1 / GSTR-3B / CMP-08 / GSTR-9 / GSTR-4 for each GSTIN**, labelled by state, with the right QRMP 22nd/24th date per state and nothing before the registration date.
+- Portal logins for GST, E-Way Bill and E-Invoice can be linked to a GSTIN; quick-login buttons show the state.
+- Uploading a GST certificate for a client that already exists (same PAN) **adds that GSTIN** as another registration.
+- Excel import: one row per GSTIN; rows with the same PAN are combined into one client. Export writes one row per GSTIN.
+- Clients created before this change keep working: their single GSTIN becomes the first registration and existing filed records and GST login stay linked to it.
+
 ## Task manager
 Inspired by ERPCA's workflow model.
 - **Workflow masters** (Tasks → Workflow & staff): departments → work categories, each with *documents required from client*, *activities with % weight* (drives progress) and *outcome documents*. Ships with GST, Income Tax, TDS, ROC/LLP, Payroll, Accounting defaults; fully editable. Staff list and default assignee per department.

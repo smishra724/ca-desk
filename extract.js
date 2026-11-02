@@ -2,7 +2,7 @@
 // and pulls master-data fields out of it. Everything runs in the browser; documents never
 // leave the user's computer for OCR.
 
-const STATE_CODES = {
+export const STATE_CODES = {
   '01':'Jammu and Kashmir','02':'Himachal Pradesh','03':'Punjab','04':'Chandigarh','05':'Uttarakhand','06':'Haryana',
   '07':'Delhi','08':'Rajasthan','09':'Uttar Pradesh','10':'Bihar','11':'Sikkim','12':'Arunachal Pradesh','13':'Nagaland',
   '14':'Manipur','15':'Mizoram','16':'Tripura','17':'Meghalaya','18':'Assam','19':'West Bengal','20':'Jharkhand',

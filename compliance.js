@@ -1,6 +1,7 @@
 // Statutory due-date engine. Dates are the standard statutory dates; government extensions
 // (CBDT / CBIC / MCA notifications) are not applied automatically.
 
+import { STATE_CODES } from './extract.js';
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 // States whose QRMP GSTR-3B is due on the 22nd (rest: 24th)
 const QRMP_22 = new Set(['22','23','24','25','26','27','29','30','31','32','33','34','35','36','37']);
@@ -20,16 +21,31 @@ export function entityKind(c) {
   return ({ C: 'company', F: 'firm', H: 'huf', T: 'trust', P: 'individual' })[p] || 'other';
 }
 
+// GST registrations of a client. Older records hold a single GSTIN on the client itself;
+// that one is returned as a "legacy" registration so its existing filing records still match.
+export function regsOf(c) {
+  if (Array.isArray(c?.gstRegs)) return c.gstRegs;
+  if (c?.gstin) return [{ id: 'main', legacy: true, gstin: c.gstin, state: STATE_CODES[c.gstin.slice(0, 2)] || c.state || '', tradeName: c.tradeName || '',
+    address: c.address || '', gstFreq: c.gstFreq || 'Monthly', regDate: c.gstRegDate || '', status: 'Active' }];
+  return [];
+}
+export const activeRegs = c => regsOf(c).filter(r => r.gstin && r.status !== 'Cancelled' && !/not/i.test(r.gstFreq || ''));
+// filing record for an item: new per-GSTIN key, or the old single-GSTIN key for the legacy registration
+export const filingFor = (map, it, prefix = '') => map[prefix + it.key] || (it.altKey ? map[prefix + it.altKey] : undefined);
+
 export function dueItems(c, from, to) {
   const out = [];
   const add = (key, form, period, due, note = '') => {
     if (due >= from && due <= to) out.push({ key, form, period, due, note });
   };
   const kind = entityKind(c);
-  const freq = (c.gstFreq || 'Monthly').toLowerCase();
-  const gst = !!c.gstin && !/not/.test(freq);
-  const qrmp = freq === 'qrmp', comp = freq === 'composition';
-  const day3B = QRMP_22.has((c.gstin || '').slice(0, 2)) ? 22 : 24;
+  const regs = activeRegs(c), multi = regs.length > 1;
+  // GST items are added once per registration; key gets "@GSTIN", label gets the state when there are several
+  const gstAdd = (r, key, form, period, due, note) => {
+    if (due < from || due > to) return;
+    out.push({ key: `${key}@${r.gstin}`, altKey: r.legacy ? key : undefined, gstin: r.gstin, state: r.state || STATE_CODES[r.gstin.slice(0, 2)] || '',
+      form: multi ? `${form} — ${r.state || STATE_CODES[r.gstin.slice(0, 2)] || r.gstin.slice(0, 2)}` : form, period, due, note: note || '' });
+  };
 
   // Monthly / quarterly items, by tax period
   for (let pm = new Date(from.getFullYear(), from.getMonth() - 3, 1); pm <= to;
@@ -40,20 +56,22 @@ export function dueItems(c, from, to) {
     const qEnd = m % 3 === 2;
     const qLabel = `${qName(m)} ${fyLabel(m < 3 ? y - 1 : y)}`;
 
-    if (gst) {
-      if (comp) {
-        if (qEnd) add(`CMP08-${id}`, 'CMP-08', qLabel, nx(18));
-      } else if (qrmp) {
+    for (const r of regs) {
+      const freq = (r.gstFreq || 'Monthly').toLowerCase();
+      if (r.regDate && new Date(y, m + 1, 0) < new Date(r.regDate)) continue; // period before registration
+      if (freq === 'composition') {
+        if (qEnd) gstAdd(r, `CMP08-${id}`, 'CMP-08', qLabel, nx(18));
+      } else if (freq === 'qrmp') {
         if (qEnd) {
-          add(`GSTR1-${id}`, 'GSTR-1 (QRMP)', qLabel, nx(13));
-          add(`GSTR3B-${id}`, 'GSTR-3B (QRMP)', qLabel, nx(day3B));
+          gstAdd(r, `GSTR1-${id}`, 'GSTR-1 (QRMP)', qLabel, nx(13));
+          gstAdd(r, `GSTR3B-${id}`, 'GSTR-3B (QRMP)', qLabel, nx(QRMP_22.has(r.gstin.slice(0, 2)) ? 22 : 24));
         } else {
-          add(`IFF-${id}`, 'IFF', per, nx(13), 'Optional');
-          add(`PMT06-${id}`, 'PMT-06 tax payment', per, nx(25));
+          gstAdd(r, `IFF-${id}`, 'IFF', per, nx(13), 'Optional');
+          gstAdd(r, `PMT06-${id}`, 'PMT-06 tax payment', per, nx(25));
         }
       } else {
-        add(`GSTR1-${id}`, 'GSTR-1', per, nx(11));
-        add(`GSTR3B-${id}`, 'GSTR-3B', per, nx(20));
+        gstAdd(r, `GSTR1-${id}`, 'GSTR-1', per, nx(11));
+        gstAdd(r, `GSTR3B-${id}`, 'GSTR-3B', per, nx(20));
       }
     }
     if (c.tds) add(`TDSPAY-${id}`, 'TDS/TCS payment', per, m === 2 ? new Date(y, 3, 30) : nx(7));
@@ -81,8 +99,11 @@ export function dueItems(c, from, to) {
     const late = kind === 'company' || !!c.audit;
     add(`ITR-${fy}`, 'Income tax return', `${L} (AY ${ay}-${String(ay + 1).slice(2)})`, new Date(ay, late ? 9 : 6, 31));
     if (c.audit) add(`3CD-${fy}`, 'Tax audit report', L, new Date(ay, 8, 30));
-    if (gst && !comp) add(`GSTR9-${fy}`, 'GSTR-9 annual return', L, new Date(ay, 11, 31));
-    if (gst && comp) add(`GSTR4-${fy}`, 'GSTR-4 annual return', L, new Date(ay, 3, 30));
+    for (const r of regs) {
+      if (r.regDate && new Date(ay, 2, 31) < new Date(r.regDate)) continue;
+      if (/composition/i.test(r.gstFreq || '')) gstAdd(r, `GSTR4-${fy}`, 'GSTR-4 annual return', L, new Date(ay, 3, 30));
+      else gstAdd(r, `GSTR9-${fy}`, 'GSTR-9 annual return', L, new Date(ay, 11, 31));
+    }
     if (kind === 'company') {
       add(`DPT3-${fy}`, 'DPT-3', L, new Date(ay, 5, 30));
       add(`DIR3-${fy}`, 'DIR-3 KYC (directors)', L, new Date(ay, 8, 30));
@@ -97,7 +118,7 @@ export function dueItems(c, from, to) {
       add(`DIR3-${fy}`, 'DIR-3 KYC (partners)', L, new Date(ay, 8, 30));
     }
   }
-  return out.sort((a, b) => a.due - b.due);
+  return out.sort((a, b) => a.due - b.due || a.form.localeCompare(b.form));
 }
 
 export const fmtDate = d => d ? `${pad(d.getDate())}-${MON[d.getMonth()]}-${d.getFullYear()}` : '';

@@ -414,7 +414,8 @@ export function initTasks(ctx) {
       const items = [];
       for (const c of S.clients) for (const it of dueItems(c, from, to)) {
         if (it.note === 'Optional') continue;
-        if (S.allFilings[`${c.id}|${it.key}`]?.status === 'filed' || have.has(`${c.id}|${it.key}`)) continue;
+        const fl = S.allFilings[`${c.id}|${it.key}`] || (it.altKey && S.allFilings[`${c.id}|${it.altKey}`]);
+        if (fl?.status === 'filed' || have.has(`${c.id}|${it.key}`) || (it.altKey && have.has(`${c.id}|${it.altKey}`))) continue;
         items.push({ ...it, c });
       }
       S.genPending = { items, assignee: fd.get('assignee') };
