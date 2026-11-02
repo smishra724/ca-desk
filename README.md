@@ -20,6 +20,14 @@ You (and staff) manage everything; each client logs in and sees only their own d
 
 **One-click portal login** — with the included Chrome extension, **Login** opens the portal and fills the user ID and password (and TAN on TRACES; on Income Tax it fills the password after you click Continue). You enter CAPTCHA / OTP and sign in. Without the extension, Login opens the portal and copies the password.
 
+## Send to client (WhatsApp / Email)
+- **Send to client** on any client page (or tick documents on the Documents tab → **Send selected**).
+- Message is pre-filled with the client's master details (name, constitution, PAN, every GSTIN with state, TAN, CIN, address) and the list of documents; edit it before sending.
+- KYC documents (GST certificate, PAN, TAN, Aadhaar, incorporation, deed, MOA/AOA) are ticked by default.
+- **On phones and Chrome/Edge on Windows** the share menu opens with the files attached — pick WhatsApp, Gmail or Outlook.
+- **Otherwise** WhatsApp (wa.me with the client's number), the mail app or Gmail opens with the message filled in, and the files download so you can attach them.
+- Each send is logged on the client ("Recently sent").
+
 ## Multiple GSTINs per client
 - Each client (one PAN) has a **GST registrations** tab: one entry per GSTIN with state, trade name, address, filing type (Monthly / QRMP / Composition), registration date and status.
 - The compliance calendar, dashboard and task generation create **GSTR-1 / GSTR-3B / CMP-08 / GSTR-9 / GSTR-4 for each GSTIN**, labelled by state, with the right QRMP 22nd/24th date per state and nothing before the registration date.

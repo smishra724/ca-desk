@@ -3,6 +3,7 @@ import { PORTALS, portalByKey } from './portals.js';
 import { extractFromFile, toISO, STATE_CODES } from './extract.js';
 import { dueItems, fmtDate, regsOf, activeRegs, filingFor } from './compliance.js';
 import { initTasks } from './tasks.js';
+import { initSend } from './send.js';
 
 // Local mode (no login, data in this browser) until firebase-config.js has real keys.
 const LOCAL = !firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith('PASTE');
@@ -281,6 +282,7 @@ function vClient() {
         <div class="chips">${c.tradeName ? `<span>${esc(c.tradeName)}</span>` : ''}${c.constitution ? `<span>${esc(c.constitution)}</span>` : ''}
         ${c.pan ? `<span class="mono">PAN ${esc(c.pan)}</span>` : ''}${regsOf(c).length === 1 ? `<span class="mono">GSTIN ${esc(regsOf(c)[0].gstin)}</span>` : regsOf(c).length > 1 ? `<span>${regsOf(c).length} GSTINs · ${esc([...new Set(regsOf(c).map(r => r.state).filter(Boolean))].join(', '))}</span>` : ''}</div></div>
       <div class="btns">
+        ${isAdmin() && S.cid ? `<button class="primary wa" data-act="sendOpen">Send to client</button>` : ''}
         ${isAdmin() ? `<button class="primary" data-act="fromDoc" data-mode="update">Fill from document</button>` : ''}
         <button data-act="downloadClient">Download my data (Excel)</button>
       </div>
@@ -374,13 +376,13 @@ function tLogins() {
 
 function tDocs() {
   return `
-  <div class="row-between wrap"><h2>Documents</h2></div>
+  <div class="row-between wrap"><h2>Documents</h2>${isAdmin() && S.docs.length ? '<button class="wa primary" data-act="sendSelected">Send selected on WhatsApp / Email</button>' : ''}</div>
   ${isAdmin() ? `<div class="upload">
     <select id="docCat">${DOC_CATS.map(c => `<option>${c}</option>`).join('')}</select>
     <label class="filebtn">Upload files<input type="file" multiple data-change="uploadDocs" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx,.zip,.json"></label>
     <span class="muted small">Max 10 MB per file.</span></div>` : ''}
-  <table class="tbl"><thead><tr><th>Document</th><th>Category</th><th>Size</th><th>Uploaded</th><th></th></tr></thead><tbody>
-  ${S.docs.map(d => `<tr><td>${esc(d.name)}</td><td>${esc(d.category)}</td><td class="nowrap">${(d.size / 1024).toFixed(0)} KB</td>
+  <table class="tbl"><thead><tr>${isAdmin() ? '<th><input type="checkbox" data-change="docpickAll" title="Select all"></th>' : ''}<th>Document</th><th>Category</th><th>Size</th><th>Uploaded</th><th></th></tr></thead><tbody>
+  ${S.docs.map(d => `<tr>${isAdmin() ? `<td><input type="checkbox" class="docpick" value="${d.id}"></td>` : ''}<td>${esc(d.name)}</td><td>${esc(d.category)}</td><td class="nowrap">${(d.size / 1024).toFixed(0)} KB</td>
     <td class="nowrap">${d.uploadedAt ? fmtDate(d.uploadedAt.toDate()) : ''}</td>
     <td class="nowrap"><button class="sm" data-act="dlDoc" data-id="${d.id}">Download</button>
     ${isAdmin() ? `<button class="sm danger" data-act="delDoc" data-id="${d.id}">Delete</button>` : ''}</td></tr>`).join('')
@@ -1054,6 +1056,9 @@ async function afterImport(n) {
 /* ================= task manager ================= */
 const T = initTasks({ S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render: () => render(), db,
   fs: { doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, where } });
+
+initSend({ S, A, C, esc, toast, modal, closeModal, regsOf, stateOf, isoToDisp, fmtDate, db, saveBlob,
+  fs: { doc, getDocs, collection, updateDoc, arrayUnion } });
 
 /* ================= event wiring ================= */
 document.addEventListener('click', e => {

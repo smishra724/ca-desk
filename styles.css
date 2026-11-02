@@ -144,3 +144,8 @@ form.row{margin-top:8px} form.row input{margin:0}
 form.row{flex-wrap:wrap} form.row input,form.row select{width:auto;flex:1;min-width:110px}
 form.row input[type=date]{flex:0 0 150px} form.row input[name=hrs]{flex:0 0 90px}
 .col{max-height:76vh;overflow:auto}
+
+/* ---------- send to client ---------- */
+button.wa{background:#1f9d55;border-color:#1f9d55;color:#fff}
+.senddocs{display:grid;gap:4px;max-height:200px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px}
+#sendMsg{font-family:inherit;font-size:13px}
