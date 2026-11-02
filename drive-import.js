@@ -15,23 +15,38 @@ const ENTITY_TYPES = new Set(['GST Certificate', 'Certificate of Incorporation',
 const RANK = { 'GST Certificate': 5, 'Certificate of Incorporation': 4, 'LLP Incorporation': 4, 'TAN Allotment': 3, 'Partnership Deed / LLP Agreement': 2, 'PAN Card': 1, 'Aadhaar': 0, 'Other': -1 };
 
 export function initDriveImport(ctx) {
-  const { S, A, C, esc, toast, modal, closeModal, db, fs, M, firebaseConfig, LOCAL,
+  const { S, A, C, esc, toast, modal, closeModal, db, fs, LOCAL,
     regsOf, regMirror, mergeReg, newRegId, stateOf, GSTIN_RE, saveFile, loadClients, render } = ctx;
   const { doc, getDoc, setDoc, updateDoc, addDoc, collection, serverTimestamp } = fs;
   let token = null, googleEmail = '', plan = null, stop = false;
 
-  /* ---------- Google connection (separate Firebase app, so the CA Desk login is untouched) ---------- */
-  async function connect() {
-    const app = M.getApps?.().find(a => a.name === 'drive') || M.initializeApp(firebaseConfig, 'drive');
-    const auth = M.getAuth(app);
-    const provider = new M.GoogleAuthProvider();
-    provider.addScope('https://www.googleapis.com/auth/drive.readonly');
-    provider.setCustomParameters({ prompt: 'select_account' });
-    const res = await M.signInWithPopup(auth, provider);
-    token = M.GoogleAuthProvider.credentialFromResult(res)?.accessToken;
-    googleEmail = res.user?.email || '';
-    await M.signOut(auth).catch(() => {});
-    if (!token) throw new Error('Google did not return Drive access. Try again and allow "See and download your Google Drive files".');
+  /* ---------- Google connection: Google Identity Services token (read-only Drive). It does not sign in
+     to CA Desk, so it never touches CA Desk logins. ---------- */
+  const CLIENT_ID = '849362120388-5g7nrke9qit6gmmp4tpra5td0p4o49gh.apps.googleusercontent.com';
+  let gisReady = null, tokenClient = null;
+  function loadGis() {
+    return gisReady ||= new Promise((ok, bad) => {
+      if (window.google?.accounts?.oauth2) return ok();
+      const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.async = true;
+      s.onload = () => ok(); s.onerror = () => bad(new Error('Could not load Google sign-in.')); document.head.appendChild(s);
+    });
+  }
+  // must be called straight from a click so the Google window is allowed to open
+  function connect() {
+    return new Promise((ok, bad) => {
+      if (!window.google?.accounts?.oauth2) return bad(new Error('Google sign-in is still loading — click again in a second.'));
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID, scope: 'https://www.googleapis.com/auth/drive.readonly', prompt: 'select_account',
+        callback: async r => {
+          if (r.error) return bad(new Error(r.error === 'access_denied' ? 'Drive access was not allowed.' : r.error));
+          token = r.access_token;
+          try { googleEmail = (await api('about', { fields: 'user(emailAddress)' })).user.emailAddress; } catch { googleEmail = ''; }
+          ok();
+        },
+        error_callback: e => bad(new Error(e?.type === 'popup_closed' ? 'The Google window was closed.' : 'Google sign-in failed: ' + (e?.message || e?.type))),
+      });
+      tokenClient.requestAccessToken();
+    });
   }
   async function api(path, params = {}, raw = false) {
     const url = `${API}/${path}?${new URLSearchParams({ supportsAllDrives: 'true', ...params })}`;
@@ -69,7 +84,7 @@ export function initDriveImport(ctx) {
     if (LOCAL) return toast('Connect Firebase first — Drive import saves straight into your cloud database.');
     const m = await getDoc(doc(db, 'meta', 'drive')).catch(() => null);
     const last = m?.exists() ? m.data().folder || '' : '';
-    plan = null;
+    plan = null; loadGis().catch(() => {});
     modal(`<h2>Import clients from Google Drive</h2>
       <p class="muted small">Point to a folder that holds one sub-folder per client (e.g. <b>DATA MANAGEMENT</b>). CA Desk reads the GST certificates, PAN, TAN, Aadhaar,
       incorporation certificates and deeds in each folder, fills the master data and GST registrations, and copies those KYC documents into the client's Documents.

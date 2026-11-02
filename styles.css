@@ -149,3 +149,4 @@ form.row input[type=date]{flex:0 0 150px} form.row input[name=hrs]{flex:0 0 90px
 button.wa{background:#1f9d55;border-color:#1f9d55;color:#fff}
 .senddocs{display:grid;gap:4px;max-height:200px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px}
 #sendMsg{font-family:inherit;font-size:13px}
+.gbtn{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;font-weight:500}

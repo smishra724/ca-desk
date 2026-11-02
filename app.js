@@ -129,6 +129,7 @@ function renderLogin() {
       <label>Password<input name="pw" type="password" required autocomplete="current-password"></label>
       <button class="primary wide">Sign in</button>
     </form>
+    <button class="wide gbtn" data-act="googleLogin"><svg width="16" height="16" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.3 0-9.7-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg> Sign in with Google</button>
     <button class="link" data-act="forgot">Forgot password?</button>
     ${S.setup ? '' : `
     <hr><h3>First-time setup</h3>
@@ -527,6 +528,10 @@ async function loadStaff() {
 /* ================= actions ================= */
 const A = {
   logout: () => signOut(auth),
+  googleLogin: () => {
+    const p = new M.GoogleAuthProvider(); p.setCustomParameters({ prompt: 'select_account' });
+    M.signInWithPopup(auth, p).catch(e => { if (!/popup-closed|cancelled-popup/.test(e.code || '')) toast(niceErr(e), 6000); });
+  },
   importLocal: () => guard(async () => {
     const docs = await readLocalIDB();
     const keys = Object.keys(docs).filter(k => k.startsWith('clients/') || k.startsWith('tasks/') || k === 'meta/workflow' || k === 'meta/counters');
@@ -1064,7 +1069,7 @@ async function afterImport(n) {
 const T = initTasks({ S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render: () => render(), db,
   fs: { doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, where } });
 
-initDriveImport({ S, A, C, esc, toast, modal, closeModal, db, M, firebaseConfig, LOCAL, regsOf, regMirror, mergeReg, newRegId, stateOf, GSTIN_RE,
+initDriveImport({ S, A, C, esc, toast, modal, closeModal, db, LOCAL, regsOf, regMirror, mergeReg, newRegId, stateOf, GSTIN_RE,
   saveFile, loadClients, render: () => render(), fs: { doc, getDoc, setDoc, updateDoc, addDoc, collection, serverTimestamp } });
 initSend({ S, A, C, esc, toast, modal, closeModal, regsOf, stateOf, isoToDisp, fmtDate, db, saveBlob,
   fs: { doc, getDocs, collection, updateDoc, arrayUnion } });
