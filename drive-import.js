@@ -90,6 +90,12 @@ export function initDriveImport(ctx) {
       if (!token) { out.innerHTML = '<p class="muted">Waiting for Google sign-in…</p>'; await connect(); }
       out.innerHTML = `<p class="muted">Connected as ${esc(googleEmail)}. Scanning folders…</p>`;
       await setDoc(doc(db, 'meta', 'drive'), { folder: document.getElementById('drvFolder').value.trim(), by: googleEmail }, { merge: true });
+      const meta = await api(`files/${id}`, { fields: 'id,name,mimeType' }).catch(() => null);
+      if (!meta) {
+        out.innerHTML = `<p class="warn">The Google account <b>${esc(googleEmail)}</b> can't open this folder. Sign in with the account that owns it
+          (or share the folder with ${esc(googleEmail)}).</p><div class="btns"><button class="primary" data-act="driveSwitch">Use a different Google account</button></div>`;
+        return;
+      }
       const top = await children(id);
       const cands = [];
       for (const f of top.filter(k => k.mimeType === FOLDER).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -107,7 +113,9 @@ export function initDriveImport(ctx) {
         out.innerHTML = `<p class="muted">Counting documents… ${esc(c.name)}</p>`;
       }
       plan = cands;
-      out.innerHTML = `<hr><p><b>${cands.filter(c => c.id).length}</b> client folder(s) found. Untick any that are not clients.</p>
+      out.innerHTML = `<hr><p>Signed in to Drive as <b>${esc(googleEmail)}</b> · folder <b>${esc(meta.name)}</b>
+          <button class="sm" data-act="driveSwitch">Use a different Google account</button></p>
+        <p><b>${cands.filter(c => c.id).length}</b> client folder(s) found. Untick any that are not clients.</p>
         <div class="genlist">${cands.map((c, i) => c.skip
           ? `<div class="small muted">✕ ${esc(c.name)} — ${esc(c.skip)}</div>`
           : `<label class="chk"><input type="checkbox" id="drv_${i}" ${c.readable.length ? 'checked' : ''}> <b>${esc(c.name)}</b>
@@ -123,6 +131,7 @@ export function initDriveImport(ctx) {
   };
 
   A.driveStop = () => { stop = true; };
+  A.driveSwitch = () => { token = null; googleEmail = ''; A.driveScan(); };
 
   A.driveRun = async () => {
     const chosen = plan.filter((c, i) => !c.skip && document.getElementById('drv_' + i)?.checked);
