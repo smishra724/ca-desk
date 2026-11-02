@@ -324,7 +324,7 @@ function tMaster() {
 
 function tGst() {
   const regs = regsOf(S.client), adm = isAdmin();
-  const creds = g => S.creds.filter(cr => cr.gstin === g || (!cr.gstin && cr.portal === 'gst' && regs.length === 1));
+  const creds = g => S.creds.filter(cr => cr.gstin === g || (!cr.gstin && cr.portal === 'gst' && regs.length === 1 && !S.creds.some(x => x.gstin)));
   return `
   <div class="row-between wrap"><h2>GST registrations</h2>
     ${adm ? `<div class="btns"><button class="primary" data-act="editReg">+ Add GSTIN</button><button data-act="fromDoc" data-mode="update">Add from GST certificate</button></div>` : ''}</div>
