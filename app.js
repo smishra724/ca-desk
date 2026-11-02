@@ -70,6 +70,7 @@ function niceErr(e) {
   const c = e?.code || '';
   if (c.includes('invalid-credential') || c.includes('wrong-password') || c.includes('user-not-found')) return 'Email or password is incorrect.';
   if (c.includes('email-already-in-use')) return 'This email already has a login. Use another email, or restore access from the list below.';
+  if (c.includes('invalid-email')) return 'That email address is not complete — check it (for example name@gmail.com).';
   if (c.includes('weak-password')) return 'Password must be at least 6 characters.';
   if (c.includes('permission-denied')) return 'You do not have permission for this.';
   if (c.includes('too-many-requests')) return 'Too many attempts. Wait a few minutes and try again.';
