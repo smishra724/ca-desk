@@ -105,7 +105,7 @@ onAuthStateChanged(auth, async u => { if (!settingUp) await boot(u); });
 async function boot(u) {
   try {
     const s = await getDoc(doc(db, 'meta', 'setup'));
-    S.setup = s.exists(); S.firm = s.exists() ? s.data().firmName || '' : '';
+    S.setup = s.exists(); S.firm = s.exists() ? s.data().firmName || '' : ''; S.trackFrom = s.exists() ? s.data().trackFrom || '' : '';
   } catch { S.setup = true; }
   document.title = S.firm ? `${S.firm} · CA Desk` : 'CA Desk';
   if (!u) { S.profile = null; return renderLogin(); }
@@ -113,7 +113,10 @@ async function boot(u) {
   const role = p?.exists() ? p.data().role : null;
   if (role !== 'admin' && role !== 'client') return renderNoAccess(u);
   S.profile = { uid: u.uid, email: u.email, ...p.data() };
-  if (isAdmin()) { await loadClients(); await loadAllFilings(); await T.load(); S.view = 'dashboard'; }
+  if (isAdmin()) {
+    if (!S.trackFrom) { S.trackFrom = todayISO(); updateDoc(doc(db, 'meta', 'setup'), { trackFrom: S.trackFrom }).catch(() => {}); }
+    await loadClients(); await loadAllFilings(); await T.load(); loadGstLoginFlags(); S.view = 'dashboard';
+  }
   else { await openClient(S.profile.clientId, 'master'); await T.loadForClient(S.profile.clientId).catch(() => {}); }
   render();
 }
@@ -154,6 +157,13 @@ async function loadClients() {
   const snap = await getDocs(collection(db, 'clients'));
   S.clients = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 }
+async function loadGstLoginFlags() {
+  try {
+    const snap = await getDocs(collectionGroup(db, 'credentials'));
+    const has = new Set(); snap.forEach(d => { if (d.data().portal === 'gst') has.add(d.ref.parent.parent.id); });
+    for (const c of S.clients) c._hasGstLogin = has.has(c.id);
+  } catch {}
+}
 async function loadAllFilings() {
   S.allFilings = {};
   try {
@@ -181,7 +191,7 @@ async function openClient(cid, tab) {
 /* ================= rendering ================= */
 function render() {
   if (!S.profile) return;
-  const nav = isAdmin() ? [['dashboard', 'Dashboard'], ['tasks', 'Tasks'], ['clients', 'Clients'], ['import', 'Excel import'], ['settings', 'Settings']]
+  const nav = isAdmin() ? [['dashboard', 'Dashboard'], ['due', 'Due dates'], ['tasks', 'Tasks'], ['clients', 'Clients'], ['import', 'Excel import'], ['settings', 'Settings']]
     .map(([v, l]) => `<button class="nav ${(S.view === v || (v === 'tasks' && ['task', 'workflow'].includes(S.view))) ? 'on' : ''}" data-act="go" data-v="${v}">${l}</button>`).join('') : '';
   $('#app').innerHTML = `
   <header class="top">
@@ -195,6 +205,7 @@ function render() {
 function body() {
   switch (S.view) {
     case 'dashboard': return vDashboard();
+    case 'due': return vDue();
     case 'clients': return vClients();
     case 'client': return vClient();
     case 'import': return vImport();
@@ -207,45 +218,143 @@ function body() {
 }
 
 /* ---------- dashboard ---------- */
-function dashRows() {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const from = new Date(today); from.setDate(from.getDate() - 90);
-  const to = new Date(today); to.setDate(to.getDate() + S.dashDays);
+// Due items across all clients. Items due before the "track from" date are history (filed before CA Desk)
+// and only appear on the Due dates page when "include history" is ticked.
+const dayStart = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+function trackFrom() { return S.trackFrom ? new Date(S.trackFrom + 'T00:00') : dayStart(new Date()); }
+function dueRows({ back = 0, ahead = 45, history = false } = {}) {
+  const today = dayStart(new Date());
+  const from = new Date(today); from.setDate(from.getDate() - back);
+  const tf = trackFrom(); const start = history ? from : (from > tf ? from : tf);
+  const to = new Date(today); to.setDate(to.getDate() + ahead);
   const rows = [];
-  for (const c of S.clients) {
-    for (const it of dueItems(c, from, to)) {
-      const f = filingFor(S.allFilings, it, `${c.id}|`);
-      if (f?.status === 'filed') continue;
-      if (it.note === 'Optional' && it.due < today) continue;
-      rows.push({ ...it, c, overdue: it.due < today });
-    }
+  if (start > to) return rows;
+  for (const c of S.clients) for (const it of dueItems(c, start, to)) {
+    const f = filingFor(S.allFilings, it, `${c.id}|`);
+    if (f?.status === 'filed') continue;
+    if (it.note === 'Optional' && it.due < today) continue;
+    rows.push({ ...it, c, overdue: it.due < today });
   }
-  return rows.sort((a, b) => a.due - b.due);
+  return rows.sort((a, b) => a.due - b.due || (a.c.name || '').localeCompare(b.c.name || ''));
 }
+const dashRows = () => dueRows({ back: 365, ahead: 0, history: true }); // used by bulk "mark filed"
+const baseForm = f => f.replace(/ — .*$/, '').replace(/ \(QRMP\)$/, '');
+const MONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const ICON = {
+  users: '<svg viewBox="0 0 24 24"><path d="M16 11a4 4 0 1 0-8 0 4 4 0 0 0 8 0Zm-12 9c0-3 3.6-5 8-5s8 2 8 5"/></svg>',
+  gst: '<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM8 9h8M8 13h8M8 17h5"/></svg>',
+  clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  alert: '<svg viewBox="0 0 24 24"><path d="M12 3 2 21h20L12 3Zm0 7v5m0 3v.01"/></svg>',
+  task: '<svg viewBox="0 0 24 24"><path d="M9 11l2 2 4-4M5 4h14v16H5z"/></svg>',
+};
+
 function vDashboard() {
-  const rows = dashRows();
-  const od = rows.filter(r => r.overdue), up = rows.filter(r => !r.overdue);
-  const week = up.filter(r => (r.due - new Date()) / 864e5 <= 7);
-  const tbl = list => list.length ? `<table class="tbl"><thead><tr><th>Due</th><th>Client</th><th>Return / form</th><th>Period</th><th></th></tr></thead><tbody>
-    ${list.map(r => `<tr class="${r.overdue ? 'od' : ''}"><td class="nowrap">${fmtDate(r.due)}</td>
-      <td><a href="#" data-act="open" data-id="${r.c.id}" data-tab="compliance">${esc(r.c.name || r.c.tradeName || '—')}</a></td>
-      <td>${esc(r.form)}${r.note ? ` <span class="tag">${esc(r.note)}</span>` : ''}</td><td>${esc(r.period)}</td>
-      <td><button class="sm" data-act="markFiled" data-cid="${r.c.id}" data-key="${r.key}">Mark filed</button></td></tr>`).join('')}
-    </tbody></table>` : '<p class="muted empty">Nothing here.</p>';
+  const today = dayStart(new Date());
+  const week = dueRows({ ahead: 7 }).filter(r => !r.overdue);
+  const overdue = dueRows({ back: 365, ahead: 0 }).filter(r => r.overdue);
+  const biz = S.clients.filter(c => c.constitution !== 'Individual');
+  const regs = S.clients.flatMap(c => regsOf(c).filter(r => r.status !== 'Cancelled').map(r => ({ ...r, c })));
+  const states = new Set(regs.map(r => r.state).filter(Boolean));
+  const openTasks = S.tasks.filter(t => !['Completed', 'Cancelled'].includes(t.status));
+  const hr = new Date().getHours();
+  const hello = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
+  const who = (S.profile.name || '').split(' ')[0];
+
+  // this month's GST filing progress (returns due in the current calendar month)
+  const mStart = new Date(today.getFullYear(), today.getMonth(), 1), mEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  const prog = {};
+  for (const c of S.clients) for (const it of dueItems(c, mStart, mEnd)) {
+    if (!/GSTR|CMP-08|PMT-06/.test(it.form)) continue;
+    const k = baseForm(it.form); const p = prog[k] ||= { total: 0, filed: 0, due: it.due, period: it.period };
+    p.total++; if (filingFor(S.allFilings, it, `${c.id}|`)?.status === 'filed') p.filed++;
+  }
+  const progHtml = Object.entries(prog).sort((a, b) => a[1].due - b[1].due).map(([k, p]) => {
+    const pct = Math.round(p.filed / p.total * 100), late = p.due < today && p.filed < p.total;
+    return `<div class="prog"><div class="prog-h"><b>${esc(k)}</b><span class="muted small">${esc(p.period)} · due ${p.due.getDate()} ${MONS[p.due.getMonth()]}</span>
+      <span class="prog-n ${late ? 'red' : ''}">${p.filed}/${p.total}</span></div>
+      <div class="bar big"><i style="width:${pct}%" class="${pct === 100 ? 'done' : late ? 'late' : ''}"></i></div></div>`;
+  }).join('') || '<p class="muted small">No GST returns due this month.</p>';
+
+  // next 7 days grouped by date
+  const byDay = {};
+  for (const r of week) (byDay[r.due.toDateString()] ||= { d: r.due, forms: {} }).forms[baseForm(r.form)] = [...(byDay[r.due.toDateString()].forms[baseForm(r.form)] || []), r];
+  const weekHtml = Object.values(byDay).map(({ d, forms }) => `<div class="day">
+      <div class="day-date ${d - today === 0 ? 'today' : ''}"><b>${d.getDate()}</b><span>${MONS[d.getMonth()]}</span></div>
+      <div class="day-body">${Object.entries(forms).map(([f, rs]) => `<div class="day-row"><span class="form-pill">${esc(f)}</span>
+        <span class="small">${rs.slice(0, 4).map(r => `<a href="#" data-act="open" data-id="${r.c.id}" data-tab="compliance">${esc(r.c.tradeName || r.c.name)}</a>`).join(', ')}${rs.length > 4 ? ` <a href="#" data-act="go" data-v="due" class="muted">+${rs.length - 4} more</a>` : ''}</span></div>`).join('')}</div></div>`).join('')
+    || '<div class="empty-state">🎉 Nothing due in the next 7 days.</div>';
+
+  // clients mix
+  const mix = {}; for (const c of S.clients) mix[c.constitution || 'Not set'] = (mix[c.constitution || 'Not set'] || 0) + 1;
+  const mixMax = Math.max(...Object.values(mix), 1);
+  const mixHtml = Object.entries(mix).sort((a, b) => b[1] - a[1]).map(([k, n]) =>
+    `<div class="hbar"><span>${esc(k)}</span><div><i style="width:${Math.max(4, n / mixMax * 100)}%"></i></div><b>${n}</b></div>`).join('');
+
+  // needs attention
+  const noPan = S.clients.filter(c => !c.pan).length;
+  const noLogin = regs.filter(r => !r.c._hasGstLogin).length;
+  const attn = [
+    overdue.length && [`${overdue.length} return(s) overdue since ${isoToDisp(S.trackFrom)}`, 'go" data-v="due', 'red'],
+    noPan && [`${noPan} client(s) without PAN`, 'go" data-v="clients', 'amber'],
+    openTasks.filter(t => t.due && t.due < todayISO()).length && [`${openTasks.filter(t => t.due && t.due < todayISO()).length} task(s) past due date`, 'go" data-v="tasks', 'red'],
+  ].filter(Boolean);
+
   return `
-  <div class="stats">
-    <div class="stat"><b>${S.clients.length}</b><span>Clients</span></div>
-    <div class="stat red"><b>${od.length}</b><span>Overdue (last 90 days)</span></div>
-    <div class="stat amber"><b>${week.length}</b><span>Due in 7 days</span></div>
-    <div class="stat"><b>${up.length}</b><span>Due in ${S.dashDays} days</span></div>
+  <div class="hero">
+    <div><h1>${hello}${who ? ', ' + esc(who) : ''}</h1><p class="muted">${today.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p></div>
+    <div class="btns"><button data-act="go" data-v="due">All due dates</button><button data-act="genTasks">Generate tasks</button><button class="primary" data-act="fromDoc" data-mode="new">+ New client</button></div>
   </div>
-  ${T.dashCard()}
-  <section class="card"><div class="row-between wrap"><h2>Overdue returns <span class="muted">(${od.length})</span></h2>
-    ${od.length ? '<button class="sm" data-act="bulkFiled">Mark past returns as filed…</button>' : ''}</div>${tbl(od)}</section>
-  <section class="card"><div class="row-between"><h2>Upcoming</h2>
-    <select data-change="dashDays">${[15, 30, 45, 60, 90].map(d => `<option ${d === S.dashDays ? 'selected' : ''} value="${d}">Next ${d} days</option>`).join('')}</select></div>
-    ${tbl(up)}
-    <p class="muted small">Statutory due dates. Check CBIC / CBDT / MCA notifications for extensions.</p></section>`;
+  <div class="kpis">
+    <a href="#" class="kpi" data-act="go" data-v="clients"><i class="ic blue">${ICON.users}</i><div><b>${S.clients.length}</b><span>Clients</span><small>${biz.length} businesses · ${S.clients.length - biz.length} individuals</small></div></a>
+    <a href="#" class="kpi" data-act="go" data-v="clients"><i class="ic green">${ICON.gst}</i><div><b>${regs.length}</b><span>Active GSTINs</span><small>${states.size} state(s)</small></div></a>
+    <a href="#" class="kpi" data-act="go" data-v="due"><i class="ic amber">${ICON.clock}</i><div><b>${week.length}</b><span>Due in 7 days</span><small>${new Set(week.map(r => r.c.id)).size} client(s)</small></div></a>
+    <a href="#" class="kpi" data-act="go" data-v="due"><i class="ic ${overdue.length ? 'red' : 'green'}">${ICON.alert}</i><div><b>${overdue.length}</b><span>Overdue</span><small>since ${isoToDisp(S.trackFrom)}</small></div></a>
+    <a href="#" class="kpi" data-act="go" data-v="tasks"><i class="ic violet">${ICON.task}</i><div><b>${openTasks.length}</b><span>Open tasks</span><small>${openTasks.filter(t => t.status === 'Waiting on client').length} waiting on client</small></div></a>
+  </div>
+  <div class="dash-grid">
+    <div>
+      <section class="card"><div class="row-between"><h2>GST filing — ${MONS[today.getMonth()]} ${today.getFullYear()}</h2><button class="sm" data-act="go" data-v="due">Details →</button></div>${progHtml}</section>
+      <section class="card"><div class="row-between"><h2>Next 7 days</h2><button class="sm" data-act="go" data-v="due">All due dates →</button></div><div class="days">${weekHtml}</div></section>
+    </div>
+    <div>
+      ${attn.length ? `<section class="card attn"><h2>Needs attention</h2>${attn.map(([t, act, cls]) => `<a href="#" class="attn-row ${cls}" data-act="${act}">${esc(t)} <span>→</span></a>`).join('')}</section>` : ''}
+      ${T.dashCard()}
+      <section class="card"><h2>Client mix</h2>${mixHtml}</section>
+    </div>
+  </div>`;
+}
+
+/* ---------- due dates page ---------- */
+function vDue() {
+  const f = S.dueF ||= { range: '30', form: '', q: '', history: false };
+  const ahead = f.range === 'overdue' ? 0 : +f.range;
+  let rows = dueRows({ back: 365, ahead, history: f.history });
+  if (f.range === 'overdue') rows = rows.filter(r => r.overdue);
+  const forms = [...new Set(rows.map(r => baseForm(r.form)))].sort();
+  if (f.form) rows = rows.filter(r => baseForm(r.form) === f.form);
+  const q = f.q.toLowerCase(); if (q) rows = rows.filter(r => [r.c.name, r.c.tradeName, r.gstin, r.form].some(v => (v || '').toLowerCase().includes(q)));
+  const shown = rows.slice(0, 500);
+  return `
+  <section class="card">
+    <div class="row-between wrap"><h2>Due dates <span class="muted">(${rows.length})</span></h2>
+      <div class="btns">${isAdmin() ? '<button class="sm" data-act="bulkFiled">Mark past returns as filed…</button>' : ''}</div></div>
+    <div class="filters">
+      <select data-change="dueF" data-k="range">${[['overdue', 'Overdue only'], ['7', 'Next 7 days'], ['30', 'Next 30 days'], ['90', 'Next 90 days']].map(([v, l]) => `<option value="${v}" ${v === f.range ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <select data-change="dueF" data-k="form"><option value="">All returns</option>${forms.map(x => `<option ${x === f.form ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+      <input id="dueQ" placeholder="Search client or GSTIN…" value="${esc(f.q)}">
+      <label class="chk"><input type="checkbox" data-change="dueF" data-k="history" ${f.history ? 'checked' : ''}> Include returns due before ${isoToDisp(S.trackFrom)}</label>
+    </div>
+    <p class="muted small">Tracking compliance from <b>${isoToDisp(S.trackFrom)}</b>. Returns due earlier are treated as filed before CA Desk. ${isAdmin() ? '<a href="#" data-act="setTrackFrom">Change</a>' : ''}</p>
+    <table class="tbl"><thead><tr><th>Due</th><th>Client</th><th>Return / form</th><th>Period</th><th></th></tr></thead><tbody>
+    ${shown.map(r => `<tr class="${r.overdue ? 'od' : ''}"><td class="nowrap">${fmtDate(r.due)}</td>
+      <td><a href="#" data-act="open" data-id="${r.c.id}" data-tab="compliance">${esc(r.c.name)}</a>${r.c.tradeName ? `<div class="muted tiny">${esc(r.c.tradeName)}</div>` : ''}</td>
+      <td>${esc(r.form)}${r.note ? ` <span class="tag">${esc(r.note)}</span>` : ''}</td><td>${esc(r.period)}</td>
+      <td>${isAdmin() ? `<button class="sm" data-act="markFiled" data-cid="${r.c.id}" data-key="${r.key}">Mark filed</button>` : ''}</td></tr>`).join('')
+      || '<tr><td colspan="5" class="muted empty">Nothing due. 🎉</td></tr>'}
+    </tbody></table>
+    ${rows.length > 500 ? `<p class="muted small">Showing first 500 of ${rows.length}. Narrow the filters.</p>` : ''}
+    <p class="muted small">Statutory due dates. Check CBIC / CBDT / MCA notifications for extensions.</p>
+  </section>`;
 }
 
 /* ---------- clients list ---------- */
@@ -653,6 +762,12 @@ const A = {
     guard(async () => { await deleteDocFile(S.cid, id); await openClient(S.cid); render(); }, 'Deleted');
   },
 
+  setTrackFrom: () => {
+    modal(`<h2>Track compliance from</h2>
+      <p class="muted small">Returns due before this date are treated as already filed (before you started using CA Desk) and are not shown as overdue. Returns you marked filed are unaffected.</p>
+      <form data-form="trackFrom" class="grid narrow"><label>Date<input type="date" name="d" value="${S.trackFrom}" required></label>
+      <div class="span2 btns"><button class="primary">Save</button><button type="button" data-act="closeModal">Cancel</button></div></form>`);
+  },
   /* compliance */
   bulkFiled: () => {
     const od = dashRows().filter(r => r.overdue);
@@ -826,6 +941,9 @@ const F = {
     if (id) Object.assign(regs.find(x => x.id === id), r); else regs.push({ id: newRegId(), ...r });
     closeModal(); await saveRegs(regs);
   }, 'GST registration saved'),
+  trackFrom: fd => guard(async () => {
+    S.trackFrom = fd.get('d'); await updateDoc(doc(db, 'meta', 'setup'), { trackFrom: S.trackFrom }); closeModal(); render();
+  }, 'Saved'),
   bulkFiled: fd => guard(async () => {
     const upto = new Date(fd.get('upto') + 'T23:59'), kinds = new Set(fd.getAll('k'));
     const rows = dashRows().filter(r => r.overdue && r.due <= upto && kinds.has(r.form.replace(/ — .*$/, '')));
@@ -912,6 +1030,7 @@ const C = {
     guard(async () => { await M.importAll(await f.text()); location.reload(); });
   },
   dashDays: el => { S.dashDays = +el.value; render(); },
+  dueF: el => { S.dueF[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; render(); },
   portalPick: el => { const u = el.form.elements.url; u.value = portalByKey(el.value).url; },
   uploadDocs: el => guard(async () => {
     const cat = $('#docCat').value;
@@ -1115,6 +1234,10 @@ document.addEventListener('change', e => {
   const el = e.target.closest('[data-change]'); if (el && C[el.dataset.change]) C[el.dataset.change](el, e);
 });
 document.addEventListener('input', e => {
+  if (e.target.id === 'dueQ') {
+    S.dueF.q = e.target.value; const pos = e.target.selectionStart; render();
+    const s = $('#dueQ'); s.focus(); s.setSelectionRange(pos, pos); return;
+  }
   if (e.target.id === 'search') {
     S.search = e.target.value; const pos = e.target.selectionStart; render();
     const s = $('#search'); s.focus(); s.setSelectionRange(pos, pos);

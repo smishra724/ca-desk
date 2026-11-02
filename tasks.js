@@ -308,11 +308,16 @@ export function initTasks(ctx) {
   };
   T.dashCard = () => {
     const open = S.tasks.filter(t => !['Completed', 'Cancelled'].includes(t.status));
+    const cols = { 'Not started': '#94a3b8', 'In progress': '#3b82f6', 'Waiting on client': '#f59e0b', 'Under review': '#8b5cf6' };
+    const total = open.length || 1;
+    const seg = Object.entries(cols).map(([s, c]) => { const n = open.filter(t => t.status === s).length; return n ? `<i style="width:${n / total * 100}%;background:${c}" title="${s}: ${n}"></i>` : ''; }).join('');
     const by = {}; for (const t of open) by[t.assignee || 'Unassigned'] = (by[t.assignee || 'Unassigned'] || 0) + 1;
-    return `<section class="card"><div class="row-between"><h2>Tasks</h2><button class="sm" data-act="go" data-v="tasks">Open task board →</button></div>
-      <div class="pills">${BOARD.filter(s => s !== 'Completed').map(s => `<span class="pillstat">${s}: <b>${open.filter(t => t.status === s).length}</b></span>`).join('')}
-        <span class="pillstat red">Overdue: <b>${open.filter(overdue).length}</b></span></div>
-      <div class="pills">${Object.entries(by).map(([k, n]) => `<span class="pillstat">${esc(k)}: <b>${n}</b></span>`).join('') || '<span class="muted small">No open tasks.</span>'}</div></section>`;
+    return `<section class="card"><div class="row-between"><h2>Tasks</h2><button class="sm" data-act="go" data-v="tasks">Task board →</button></div>
+      ${open.length ? `<div class="stack">${seg}</div>
+      <div class="legend">${Object.entries(cols).map(([s, c]) => `<span><i style="background:${c}"></i>${s} <b>${open.filter(t => t.status === s).length}</b></span>`).join('')}
+        <span class="red"><i style="background:var(--red)"></i>Overdue <b>${open.filter(overdue).length}</b></span></div>
+      <div class="pills">${Object.entries(by).map(([k, n]) => `<span class="pillstat">${esc(k)} <b>${n}</b></span>`).join('')}</div>`
+      : `<div class="empty-state small">No open tasks. <a href="#" data-act="genTasks">Generate this month's tasks</a> from the compliance calendar.</div>`}</section>`;
   };
 
   /* ---------- workflow masters ---------- */
