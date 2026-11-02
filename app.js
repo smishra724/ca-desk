@@ -240,7 +240,8 @@ function vDashboard() {
     <div class="stat"><b>${up.length}</b><span>Due in ${S.dashDays} days</span></div>
   </div>
   ${T.dashCard()}
-  <section class="card"><h2>Overdue returns</h2>${tbl(od)}</section>
+  <section class="card"><div class="row-between wrap"><h2>Overdue returns <span class="muted">(${od.length})</span></h2>
+    ${od.length ? '<button class="sm" data-act="bulkFiled">Mark past returns as filed…</button>' : ''}</div>${tbl(od)}</section>
   <section class="card"><div class="row-between"><h2>Upcoming</h2>
     <select data-change="dashDays">${[15, 30, 45, 60, 90].map(d => `<option ${d === S.dashDays ? 'selected' : ''} value="${d}">Next ${d} days</option>`).join('')}</select></div>
     ${tbl(up)}
@@ -653,6 +654,18 @@ const A = {
   },
 
   /* compliance */
+  bulkFiled: () => {
+    const od = dashRows().filter(r => r.overdue);
+    const kinds = [...new Set(od.map(r => r.form.replace(/ — .*$/, '')))].sort();
+    modal(`<h2>Mark past returns as filed</h2>
+      <p class="muted small">Use this once to clear returns you have already filed outside CA Desk. Only items listed under “Overdue returns” are affected; you can undo any single one from the client's Compliance tab.</p>
+      <form data-form="bulkFiled" class="grid">
+        <label>Due on or before<input type="date" name="upto" value="${todayISO()}" required></label>
+        <label>Filed on (optional)<input type="date" name="filedOn"></label>
+        <div class="span2"><h3>Return types</h3><div class="senddocs">${kinds.map(k => `<label class="chk"><input type="checkbox" name="k" value="${esc(k)}" checked> ${esc(k)} <span class="muted tiny">${od.filter(r => r.form.replace(/ — .*$/, '') === k).length}</span></label>`).join('')}</div></div>
+        <div class="span2 btns"><button class="primary">Mark as filed</button><button type="button" data-act="closeModal">Cancel</button></div>
+      </form>`);
+  },
   markFiled: ({ cid, key }) => {
     modal(`<h2>Mark as filed</h2><form data-form="filed" data-cid="${cid}" data-key="${key}" class="grid narrow">
       <label>Filed on<input type="date" name="filedOn" value="${todayISO()}" required></label>
@@ -813,6 +826,19 @@ const F = {
     if (id) Object.assign(regs.find(x => x.id === id), r); else regs.push({ id: newRegId(), ...r });
     closeModal(); await saveRegs(regs);
   }, 'GST registration saved'),
+  bulkFiled: fd => guard(async () => {
+    const upto = new Date(fd.get('upto') + 'T23:59'), kinds = new Set(fd.getAll('k'));
+    const rows = dashRows().filter(r => r.overdue && r.due <= upto && kinds.has(r.form.replace(/ — .*$/, '')));
+    if (!rows.length) throw new Error('Nothing matches.');
+    if (!confirm(`Mark ${rows.length} return(s) as filed?`)) return;
+    let b = writeBatch(db), n = 0;
+    for (const r of rows) {
+      const data = { status: 'filed', filedOn: fd.get('filedOn') || '', ack: '', remarks: 'Bulk-marked (filed before CA Desk)', by: S.profile.email, at: serverTimestamp() };
+      b.set(doc(db, 'clients', r.c.id, 'filings', r.key), data); S.allFilings[`${r.c.id}|${r.key}`] = data;
+      if (++n % 400 === 0) { await b.commit(); b = writeBatch(db); }
+    }
+    await b.commit(); closeModal(); render(); toast(`${n} return(s) marked as filed`);
+  }),
   filed: (fd, form) => guard(async () => {
     const { cid, key } = form.dataset;
     const data = { status: 'filed', filedOn: fd.get('filedOn'), ack: fd.get('ack').trim(), remarks: fd.get('remarks').trim(), by: S.profile.email, at: serverTimestamp() };
