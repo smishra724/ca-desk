@@ -1,10 +1,10 @@
-// Paste the values from Firebase console → Project settings → Your apps → Web app → SDK setup and configuration.
-// These keys are not secret; your data is protected by firestore.rules.
+// Firebase web-app keys for project ca-desk-ee7b0. These keys are not secret;
+// data is protected by firestore.rules.
 export const firebaseConfig = {
-  apiKey: "PASTE_API_KEY",
-  authDomain: "PASTE_PROJECT_ID.firebaseapp.com",
-  projectId: "PASTE_PROJECT_ID",
-  storageBucket: "PASTE_PROJECT_ID.appspot.com",
-  messagingSenderId: "PASTE_SENDER_ID",
-  appId: "PASTE_APP_ID"
+  apiKey: "AIzaSyAyaC8rkXpw-Kt22aXNWBRCcroC9jVieW0",
+  authDomain: "ca-desk-ee7b0.firebaseapp.com",
+  projectId: "ca-desk-ee7b0",
+  storageBucket: "ca-desk-ee7b0.firebasestorage.app",
+  messagingSenderId: "849362120388",
+  appId: "1:849362120388:web:bbd75bb35f298a6fdfe391"
 };

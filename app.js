@@ -432,7 +432,10 @@ function vSettings() {
     ${LOCAL ? '<p class="muted small">In local mode everything lives in this browser. Download a backup regularly and keep it safe — clearing browser data deletes it. The backup also moves your data to another computer or into Firebase later.</p>'
       : '<p class="muted small">Your data is stored in Firebase. A backup file is still useful as an offline copy.</p>'}
     <div class="btns"><button class="primary" data-act="backup">Download full backup</button>
-    ${LOCAL ? '<label class="filebtn ghostbtn">Restore from backup<input type="file" accept=".json" data-change="restore"></label>' : ''}</div>
+    ${LOCAL ? '<label class="filebtn ghostbtn">Restore from backup<input type="file" accept=".json" data-change="restore"></label>'
+      : `<label class="filebtn ghostbtn">Import backup file into cloud<input type="file" accept=".json" data-change="cloudImport"></label>
+         <button data-act="importLocal">Move this browser's local data to cloud</button>`}</div>
+    ${LOCAL ? '' : '<p class="muted small">Import adds or overwrites clients, logins, documents, tasks and workflow from the backup. Logins and firm settings are not changed.</p>'}
   </section>
   ${LOCAL ? '' : `<section class="card">
     <h2>Staff logins</h2>
@@ -460,6 +463,13 @@ async function loadStaff() {
 /* ================= actions ================= */
 const A = {
   logout: () => signOut(auth),
+  importLocal: () => guard(async () => {
+    const docs = await readLocalIDB();
+    const keys = Object.keys(docs).filter(k => k.startsWith('clients/') || k.startsWith('tasks/') || k === 'meta/workflow' || k === 'meta/counters');
+    if (!keys.length) throw new Error('No local data found in this browser.');
+    if (!confirm(`Move ${Object.keys(docs).filter(k => /^clients\/[^/]+$/.test(k)).length} client(s) and ${keys.filter(k => /^tasks\//.test(k)).length} task(s) from this browser into the cloud?`)) return;
+    await afterImport(await importDocs(docs));
+  }),
   backup: () => guard(async () => {
     let json;
     if (LOCAL) json = M.exportAll();
@@ -720,6 +730,11 @@ const F = {
 
 /* ================= change handlers ================= */
 const C = {
+  cloudImport: el => {
+    const f = el.files[0]; if (!f) return;
+    if (!confirm('Import this backup into the cloud database? Records with the same IDs will be overwritten.')) return;
+    guard(async () => { const n = await importDocs(JSON.parse(await f.text()).docs || {}); await afterImport(n); });
+  },
   restore: el => {
     const f = el.files[0]; if (!f) return;
     if (!confirm('Replace ALL data in this browser with the backup? Current data will be overwritten.')) return;
@@ -829,6 +844,48 @@ async function deleteDocFile(cid, id) {
 function saveBlob(blob, name) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+/* ================= import into cloud ================= */
+function readLocalIDB() {
+  return new Promise((ok, bad) => {
+    const r = indexedDB.open('ca-desk-local', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('docs');
+    r.onerror = () => bad(r.error);
+    r.onsuccess = () => {
+      const out = {}, idb = r.result;
+      if (!idb.objectStoreNames.contains('docs')) return ok(out);
+      const c = idb.transaction('docs').objectStore('docs').openCursor();
+      c.onsuccess = () => { const cur = c.result; if (cur) { out[cur.key] = cur.value; cur.continue(); } else ok(out); };
+      c.onerror = () => bad(c.error);
+    };
+  });
+}
+const revive = v => {
+  if (Array.isArray(v)) return v.map(revive);
+  if (v && typeof v === 'object') {
+    if ('__ts' in v) return new Date(v.__ts);
+    if ('seconds' in v && Object.keys(v).length <= 2 && typeof v.seconds === 'number') return new Date(v.seconds * 1000);
+    const o = {}; for (const [k, x] of Object.entries(v)) o[k] = revive(x); return o;
+  }
+  return v;
+};
+async function importDocs(docs) {
+  const keys = Object.keys(docs).filter(k => k.startsWith('clients/') || k.startsWith('tasks/') || k === 'meta/workflow' || k === 'meta/counters');
+  let batch = writeBatch(db), n = 0, inBatch = 0;
+  for (const k of keys) {
+    const data = revive(docs[k]);
+    if (/^clients\/[^/]+$/.test(k)) data.portalUsers = [];
+    batch.set(doc(db, ...k.split('/')), data);
+    n++;
+    if (++inBatch >= (k.includes('/chunks/') ? 5 : 200)) { busy(true, `Importing… ${n} of ${keys.length}`); await batch.commit(); batch = writeBatch(db); inBatch = 0; }
+  }
+  await batch.commit();
+  return n;
+}
+async function afterImport(n) {
+  await loadClients(); await loadAllFilings(); await T.load(); render(); loadStaff();
+  toast(`Imported ${n} records into the cloud`, 5000);
 }
 
 /* ================= task manager ================= */
