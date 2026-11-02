@@ -1238,7 +1238,9 @@ async function folderAttach(files) {
     try { await saveFile(it.c, f, it.t); existing[it.c].add(`${f.name}|${f.size}`); added++; }
     catch (e) { failed.push(`${it.p} (${niceErr(e)})`); }
   }
-  await setDoc(doc(db, 'meta', 'docImport'), { lastRun: serverTimestamp(), lastAdded: added }, { merge: true });
+  // keep only what is still to do, so the list of file names doesn't linger where client logins could read it
+  const left = items.filter(it => names[it.c] && !byPath.get(it.p.toLowerCase()));
+  await setDoc(doc(db, 'meta', 'docImport'), { items: left, lastRun: serverTimestamp(), lastAdded: added });
   if (S.cid && S.view === 'client') S.docs = (await getDocs(collection(db, 'clients', S.cid, 'docs'))).docs.map(d => ({ id: d.id, ...d.data() }));
   S.attachReport = `<div class="note"><b>${added}</b> document(s) attached${had ? `, ${had} were already there` : ''}.
     ${missing.length ? `<details><summary>${missing.length} file(s) not found in the chosen folder</summary><div class="tiny mono">${missing.map(esc).join('<br>')}</div></details>` : ''}
