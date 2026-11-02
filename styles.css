@@ -212,3 +212,4 @@ button.wa{background:#1f9d55;border-color:#1f9d55;color:#fff}
 .cbx{width:32px}.cbx input{width:auto;margin:0}
 .selbar{display:flex;align-items:center;gap:10px;background:var(--brand-2);border-radius:8px;padding:8px 12px;margin:4px 0 8px}
 .chips .cat{font-weight:600}.chips .cat.itr{background:#f1ecfe;color:#6d3fd1}.chips .cat.biz{background:#e8f0fe;color:#1a56c4}
+.card .filebtn + .note{margin-top:12px}

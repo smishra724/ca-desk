@@ -390,6 +390,7 @@ function vClients() {
         <button class="primary" data-act="fromDoc" data-mode="new">+ New client from documents</button>
         <button data-act="newClient" data-cat="${tab}">+ Blank client</button>
         <button data-act="driveOpen">Import from Google Drive</button>
+        ${LOCAL ? '' : '<label class="filebtn ghostbtn">Attach documents from folder<input type="file" webkitdirectory multiple data-change="folderAttach"></label>'}
         <button data-act="exportAll">Export all (Excel)</button>
       </div>
     </div>
@@ -629,6 +630,12 @@ function vSettings() {
     <h2>Firm</h2>
     <form data-form="firm" class="grid narrow"><label>Firm name<input name="firm" value="${esc(S.firm)}" required></label>
       <div class="span2"><button class="primary">Save</button></div></form>
+  </section>
+  <section class="card">
+    <h2>Attach documents from your computer</h2>
+    <p class="muted small">Choose your <b>DATA MANAGEMENT</b> folder. PAN, Aadhaar, incorporation certificates, MOA/AOA, GST registration certificates, TAN, Udyam and other certificates are attached to the right client's Documents tab. Files already attached are skipped, so it is safe to run again.</p>
+    <label class="filebtn primarybtn">Choose DATA MANAGEMENT folder<input type="file" webkitdirectory multiple data-change="folderAttach"></label>
+    ${S.attachReport || ''}
   </section>
   <section class="card">
     <h2>Google Drive</h2>
@@ -1072,6 +1079,12 @@ const C = {
   dashDays: el => { S.dashDays = +el.value; render(); },
   selClient: el => { el.checked ? S.sel.add(el.value) : S.sel.delete(el.value); render(); },
   selAll: el => { document.querySelectorAll('[data-change=selClient]').forEach(i => el.checked ? S.sel.add(i.value) : S.sel.delete(i.value)); render(); },
+  folderAttach: el => {
+    const files = [...el.files]; el.value = '';
+    if (!files.length) return;
+    let n = 0;
+    guard(async () => { n = await folderAttach(files); render(); }).then(() => { if (n) toast(`${n} document(s) attached`); });
+  },
   dueF: el => { S.dueF[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; render(); },
   portalPick: el => { const u = el.form.elements.url; u.value = portalByKey(el.value).url; },
   uploadDocs: el => guard(async () => {
@@ -1200,6 +1213,37 @@ async function saveFile(cid, file, category) {
   }
   batch.set(ref, { name: file.name, mime: file.type || 'application/octet-stream', size: file.size, category: category || 'Other', chunks: n, uploadedAt: serverTimestamp(), uploadedBy: S.profile.email });
   await batch.commit();
+}
+// Attach certificates from a picked folder using the prepared list in meta/docImport ({items:[{p,c,t}]}).
+async function folderAttach(files) {
+  const m = (await getDoc(doc(db, 'meta', 'docImport'))).data();
+  const items = m?.items || [];
+  if (!items.length) throw new Error('No document list has been prepared yet.');
+  const byPath = new Map();
+  for (const f of files) {
+    const segs = (f.webkitRelativePath || f.name).split('/');
+    for (let k = 0; k < Math.min(segs.length, 4); k++) byPath.set(segs.slice(k).join('/').toLowerCase(), f);
+  }
+  const names = Object.fromEntries(S.clients.map(c => [c.id, c.name]));
+  const existing = {};
+  let added = 0, had = 0, done = 0; const missing = [], failed = [];
+  for (const it of items) {
+    done++;
+    if (!names[it.c]) continue; // client deleted since the list was made
+    const f = byPath.get(it.p.toLowerCase());
+    if (!f) { missing.push(it.p); continue; }
+    existing[it.c] ||= new Set((await getDocs(collection(db, 'clients', it.c, 'docs'))).docs.map(d => `${d.data().name}|${d.data().size}`));
+    if (existing[it.c].has(`${f.name}|${f.size}`)) { had++; continue; }
+    busy(true, `Attaching ${done} of ${items.length}: ${names[it.c]} – ${f.name}`);
+    try { await saveFile(it.c, f, it.t); existing[it.c].add(`${f.name}|${f.size}`); added++; }
+    catch (e) { failed.push(`${it.p} (${niceErr(e)})`); }
+  }
+  await setDoc(doc(db, 'meta', 'docImport'), { lastRun: serverTimestamp(), lastAdded: added }, { merge: true });
+  if (S.cid && S.view === 'client') S.docs = (await getDocs(collection(db, 'clients', S.cid, 'docs'))).docs.map(d => ({ id: d.id, ...d.data() }));
+  S.attachReport = `<div class="note"><b>${added}</b> document(s) attached${had ? `, ${had} were already there` : ''}.
+    ${missing.length ? `<details><summary>${missing.length} file(s) not found in the chosen folder</summary><div class="tiny mono">${missing.map(esc).join('<br>')}</div></details>` : ''}
+    ${failed.length ? `<details open><summary>${failed.length} failed</summary><div class="tiny">${failed.map(esc).join('<br>')}</div></details>` : ''}</div>`;
+  return added;
 }
 async function deleteDocFile(cid, id) {
   for (const c of (await getDocs(collection(db, 'clients', cid, 'docs', id, 'chunks'))).docs) await deleteDoc(c.ref);
