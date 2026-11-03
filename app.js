@@ -45,6 +45,25 @@ const FIELDS = [
   ['audit', 'Tax audit applicable', 'bool'], ['advTax', 'Advance tax applicable', 'bool'],
   ['people', 'Partners / directors (name, DIN)', 'textarea'], ['notes', 'Notes', 'textarea'],
 ];
+// Which master fields apply to each constitution, and what they are called there.
+// Fields not listed in `hide` are shown; `name` overrides the label.
+const CONS_FORM = {
+  'Individual': { hide: ['cin', 'people', 'tan'], name: { doi: 'Date of birth', aadhaar: 'Aadhaar' } },
+  'Proprietorship': { hide: ['cin', 'people'], name: { doi: 'Date of birth (proprietor)', aadhaar: 'Aadhaar (proprietor)', name: 'Legal name (proprietor)' } },
+  'HUF': { hide: ['cin'], name: { doi: 'Date of creation', aadhaar: 'Aadhaar (Karta)', people: 'Karta & coparceners' } },
+  'Partnership Firm': { hide: ['cin', 'aadhaar'], name: { doi: 'Date of partnership deed', people: 'Partners (name, PAN, share %)' } },
+  'LLP': { hide: ['aadhaar'], name: { cin: 'LLPIN', doi: 'Date of incorporation', people: 'Designated partners (name, DPIN)' } },
+  'Private Ltd': { hide: ['aadhaar'], name: { cin: 'CIN', doi: 'Date of incorporation', people: 'Directors (name, DIN)' } },
+  'Public Ltd': { hide: ['aadhaar'], name: { cin: 'CIN', doi: 'Date of incorporation', people: 'Directors (name, DIN)' } },
+  'OPC': { hide: ['aadhaar'], name: { cin: 'CIN', doi: 'Date of incorporation', people: 'Director & nominee (name, DIN)' } },
+  'Trust': { hide: ['aadhaar'], name: { cin: 'Registration no.', doi: 'Date of registration', people: 'Trustees' } },
+  'Society': { hide: ['aadhaar'], name: { cin: 'Registration no.', doi: 'Date of registration', people: 'Governing body members' } },
+  'AOP/BOI': { hide: ['aadhaar', 'cin'], name: { doi: 'Date of formation', people: 'Members' } },
+};
+const formFields = cons => {
+  const r = CONS_FORM[cons]; if (!r) return FIELDS;
+  return FIELDS.filter(f => !r.hide.includes(f[0])).map(f => r.name[f[0]] ? [f[0], r.name[f[0]], ...f.slice(2)] : f);
+};
 const label = k => (FIELDS.find(f => f[0] === k) || [k, k])[1];
 const UPPER = new Set(['pan', 'gstin', 'tan', 'cin']);
 // GST details live in the client's registrations list (one entry per GSTIN), not in the master form
@@ -458,7 +477,7 @@ function vClient() {
 function fieldInput([k, l, type, opts], v) {
   if (type === 'bool') return `<label class="chk"><input type="checkbox" name="${k}" ${v ? 'checked' : ''}> ${l}</label>`;
   let inp;
-  if (type === 'select') inp = `<select name="${k}"><option value=""></option>${opts.map(o => `<option ${o === v ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+  if (type === 'select') inp = `<select name="${k}" ${k === 'constitution' ? 'data-change="consChange"' : ''}><option value=""></option>${opts.map(o => `<option ${o === v ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
   else if (type === 'textarea') inp = `<textarea name="${k}" rows="3">${esc(v)}</textarea>`;
   else if (type === 'date') inp = `<input type="date" name="${k}" value="${esc(v)}">`;
   else inp = `<input name="${k}" value="${esc(v)}" ${UPPER.has(k) ? 'class="mono up"' : ''}>`;
@@ -467,11 +486,12 @@ function fieldInput([k, l, type, opts], v) {
 function tMaster() {
   const c = S.client || {};
   if (!isAdmin()) {
-    return `<dl class="dl">${FIELDS.filter(f => c[f[0]] !== undefined && c[f[0]] !== '' && f[0] !== 'notes' && !GST_KEYS.has(f[0])).map(([k, l, t]) => `<dt>${l}</dt><dd>${
+    return `<dl class="dl">${formFields(c.constitution).filter(f => c[f[0]] !== undefined && c[f[0]] !== '' && f[0] !== 'notes' && !GST_KEYS.has(f[0])).map(([k, l, t]) => `<dt>${l}</dt><dd>${
       t === 'bool' ? (c[k] ? 'Yes' : 'No') : t === 'date' ? isoToDisp(c[k]) : k === 'aadhaar' ? 'XXXX XXXX ' + esc(String(c[k]).slice(-4)) : esc(c[k]).replace(/\n/g, '<br>')}</dd>`).join('')}</dl>`;
   }
   return `<form data-form="master" class="grid">
-    ${FIELDS.filter(f => f[2] !== 'bool' && !GST_KEYS.has(f[0])).map(f => fieldInput(f, c[f[0]])).join('')}
+    ${formFields(c.constitution).filter(f => f[2] !== 'bool' && !GST_KEYS.has(f[0])).map(f => fieldInput(f, c[f[0]])).join('')}
+    ${FIELDS.filter(f => f[2] !== 'bool' && !GST_KEYS.has(f[0]) && !formFields(c.constitution).some(x => x[0] === f[0]) && c[f[0]]).map(f => `<input type="hidden" name="${f[0]}" value="${esc(c[f[0]])}">`).join('')}
     <p class="span2 muted small">GSTINs are managed in the <a href="#" data-act="tab" data-t="gst">GST registrations</a> tab — add one per state.</p>
     <div class="span2 bools">${FIELDS.filter(f => f[2] === 'bool').map(f => fieldInput(f, c[f[0]])).join('')}</div>
     <div class="span2 btns"><button class="primary">Save master data</button>
@@ -1100,6 +1120,11 @@ const C = {
     if (!files.length) return;
     let n = 0;
     guard(async () => { n = await folderAttach(files); render(); }).then(() => { if (n) toast(`${n} document(s) attached`); });
+  },
+  consChange: el => { // keep what was typed, then redraw the form for the new constitution
+    const form = el.form, c = S.client ||= {};
+    for (const [k, , t] of FIELDS) { const e = form.elements[k]; if (!e) continue; c[k] = t === 'bool' ? e.checked : e.value; }
+    render();
   },
   dueF: el => { S.dueF[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; render(); },
   portalPick: el => { const u = el.form.elements.url; u.value = portalByKey(el.value).url; },
