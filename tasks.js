@@ -74,7 +74,7 @@ export function initTasks(ctx) {
   const me = () => S.profile?.name || S.profile?.email || 'Owner';
 
   S.wf = null; S.tasks = []; S.task = null;
-  S.tf = { q: '', assignee: '', dept: '', status: 'open', due: '', star: false, mode: 'board' };
+  S.tf = { q: '', assignee: '', dept: '', status: 'open', due: '', star: false, mode: 'list' };
 
   /* ---------- data ---------- */
   T.load = async () => {
@@ -134,6 +134,14 @@ export function initTasks(ctx) {
     S.allFilings[`${t.clientId}|${t.filingKey}`] = data; if (S.cid === t.clientId) S.filings[t.filingKey] = data;
   }
 
+  async function setStatus(t, to) {
+    if (!t || t.status === to) return;
+    const upd = { status: to };
+    if (to === 'Completed') upd.done = { ...t.done, acts: (t.list?.acts || []).map(() => true) };
+    await patch(t.id, upd, `Status: ${t.status} → ${to}`);
+    if (to === 'Completed') await syncFiling(t);
+  }
+
   /* ---------- filtering ---------- */
   function filtered() {
     const f = S.tf, q = f.q.toLowerCase(), today = todayISO();
@@ -145,7 +153,7 @@ export function initTasks(ctx) {
       (!f.dept || t.deptId === f.dept) &&
       (f.status === 'all' || (f.status === 'open' ? !['Completed', 'Cancelled'].includes(t.status) : t.status === f.status)) &&
       (!f.star || t.starred) &&
-      (!f.due || (f.due === 'overdue' ? overdue(t) : f.due === 'week' ? t.due && t.due <= wkISO : f.due === 'month' ? t.due && t.due <= moISO
+      (!f.due || (f.due === 'overdue' ? overdue(t) : f.due === 'today' ? t.due === today && !['Completed', 'Cancelled'].includes(t.status) : f.due === 'week' ? t.due && t.due <= wkISO : f.due === 'month' ? t.due && t.due <= moISO
         : f.due === 'unbilled' ? t.status === 'Completed' && !t.billed && t.fee > 0 : true))
     ).sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999') || a.no - b.no);
   }
@@ -164,44 +172,86 @@ export function initTasks(ctx) {
   };
   const initials = n => n ? n.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() : '—';
 
+  const STC = { 'Not started': 'ns', 'In progress': 'ip', 'Waiting on client': 'wc', 'Under review': 'ur', 'Completed': 'cp', 'Cancelled': 'cx' };
+  const daysTo = d => d ? Math.round((new Date(d + 'T00:00') - new Date(todayISO() + 'T00:00')) / 864e5) : null;
+  const dueBadge = t => {
+    if (!t.due || ['Completed', 'Cancelled'].includes(t.status)) return '';
+    const n = daysTo(t.due);
+    return n < 0 ? `<span class="dd late">${-n}d late</span>` : n === 0 ? '<span class="dd today">Today</span>' : n <= 3 ? `<span class="dd soon">${n}d left</span>` : `<span class="dd">${n}d left</span>`;
+  };
   T.vTasks = () => {
-    const f = S.tf, list = filtered();
-    const tabs = [['board', 'Board'], ['list', 'List'], ['time', 'Timesheet'], ['billing', 'Billing']]
+    const f = S.tf, list = filtered(), adm = isAdmin(), today = todayISO();
+    const sel = S.tsel ||= new Set();
+    const open = S.tasks.filter(t => !['Completed', 'Cancelled'].includes(t.status));
+    const mo = todayISO().slice(0, 7);
+    // counters across the top — each one is a filter
+    const ctr = [
+      ['open', '', 'Open', open.length, 'c-all'],
+      ['open', 'overdue', 'Overdue', open.filter(overdue).length, 'c-late'],
+      ['open', 'today', 'Due today', open.filter(t => t.due === today).length, 'c-today'],
+      ['Not started', '', 'Not started', open.filter(t => t.status === 'Not started').length, 'c-ns'],
+      ['In progress', '', 'In progress', open.filter(t => t.status === 'In progress').length, 'c-ip'],
+      ['Waiting on client', '', 'Waiting on client', open.filter(t => t.status === 'Waiting on client').length, 'c-wc'],
+      ['Under review', '', 'Under review', open.filter(t => t.status === 'Under review').length, 'c-ur'],
+      ['Completed', '', 'Completed', S.tasks.filter(t => t.status === 'Completed').length, 'c-cp'],
+    ];
+    const ctrHtml = ctr.map(([st, du, l, n, cls]) => `<button class="ctr ${cls} ${f.status === st && (f.due || '') === du ? 'on' : ''}" data-act="tctr" data-s="${st}" data-d="${du}"><b>${n}</b><span>${l}</span></button>`).join('');
+    // left panel: departments and staff with open counts
+    const base = S.tasks.filter(t => f.status === 'all' || (f.status === 'open' ? !['Completed', 'Cancelled'].includes(t.status) : t.status === f.status));
+    const deptRows = [['', 'All departments', base.length], ...S.wf.departments.map(d => [d.id, d.name, base.filter(t => t.deptId === d.id).length])]
+      .filter(([id, , n]) => !id || n).map(([id, l, n]) => `<button class="fl ${f.dept === id ? 'on' : ''}" data-act="tfset" data-k="dept" data-v="${id}"><span>${esc(l)}</span><b>${n}</b></button>`).join('');
+    const staff = [...new Set([...(S.wf.staff || []), ...base.map(t => t.assignee).filter(Boolean)])];
+    const staffRows = [['', 'Everyone', base.length], ...staff.map(n => [n, n, base.filter(t => t.assignee === n).length]), ['_none', 'Unassigned', base.filter(t => !t.assignee).length]]
+      .filter(([id, , n]) => !id || n).map(([id, l, n]) => `<button class="fl ${f.assignee === id ? 'on' : ''}" data-act="tfset" data-k="assignee" data-v="${esc(id)}"><span>${id && id !== '_none' ? `<i class="av">${esc(initials(l))}</i>` : ''}${esc(l)}</span><b>${n}</b></button>`).join('');
+    const modes = [['list', 'Register'], ['board', 'Board'], ['time', 'Timesheet'], ['billing', 'Billing']]
       .map(([m, l]) => `<button class="${f.mode === m ? 'on' : ''}" data-act="taskMode" data-m="${m}">${l}</button>`).join('');
-    const filters = `<div class="filters">
-      <input id="tq" placeholder="Search task no, client, work, period…" value="${esc(f.q)}">
-      <select data-change="tf" data-k="assignee"><option value="">All staff</option><option value="_none" ${f.assignee === '_none' ? 'selected' : ''}>Unassigned</option>${(S.wf.staff || []).map(s => `<option ${s === f.assignee ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select>
-      <select data-change="tf" data-k="dept"><option value="">All departments</option>${S.wf.departments.map(d => `<option value="${d.id}" ${d.id === f.dept ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select>
-      <select data-change="tf" data-k="status">${[['open', 'Open tasks'], ['all', 'All statuses'], ...STATUSES.map(s => [s, s])].map(([v, l]) => `<option value="${v}" ${v === f.status ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      <select data-change="tf" data-k="due">${[['', 'Any due date'], ['overdue', 'Overdue'], ['week', 'Due in 7 days'], ['month', 'Due this month'], ['unbilled', 'Completed, not billed']].map(([v, l]) => `<option value="${v}" ${v === f.due ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      <label class="chk"><input type="checkbox" data-change="tf" data-k="star" ${f.star ? 'checked' : ''}> ★ Bookmarked</label>
-    </div>`;
+    const stOpts = cur => STATUSES.map(x => `<option ${x === cur ? 'selected' : ''}>${x}</option>`).join('');
     let bodyHtml = '';
     if (f.mode === 'board') {
       bodyHtml = `<div class="board">${BOARD.filter(s => f.status === 'open' ? s !== 'Completed' : true).map(s => {
         const col = list.filter(t => t.status === s);
-        return `<div class="col" data-status="${s}"><div class="col-h">${s} <span class="muted">${col.length}</span></div>${col.map(card).join('') || '<div class="muted tiny empty">Drop tasks here</div>'}</div>`;
+        return `<div class="col" data-status="${s}"><div class="col-h"><span class="st ${STC[s]}">${s}</span><span class="muted">${col.length}</span></div>${col.map(card).join('') || '<div class="muted tiny empty">Drop tasks here</div>'}</div>`;
       }).join('')}</div>`;
     } else if (f.mode === 'list') {
-      bodyHtml = `<table class="tbl"><thead><tr><th>No.</th><th>Client</th><th>Work</th><th>Period</th><th>Due</th><th>Assignee</th><th>Status</th><th>Progress</th></tr></thead><tbody>
-        ${list.map(t => `<tr class="click ${overdue(t) ? 'od2' : ''}" data-act="openTask" data-id="${t.id}"><td class="mono nowrap">${t.starred ? '★ ' : ''}${tno(t)}</td>
-          <td>${esc(t.clientName)}</td><td>${esc(t.title)}<div class="muted tiny">${esc(t.dept)}</div></td><td>${esc(t.period)}</td>
-          <td class="nowrap ${overdue(t) ? 'red' : ''}">${isoToDisp(t.due)}</td><td>${esc(t.assignee || '—')}</td>
-          <td>${statusTag(t.status)}</td><td><div class="bar sm"><i style="width:${progress(t)}%"></i></div><span class="tiny muted">${progress(t)}%</span></td></tr>`).join('')
-          || '<tr><td colspan="8" class="muted empty">No tasks match.</td></tr>'}</tbody></table>`;
+      const nSel = [...sel].filter(id => list.some(t => t.id === id)).length;
+      bodyHtml = `${adm && nSel ? `<div class="bulkbar"><b>${nSel} selected</b>
+          <select data-change="tbulkStatus"><option value="">Set status…</option>${STATUSES.map(x => `<option>${x}</option>`).join('')}</select>
+          <select data-change="tbulkAssign"><option value="">Assign to…</option><option value="__none">Unassigned</option>${(S.wf?.staff || []).map(x => `<option>${esc(x)}</option>`).join('')}</select>
+          <button class="sm" data-act="tselClear">Clear</button></div>` : ''}
+        <div class="reg-wrap"><table class="reg"><thead><tr>
+          ${adm ? '<th class="cbx"><input type="checkbox" data-change="tselAll" aria-label="Select all"></th>' : ''}
+          <th>Task no.</th><th>Client</th><th>Work</th><th>Period</th><th>Assigned to</th><th>Due date</th><th>Status</th><th>Progress</th><th class="num">Fee</th></tr></thead><tbody>
+        ${list.map(t => { const p = progress(t); const c = S.clients.find(x => x.id === t.clientId); return `<tr class="${overdue(t) ? 'late' : ''} ${sel.has(t.id) ? 'sel' : ''}">
+          ${adm ? `<td class="cbx"><input type="checkbox" data-change="tsel" value="${t.id}" ${sel.has(t.id) ? 'checked' : ''}></td>` : ''}
+          <td class="nowrap"><a href="#" data-act="openTask" data-id="${t.id}" class="tno">${tno(t)}</a>${t.starred ? ' <span class="star">★</span>' : ''}${t.priority === 'Urgent' || t.priority === 'High' ? ` <span class="pri ${t.priority === 'Urgent' ? 'u' : 'h'}">${t.priority}</span>` : ''}</td>
+          <td><a href="#" data-act="openTask" data-id="${t.id}" class="cl">${esc(t.clientName || '—')}</a>${c?.pan || c?.gstin ? `<div class="sub mono">${esc(c.gstin || c.pan)}</div>` : ''}</td>
+          <td>${esc(t.title)}${t.dept ? `<div class="sub"><span class="dept">${esc(t.dept)}</span></div>` : ''}</td>
+          <td class="per" title="${esc(t.period || '')}">${esc((t.period || '—').replace(/\s*\(AY[^)]*\)/, ''))}</td>
+          <td class="nowrap">${t.assignee ? `<i class="av">${esc(initials(t.assignee))}</i>${esc(t.assignee)}` : '<span class="muted">Unassigned</span>'}</td>
+          <td class="nowrap">${t.due ? isoToDisp(t.due) : '<span class="muted">—</span>'} ${dueBadge(t)}</td>
+          <td>${adm ? `<select class="st-sel ${STC[t.status]}" data-change="tstat" data-id="${t.id}">${stOpts(t.status)}</select>` : `<span class="st ${STC[t.status]}">${esc(t.status)}</span>`}</td>
+          <td class="nowrap"><span class="pbar"><i style="width:${p}%" class="${p === 100 ? 'full' : ''}"></i></span><span class="pnum">${p}%</span></td>
+          <td class="num">${t.fee ? '₹' + (+t.fee).toLocaleString('en-IN') : '—'}</td></tr>`; }).join('')
+          || `<tr><td colspan="10" class="empty">No tasks match these filters. ${adm ? '<a href="#" data-act="genTasks">Generate tasks from the compliance calendar</a> or <a href="#" data-act="newTask">create one</a>.' : ''}</td></tr>`}
+        </tbody></table></div>
+        <div class="reg-foot">${list.length} task${list.length === 1 ? '' : 's'} shown · Fee total ₹${list.reduce((a, t) => a + (+t.fee || 0), 0).toLocaleString('en-IN')}</div>`;
     } else if (f.mode === 'time') bodyHtml = vTime();
     else bodyHtml = vBilling(list);
-    const open = S.tasks.filter(t => !['Completed', 'Cancelled'].includes(t.status));
+    const showSide = ['list', 'board', 'billing'].includes(f.mode);
     return `
-    <section class="card">
-      <div class="row-between wrap"><h2>Tasks <span class="muted">(${open.length} open · <span class="red">${open.filter(overdue).length} overdue</span>)</span></h2>
-        <div class="btns">${isAdmin() ? `<button class="primary" data-act="newTask">+ New task</button>
-          <button data-act="genTasks">Generate from compliance calendar</button>
-          <button data-act="go" data-v="workflow">Workflow & staff</button>` : ''}</div></div>
-      <div class="tabs inner">${tabs}</div>
-      ${['board', 'list', 'billing'].includes(f.mode) ? filters : ''}
-      ${bodyHtml}
-    </section>`;
+    <div class="tk">
+      <div class="tk-bar">
+        <div class="seg">${modes}</div>
+        <div class="tk-search"><input id="tq" placeholder="Search task no., client, work, period" value="${esc(f.q)}"></div>
+        <select data-change="tf" data-k="dept" class="tk-due"><option value="">All departments</option>${S.wf.departments.map(d => { const n = base.filter(t => t.deptId === d.id).length; return n || f.dept === d.id ? `<option value="${d.id}" ${d.id === f.dept ? 'selected' : ''}>${esc(d.name)} (${n})</option>` : ''; }).join('')}</select>
+        <select data-change="tf" data-k="assignee" class="tk-due"><option value="">Everyone</option>${staff.map(n => `<option ${n === f.assignee ? 'selected' : ''}>${esc(n)}</option>`).join('')}<option value="_none" ${f.assignee === '_none' ? 'selected' : ''}>Unassigned (${base.filter(t => !t.assignee).length})</option></select>
+        <select data-change="tf" data-k="due" class="tk-due">${[['', 'Any due date'], ['overdue', 'Overdue'], ['today', 'Due today'], ['week', 'Due in 7 days'], ['month', 'Due this month'], ['unbilled', 'Completed, not billed']].map(([v, l]) => `<option value="${v}" ${v === f.due ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <label class="chk"><input type="checkbox" data-change="tf" data-k="star" ${f.star ? 'checked' : ''}> Starred</label>
+        ${adm ? `<span class="tk-act"><button data-act="go" data-v="workflow">Work categories &amp; staff</button><button data-act="genTasks">Generate from calendar</button><button class="primary" data-act="newTask">New task</button></span>` : ''}
+      </div>
+      ${showSide ? `<div class="ctrs">${ctrHtml}</div>` : ''}
+      <section class="tk-main">${bodyHtml}</section>
+    </div>`;
   };
   const statusTag = s => `<span class="tag ${({ 'Completed': 'green', 'Waiting on client': 'amber', 'Under review': 'blue', 'In progress': 'blue', 'Cancelled': '' })[s] ?? ''}">${esc(s)}</span>`;
 
@@ -340,6 +390,9 @@ export function initTasks(ctx) {
   /* ---------- actions ---------- */
   Object.assign(A, {
     taskMode: ({ m }) => { S.tf.mode = m; render(); },
+    tctr: ({ s, d }) => { S.tf.status = s; S.tf.due = d || ''; S.tsel = new Set(); render(); },
+    tfset: ({ k, v }) => { S.tf[k] = v || ''; S.tsel = new Set(); render(); },
+    tselClear: () => { S.tsel = new Set(); render(); },
     openTask: ({ id }) => { S.task = id; S.view = 'task'; render(); window.scrollTo(0, 0); },
     newTask: ({ cid, multi, cat, title } = {}) => {
       S.newMulti = Array.isArray(multi) ? multi : null; // several clients picked on the Compliances page → one task each
@@ -486,6 +539,13 @@ export function initTasks(ctx) {
 
   /* ---------- change handlers ---------- */
   Object.assign(C, {
+    tstat: el => { const t = S.tasks.find(x => x.id === el.dataset.id); guard(async () => { await setStatus(t, el.value); render(); }, `${tno(t)}: ${el.value}`); },
+    tsel: el => { el.checked ? S.tsel.add(el.value) : S.tsel.delete(el.value); render(); },
+    tselAll: el => { for (const i of document.querySelectorAll('[data-change=tsel]')) el.checked ? S.tsel.add(i.value) : S.tsel.delete(i.value); render(); },
+    tbulkStatus: el => { const to = el.value; if (!to) return; const ids = [...S.tsel];
+      guard(async () => { for (const id of ids) await setStatus(S.tasks.find(x => x.id === id), to); S.tsel = new Set(); render(); }, `${ids.length} task(s) set to ${to}`); },
+    tbulkAssign: el => { const v = el.value; if (!v) return; const to = v === '__none' ? '' : v; const ids = [...S.tsel];
+      guard(async () => { for (const id of ids) { const t = S.tasks.find(x => x.id === id); if (t.assignee !== to) await patch(id, { assignee: to }, `Assigned to ${to || 'nobody'}`); } S.tsel = new Set(); render(); }, `${ids.length} task(s) reassigned`); },
     tf: el => { S.tf[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; render(); },
     tcheck: el => guard(async () => {
       const t = S.tasks.find(x => x.id === S.task), sec = el.dataset.sec, i = +el.dataset.i;
@@ -512,13 +572,7 @@ export function initTasks(ctx) {
     const col = e.target.closest?.('.col'); if (!col || !dragId) return; e.preventDefault();
     const t = S.tasks.find(x => x.id === dragId), to = col.dataset.status; dragId = null;
     if (!t || t.status === to || !isAdmin()) return render();
-    guard(async () => {
-      const upd = { status: to };
-      if (to === 'Completed') upd.done = { ...t.done, acts: (t.list?.acts || []).map(() => true) };
-      await patch(t.id, upd, `Status: ${t.status} → ${to}`);
-      if (to === 'Completed') await syncFiling(t);
-      render();
-    });
+    guard(async () => { await setStatus(t, to); render(); });
   });
 
   return T;
