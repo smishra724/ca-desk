@@ -228,3 +228,6 @@ button.wa{background:#1f9d55;border-color:#1f9d55;color:#fff}
 .cpanel{padding:4px 12px 10px}.cpanel .tbl{margin:0}
 .red{color:#c03030}
 @media (max-width:640px){.chead{grid-template-columns:1fr auto 16px}.ccount{grid-column:1/2;grid-row:2}.cdue{grid-column:2/3}}
+.hbar.click{cursor:pointer;border-radius:6px;padding:2px 4px;margin:0 -4px}.hbar.click:hover{background:#f1f3f5}.hbar.click:hover span{color:var(--brand);text-decoration:underline}
+.consbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:4px 0 8px}.consbar select{width:auto;margin-left:6px}
+.fchip{background:var(--brand-2);border-radius:16px;padding:4px 12px;font-size:13.5px}.fchip a{margin-left:6px}

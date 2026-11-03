@@ -307,7 +307,7 @@ function vDashboard() {
   const mix = {}; for (const c of S.clients) mix[c.constitution || 'Not set'] = (mix[c.constitution || 'Not set'] || 0) + 1;
   const mixMax = Math.max(...Object.values(mix), 1);
   const mixHtml = Object.entries(mix).sort((a, b) => b[1] - a[1]).map(([k, n]) =>
-    `<div class="hbar"><span>${esc(k)}</span><div><i style="width:${Math.max(4, n / mixMax * 100)}%"></i></div><b>${n}</b></div>`).join('');
+    `<div class="hbar click" data-act="mixOpen" data-k="${esc(k)}" title="Show ${esc(k)} clients"><span>${esc(k)}</span><div><i style="width:${Math.max(4, n / mixMax * 100)}%"></i></div><b>${n}</b></div>`).join('');
 
   // needs attention
   const noPan = S.clients.filter(c => !c.pan).length;
@@ -396,22 +396,24 @@ function vClients() {
   const tab = S.clientTab ||= 'business';
   const q = S.search.toLowerCase();
   const itr = S.clients.filter(isItrOnly), biz = S.clients.filter(c => !isItrOnly(c));
-  const base = tab === 'itr' ? itr : biz;
+  const cf = S.consF; // set from the dashboard's client mix: one constitution, across both tabs
+  const base = cf ? S.clients.filter(c => (c.constitution || 'Not set') === cf) : tab === 'itr' ? itr : biz;
   const list = base.filter(c => !q || [c.name, c.tradeName, c.pan, c.gstin, c.code, c.mobile, c.email, ...(c.gstins || []), ...regsOf(c).map(r => r.state)].some(v => (v || '').toLowerCase().includes(q)));
   const sel = S.sel ||= new Set();
   const fy = itrFy(), fyL = `FY ${fy}-${String(fy + 1).slice(2)}`;
   const itrStatus = c => { const f = S.allFilings[`${c.id}|ITR-${fy}`]; return f?.status === 'filed' ? `<span class="tag green">Filed${f.filedOn ? ' ' + isoToDisp(f.filedOn) : ''}</span>` : '<span class="tag amber">Pending</span>'; };
   const cb = c => isAdmin() ? `<td class="cbx" data-stop="1"><input type="checkbox" data-change="selClient" value="${c.id}" ${sel.has(c.id) ? 'checked' : ''}></td>` : '';
   const filedCount = itr.filter(c => S.allFilings[`${c.id}|ITR-${fy}`]?.status === 'filed').length;
-  const head = tab === 'itr'
+  const tv = cf ? 'business' : tab;
+  const head = tv === 'itr'
     ? `<tr>${isAdmin() ? '<th class="cbx"><input type="checkbox" data-change="selAll"></th>' : ''}<th>Name</th><th>PAN</th><th>Date of birth</th><th>Mobile / email</th><th>ITR ${fyL}</th><th></th></tr>`
     : `<tr>${isAdmin() ? '<th class="cbx"><input type="checkbox" data-change="selAll"></th>' : ''}<th>Code</th><th>Name</th><th>Constitution</th><th>PAN</th><th>GSTIN</th><th>Client login</th></tr>`;
-  const row = c => tab === 'itr'
+  const row = c => tv === 'itr'
     ? `<tr class="click" data-act="open" data-id="${c.id}">${cb(c)}<td><b>${esc(c.name || '—')}</b></td><td class="mono">${esc(c.pan) || '<span class="tag amber">No PAN</span>'}</td>
         <td class="nowrap">${isoToDisp(c.doi)}</td><td class="small">${esc(c.mobile)}${c.email ? `<div class="muted tiny">${esc(c.email)}</div>` : ''}</td><td>${itrStatus(c)}</td>
         <td class="nowrap" data-stop="1">${isAdmin() && S.allFilings[`${c.id}|ITR-${fy}`]?.status !== 'filed' ? `<button class="sm" data-act="markFiled" data-cid="${c.id}" data-key="ITR-${fy}">Mark filed</button>` : ''}</td></tr>`
     : `<tr class="click" data-act="open" data-id="${c.id}">${cb(c)}<td>${esc(c.code)}</td>
-        <td><b>${esc(c.name || '—')}</b>${c.tradeName ? `<div class="muted small">${esc(c.tradeName)}</div>` : ''}</td>
+        <td><b>${esc(c.name || '—')}</b>${cf && isItrOnly(c) ? ' <span class="tag">ITR only</span>' : ''}${c.tradeName ? `<div class="muted small">${esc(c.tradeName)}</div>` : ''}</td>
         <td>${esc(c.constitution)}</td><td class="mono">${esc(c.pan)}</td><td class="mono">${esc(regsOf(c)[0]?.gstin || '')}${regsOf(c).length > 1 ? ` <span class="tag blue">+${regsOf(c).length - 1} more</span>` : ''}</td>
         <td>${(c.portalUsers || []).filter(p => !p.revoked).length ? '<span class="tag green">Active</span>' : '<span class="tag">—</span>'}</td></tr>`;
   const nSel = [...sel].filter(id => base.some(c => c.id === id)).length;
@@ -428,13 +430,17 @@ function vClients() {
       </div>
     </div>
     <div class="tabs inner seg">
-      <button class="${tab === 'business' ? 'on' : ''}" data-act="clientTab" data-t="business">Business clients <span class="cnt">${biz.length}</span></button>
-      <button class="${tab === 'itr' ? 'on' : ''}" data-act="clientTab" data-t="itr">Individual – ITR only <span class="cnt">${itr.length}</span></button>
+      <button class="${tab === 'business' && !cf ? 'on' : ''}" data-act="clientTab" data-t="business">Business clients <span class="cnt">${biz.length}</span></button>
+      <button class="${tab === 'itr' && !cf ? 'on' : ''}" data-act="clientTab" data-t="itr">Individual – ITR only <span class="cnt">${itr.length}</span></button>
     </div>
-    ${tab === 'itr' ? `<p class="muted small">Clients here get only the yearly income tax return in their compliance calendar (plus advance tax if ticked). ITR ${fyL}: <b>${filedCount}</b> of ${itr.length} filed.</p>` : ''}
+    <div class="consbar"><label class="small muted">Constitution
+      <select data-change="consF"><option value="">All</option>${[...new Set(S.clients.map(c => c.constitution || 'Not set'))].sort().map(k => `<option ${k === cf ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></label>
+      ${cf ? `<span class="fchip">${esc(cf)}: <b>${base.length}</b> client${base.length === 1 ? '' : 's'} (Business + ITR) <a href="#" data-act="consClear">✕ clear</a></span>` : ''}</div>
+    ${tab === 'itr' && !cf ? `<p class="muted small">Clients here get only the yearly income tax return in their compliance calendar (plus advance tax if ticked). ITR ${fyL}: <b>${filedCount}</b> of ${itr.length} filed.</p>` : ''}
     <input id="search" class="search" placeholder="${tab === 'itr' ? 'Search name, PAN, mobile, email…' : 'Search name, PAN, any GSTIN, state, code, mobile…'}" value="${esc(S.search)}">
     ${isAdmin() && nSel ? `<div class="selbar"><b>${nSel} selected</b>
-      <button class="sm primary" data-act="moveSel" data-to="${tab === 'itr' ? 'business' : 'itr'}">Move to ${tab === 'itr' ? 'Business clients' : 'Individual – ITR only'}</button>
+      ${cf ? `<button class="sm primary" data-act="moveSel" data-to="itr">Move to Individual – ITR only</button><button class="sm" data-act="moveSel" data-to="business">Move to Business clients</button>`
+        : `<button class="sm primary" data-act="moveSel" data-to="${tab === 'itr' ? 'business' : 'itr'}">Move to ${tab === 'itr' ? 'Business clients' : 'Individual – ITR only'}</button>`}
       <button class="sm" data-act="selClear">Clear</button></div>` : ''}
     <table class="tbl"><thead>${head}</thead><tbody>
     ${list.map(row).join('') || `<tr><td colspan="7" class="muted empty">${q ? 'No match.' : tab === 'itr' ? 'No ITR-only clients. Move individuals here from Business clients.' : 'No clients yet.'}</td></tr>`}
@@ -749,7 +755,9 @@ const A = {
   tab: ({ t }) => { S.tab = t; render(); },
   dueToggle: ({ k }) => { const o = S.dueOpen ||= new Set(); o.has(k) ? o.delete(k) : o.add(k); render(); },
   dueAll: ({ v }) => { S.dueOpen = new Set(); if (v) for (const b of document.querySelectorAll('[data-act=dueToggle]')) S.dueOpen.add(b.dataset.k); render(); },
-  clientTab: ({ t }) => { S.clientTab = t; S.sel = new Set(); render(); },
+  mixOpen: ({ k }) => { S.consF = k; S.search = ''; S.sel = new Set(); S.view = 'clients'; render(); },
+  consClear: () => { S.consF = ''; render(); },
+  clientTab: ({ t }) => { S.consF = ''; S.clientTab = t; S.sel = new Set(); render(); },
   selClear: () => { S.sel = new Set(); render(); },
   moveSel: ({ to }) => {
     const ids = [...S.sel]; if (!ids.length) return;
@@ -1126,6 +1134,7 @@ const C = {
     for (const [k, , t] of FIELDS) { const e = form.elements[k]; if (!e) continue; c[k] = t === 'bool' ? e.checked : e.value; }
     render();
   },
+  consF: el => { S.consF = el.value; S.sel = new Set(); render(); },
   dueF: el => { S.dueF[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; render(); },
   portalPick: el => { const u = el.form.elements.url; u.value = portalByKey(el.value).url; },
   uploadDocs: el => guard(async () => {
