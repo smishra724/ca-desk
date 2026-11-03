@@ -40,6 +40,9 @@ export function isItrOnly(c) {
   return (c?.constitution === 'Individual' || (!c?.constitution && (c?.pan || '')[3] === 'P')) && !activeRegs(c).length;
 }
 
+// Compliance code from a due-item key: "GSTR1-2026-10@09AB…" → "GSTR1", "ADV2-2025" → "ADV", "MSME1H1-2025" → "MSME1"
+export const codeOf = key => { const p = key.split('@')[0].split('-')[0]; return /^ADV\d$/.test(p) ? 'ADV' : p.replace(/H\d$/, ''); };
+
 export function dueItems(c, from, to) {
   const out = [];
   if (isItrOnly(c)) c = { ...c, gstRegs: [], gstin: '', tds: false, pfesic: false, constitution: c.constitution || 'Individual', _itr: true };
@@ -126,7 +129,8 @@ export function dueItems(c, from, to) {
       add(`DIR3-${fy}`, 'DIR-3 KYC (partners)', L, new Date(ay, 8, 30));
     }
   }
-  return out.sort((a, b) => a.due - b.due || a.form.localeCompare(b.form));
+  const off = new Set(c.off || []); // compliances switched off for this client on the Compliances page
+  return out.filter(i => !off.has(codeOf(i.key))).sort((a, b) => a.due - b.due || a.form.localeCompare(b.form));
 }
 
 export const fmtDate = d => d ? `${pad(d.getDate())}-${MON[d.getMonth()]}-${d.getFullYear()}` : '';

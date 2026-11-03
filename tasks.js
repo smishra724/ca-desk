@@ -341,16 +341,19 @@ export function initTasks(ctx) {
   Object.assign(A, {
     taskMode: ({ m }) => { S.tf.mode = m; render(); },
     openTask: ({ id }) => { S.task = id; S.view = 'task'; render(); window.scrollTo(0, 0); },
-    newTask: ({ cid }) => {
-      modal(`<h2>New task</h2><form data-form="newTask" class="grid">
-        <label class="span2">Client<select name="clientId" required><option value=""></option>${S.clients.map(c => `<option value="${c.id}" ${c.id === (cid || '') ? 'selected' : ''}>${esc(c.name)}${c.gstin ? ' · ' + c.gstin : ''}</option>`).join('')}</select></label>
-        <label class="span2">Work category<select name="catId" required>${S.wf.departments.map(d => `<optgroup label="${esc(d.name)}">${d.categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</optgroup>`).join('')}</select></label>
+    newTask: ({ cid, multi, cat, title } = {}) => {
+      S.newMulti = Array.isArray(multi) ? multi : null; // several clients picked on the Compliances page → one task each
+      const names = S.newMulti ? S.newMulti.map(id => S.clients.find(c => c.id === id)?.name).filter(Boolean) : [];
+      modal(`<h2>New task${S.newMulti ? ` for ${names.length} clients` : ''}</h2><form data-form="newTask" class="grid">
+        ${S.newMulti ? `<div class="span2 small"><b>Clients:</b> <span class="muted">${esc(names.slice(0, 12).join(', '))}${names.length > 12 ? ` and ${names.length - 12} more` : ''}</span></div>`
+          : `<label class="span2">Client<select name="clientId" required><option value=""></option>${S.clients.map(c => `<option value="${c.id}" ${c.id === (cid || '') ? 'selected' : ''}>${esc(c.name)}${c.gstin ? ' · ' + c.gstin : ''}</option>`).join('')}</select></label>`}
+        <label class="span2">Work category<select name="catId" required>${S.wf.departments.map(d => `<optgroup label="${esc(d.name)}">${d.categories.map(c => `<option value="${c.id}" ${c.id === cat ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>`).join('')}</select></label>
         <label>Period<input name="period" placeholder="e.g. Oct 2026 / FY 2025-26"></label>
         <label>Due date<input type="date" name="due"></label>
         <label>Assign to<select name="assignee"><option value="__dept">Department default</option>${staffOpts('', 'Unassigned')}</select></label>
         <label>Priority<select name="priority">${PRIORITIES.map(p => `<option ${p === 'Normal' ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
         <label>Fee (₹)<input type="number" name="fee" min="0"></label>
-        <label>Title (optional)<input name="title" placeholder="Defaults to the work category"></label>
+        <label>Title (optional)<input name="title" value="${esc(title || '')}" placeholder="Defaults to the work category"></label>
         <div class="span2 btns"><button class="primary">Create task</button><button type="button" data-act="closeModal">Cancel</button></div></form>`);
     },
     genTasks: () => {
@@ -409,6 +412,12 @@ export function initTasks(ctx) {
   Object.assign(F, {
     newTask: fd => guard(async () => {
       const a = fd.get('assignee');
+      if (S.newMulti) {
+        const ids = S.newMulti; S.newMulti = null;
+        for (const cid of ids) await createTask({ clientId: cid, catId: fd.get('catId'), period: fd.get('period').trim(), due: fd.get('due'),
+          priority: fd.get('priority'), fee: fd.get('fee'), title: fd.get('title').trim() || undefined, assignee: a === '__dept' ? undefined : a });
+        closeModal(); S.view = 'tasks'; render(); toast(`${ids.length} task(s) created`); return;
+      }
       const id = await createTask({ clientId: fd.get('clientId'), catId: fd.get('catId'), period: fd.get('period').trim(), due: fd.get('due'),
         priority: fd.get('priority'), fee: fd.get('fee'), title: fd.get('title').trim() || undefined, assignee: a === '__dept' ? undefined : a });
       closeModal(); S.task = id; S.view = 'task'; render();

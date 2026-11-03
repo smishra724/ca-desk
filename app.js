@@ -1,7 +1,7 @@
 import { firebaseConfig } from './firebase-config.js';
 import { PORTALS, portalByKey } from './portals.js';
 import { extractFromFile, toISO, STATE_CODES } from './extract.js';
-import { dueItems, fmtDate, regsOf, activeRegs, filingFor, isItrOnly } from './compliance.js';
+import { dueItems, fmtDate, regsOf, activeRegs, filingFor, isItrOnly, codeOf } from './compliance.js';
 import { initTasks } from './tasks.js';
 import { initSend } from './send.js';
 import { initDriveImport } from './drive-import.js';
@@ -210,7 +210,7 @@ async function openClient(cid, tab) {
 /* ================= rendering ================= */
 function render() {
   if (!S.profile) return;
-  const nav = isAdmin() ? [['dashboard', 'Dashboard'], ['due', 'Due dates'], ['tasks', 'Tasks'], ['clients', 'Clients'], ['import', 'Excel import'], ['settings', 'Settings']]
+  const nav = isAdmin() ? [['dashboard', 'Dashboard'], ['due', 'Due dates'], ['tasks', 'Tasks'], ['clients', 'Clients'], ['comps', 'Compliances'], ['import', 'Excel import'], ['settings', 'Settings']]
     .map(([v, l]) => `<button class="nav ${(S.view === v || (v === 'tasks' && ['task', 'workflow'].includes(S.view))) ? 'on' : ''}" data-act="go" data-v="${v}">${l}</button>`).join('') : '';
   $('#app').innerHTML = `
   <header class="top">
@@ -229,6 +229,7 @@ function body() {
     case 'client': return vClient();
     case 'import': return vImport();
     case 'settings': return vSettings();
+    case 'comps': return vComps();
     case 'tasks': return T.vTasks();
     case 'task': return T.vTask();
     case 'workflow': return T.vWorkflow();
@@ -663,6 +664,96 @@ function vImport() {
   </section>`;
 }
 
+/* ---------- compliances: pick a compliance / task, tick the clients it applies to ---------- */
+// type 'flag' = client opt-in flag (drives the calendar); 'auto' = applies by law (GSTIN / constitution), can be switched off per client;
+// 'service' = work you do that has no statutory due date (stored in client.services)
+const COMPS = [
+  { id: 'GSTR1', name: 'GSTR-1 / IFF', type: 'auto', codes: ['GSTR1', 'IFF'], grp: 'GST' },
+  { id: 'GSTR3B', name: 'GSTR-3B / PMT-06', type: 'auto', codes: ['GSTR3B', 'PMT06'], grp: 'GST' },
+  { id: 'CMP08', name: 'CMP-08 (composition)', type: 'auto', codes: ['CMP08'], grp: 'GST' },
+  { id: 'GSTR9', name: 'GSTR-9 annual return', type: 'auto', codes: ['GSTR9'], grp: 'GST' },
+  { id: 'GSTR4', name: 'GSTR-4 annual return', type: 'auto', codes: ['GSTR4'], grp: 'GST' },
+  { id: 'ITR', name: 'Income tax return', type: 'auto', codes: ['ITR'], grp: 'Income tax' },
+  { id: 'audit', name: 'Tax audit (3CD)', type: 'flag', flag: 'audit', grp: 'Income tax' },
+  { id: 'advTax', name: 'Advance tax', type: 'flag', flag: 'advTax', grp: 'Income tax' },
+  { id: 'tds', name: 'TDS / TCS (payment & returns)', type: 'flag', flag: 'tds', grp: 'TDS & payroll' },
+  { id: 'pfesic', name: 'PF / ESIC', type: 'flag', flag: 'pfesic', grp: 'TDS & payroll' },
+  { id: 'AOC4', name: 'AOC-4 (financials)', type: 'auto', codes: ['AOC4'], grp: 'ROC' },
+  { id: 'MGT7', name: 'MGT-7 / 7A', type: 'auto', codes: ['MGT7'], grp: 'ROC' },
+  { id: 'DPT3', name: 'DPT-3', type: 'auto', codes: ['DPT3'], grp: 'ROC' },
+  { id: 'DIR3', name: 'DIR-3 KYC', type: 'auto', codes: ['DIR3'], grp: 'ROC' },
+  { id: 'MSME1', name: 'MSME-1', type: 'auto', codes: ['MSME1'], grp: 'ROC' },
+  { id: 'LLP11', name: 'LLP Form 11', type: 'auto', codes: ['LLP11'], grp: 'ROC' },
+  { id: 'LLP8', name: 'LLP Form 8', type: 'auto', codes: ['LLP8'], grp: 'ROC' },
+  { id: 'BOOKS', name: 'Monthly bookkeeping', type: 'service', grp: 'Other work' },
+  { id: 'FS', name: 'Finalisation of accounts', type: 'service', grp: 'Other work' },
+  { id: 'GEN', name: 'General work', type: 'service', grp: 'Other work' },
+];
+const compById = id => COMPS.find(x => x.id === id) || (id.startsWith('svc:') ? { id, name: id.slice(4), type: 'service', grp: 'Other work' } : null);
+// clients the law makes it possible for (ignoring this client's own switch-offs)
+const compEligible = (cp, c) => {
+  if (cp.type !== 'auto') return true;
+  const y = new Date().getFullYear(), its = dueItems({ ...c, off: [] }, new Date(y - 1, 0, 1), new Date(y + 1, 11, 31));
+  return its.some(i => cp.codes.includes(codeOf(i.key)));
+};
+const compOn = (cp, c) => cp.type === 'flag' ? !!c[cp.flag] && !isItrOnly(c)
+  : cp.type === 'service' ? (c.services || []).includes(cp.id)
+  : compEligible(cp, c) && !cp.codes.some(k => (c.off || []).includes(k));
+function vComps() {
+  const svcExtra = [...new Set(S.clients.flatMap(c => c.services || []).filter(x => x.startsWith('svc:')))].map(compById);
+  const all = [...COMPS, ...svcExtra];
+  const cnt = cp => S.clients.filter(c => compOn(cp, c)).length;
+  const groups = [...new Set(all.map(x => x.grp))];
+  const sel = S.compSel && compById(S.compSel);
+  return `
+  <section class="card">
+    <div class="row-between wrap"><h2>Compliances &amp; work</h2><button class="sm" data-act="compNew">+ Add other work</button></div>
+    <p class="muted small">Click a compliance or task to see and tick the clients it applies to. The due-dates calendar and task generation follow these ticks.</p>
+    ${groups.map(g => `<h3 class="cgrp">${esc(g)}</h3><div class="cbtns">${all.filter(x => x.grp === g).map(cp => `
+      <button class="compbtn ${S.compSel === cp.id ? 'on' : ''}" data-act="compOpen" data-id="${esc(cp.id)}"><span>${esc(cp.name)}</span><b>${cnt(cp)}</b></button>`).join('')}</div>`).join('')}
+  </section>
+  ${sel ? compPanel(sel) : ''}`;
+}
+function compPanel(cp) {
+  const q = (S.compQ || '').toLowerCase(), cf = S.compCons || '';
+  const elig = S.clients.filter(c => compEligible(cp, c) && !(cp.type === 'flag' && isItrOnly(c)));
+  const pick = S.compPick ||= new Set(elig.filter(c => compOn(cp, c)).map(c => c.id));
+  const shown = elig.filter(c => (!cf || (c.constitution || 'Not set') === cf) && (!q || [c.name, c.tradeName, c.pan, c.gstin].some(v => (v || '').toLowerCase().includes(q))))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const notElig = S.clients.length - elig.length;
+  const why = cp.type === 'auto' ? `Only clients for whom ${esc(cp.name)} can arise are listed (GSTIN / filing type / constitution)${notElig ? ` — ${notElig} others don't qualify` : ''}.`
+    : cp.type === 'flag' ? `Ticking switches on ${esc(cp.name)} in the client's compliance calendar.${notElig ? ` ITR-only clients (${notElig}) are excluded.` : ''}`
+    : 'Work without a statutory due date. Use "Create tasks" to raise a task for every ticked client.';
+  return `<section class="card" id="compPanel">
+    <div class="row-between wrap"><h2>${esc(cp.name)} <span class="muted">(${pick.size} of ${elig.length} ticked)</span></h2>
+      <div class="btns"><button class="primary" data-act="compSave">Save</button>
+        <button data-act="compTasks">Create tasks for ticked clients…</button><button data-act="compClose">Close</button></div></div>
+    <p class="muted small">${why}</p>
+    <div class="filters">
+      <input id="compQ" placeholder="Search client, PAN, GSTIN…" value="${esc(S.compQ || '')}">
+      <select data-change="compCons"><option value="">All constitutions</option>${[...new Set(elig.map(c => c.constitution || 'Not set'))].sort().map(k => `<option ${k === cf ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>
+      <button class="sm" data-act="compAll" data-v="1">Tick all shown</button><button class="sm" data-act="compAll" data-v="">Untick all shown</button>
+    </div>
+    <div class="cgrid">${shown.map(c => `<label class="cpick ${pick.has(c.id) ? 'on' : ''}"><input type="checkbox" data-change="compPick" value="${c.id}" ${pick.has(c.id) ? 'checked' : ''}>
+      <span><b>${esc(c.name)}</b><span class="muted tiny">${esc(c.constitution || '')}${c.pan ? ' · ' + esc(c.pan) : ''}${regsOf(c).length ? ' · ' + regsOf(c).length + ' GSTIN' : ''}</span></span></label>`).join('') || '<p class="muted">No clients match.</p>'}</div>
+  </section>`;
+}
+async function compSave(cp) {
+  const pick = S.compPick; let b = writeBatch(db), n = 0, changed = 0;
+  for (const c of S.clients) {
+    if (!compEligible(cp, c) || (cp.type === 'flag' && isItrOnly(c))) continue;
+    const want = pick.has(c.id); if (want === compOn(cp, c)) continue;
+    let upd;
+    if (cp.type === 'flag') upd = { [cp.flag]: want };
+    else if (cp.type === 'service') { const sv = new Set(c.services || []); want ? sv.add(cp.id) : sv.delete(cp.id); upd = { services: [...sv] }; }
+    else { const off = new Set(c.off || []); for (const k of cp.codes) want ? off.delete(k) : off.add(k); upd = { off: [...off] }; }
+    b.update(doc(db, 'clients', c.id), { ...upd, updatedAt: serverTimestamp() }); Object.assign(c, upd); changed++;
+    if (S.client?.id === c.id) Object.assign(S.client, upd);
+    if (++n % 400 === 0) { await b.commit(); b = writeBatch(db); }
+  }
+  await b.commit(); return changed;
+}
+
 /* ---------- settings ---------- */
 function vSettings() {
   return `
@@ -757,6 +848,18 @@ const A = {
   dueAll: ({ v }) => { S.dueOpen = new Set(); if (v) for (const b of document.querySelectorAll('[data-act=dueToggle]')) S.dueOpen.add(b.dataset.k); render(); },
   mixOpen: ({ k }) => { S.consF = k; S.search = ''; S.sel = new Set(); S.view = 'clients'; render(); },
   consClear: () => { S.consF = ''; render(); },
+  compOpen: ({ id }) => { S.compSel = S.compSel === id ? null : id; S.compPick = null; S.compQ = ''; S.compCons = ''; render(); if (S.compSel) setTimeout(() => document.getElementById('compPanel')?.scrollIntoView({ behavior: 'smooth' }), 50); },
+  compClose: () => { S.compSel = null; S.compPick = null; render(); },
+  compAll: ({ v }) => { for (const i of document.querySelectorAll('[data-change=compPick]')) v ? S.compPick.add(i.value) : S.compPick.delete(i.value); render(); },
+  compSave: () => guard(async () => { const n = await compSave(compById(S.compSel)); S.compPick = null; render(); toast(n ? `Saved — ${n} client(s) updated` : 'No changes'); }),
+  compNew: () => { const n = prompt('Name of the work (e.g. Monthly MIS, Trademark renewal)'); if (n?.trim()) { S.compSel = 'svc:' + n.trim(); S.compPick = new Set(); render(); } },
+  compTasks: () => {
+    const cp = compById(S.compSel), ids = [...S.compPick];
+    if (!ids.length) return toast('Tick at least one client first');
+    guard(() => compSave(cp)); // keep the ticks as the clients this work applies to
+    const catId = cp.type === 'flag' ? ({ tds: 'TDSRET', pfesic: 'EPF', audit: '3CD', advTax: 'ADV' })[cp.id] : cp.type === 'service' ? (cp.id.startsWith('svc:') ? 'GEN' : cp.id) : cp.id;
+    A.newTask({ multi: ids, cat: catId, title: cp.id.startsWith('svc:') ? cp.name : '' });
+  },
   clientTab: ({ t }) => { S.consF = ''; S.clientTab = t; S.sel = new Set(); render(); },
   selClear: () => { S.sel = new Set(); render(); },
   moveSel: ({ to }) => {
@@ -1135,6 +1238,9 @@ const C = {
     render();
   },
   consF: el => { S.consF = el.value; S.sel = new Set(); render(); },
+  compPick: el => { el.checked ? S.compPick.add(el.value) : S.compPick.delete(el.value); el.closest('.cpick')?.classList.toggle('on', el.checked);
+    const h = document.querySelector('#compPanel h2 .muted'); if (h) h.textContent = h.textContent.replace(/^\(\d+/, '(' + S.compPick.size); },
+  compCons: el => { S.compCons = el.value; render(); },
   dueF: el => { S.dueF[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; render(); },
   portalPick: el => { const u = el.form.elements.url; u.value = portalByKey(el.value).url; },
   uploadDocs: el => guard(async () => {
@@ -1376,6 +1482,10 @@ document.addEventListener('input', e => {
   if (e.target.id === 'dueQ') {
     S.dueF.q = e.target.value; const pos = e.target.selectionStart; render();
     const s = $('#dueQ'); s.focus(); s.setSelectionRange(pos, pos); return;
+  }
+  if (e.target.id === 'compQ') {
+    S.compQ = e.target.value; const pos = e.target.selectionStart; render();
+    const s = $('#compQ'); s.focus(); s.setSelectionRange(pos, pos); return;
   }
   if (e.target.id === 'search') {
     S.search = e.target.value; const pos = e.target.selectionStart; render();
