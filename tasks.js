@@ -161,8 +161,31 @@ export function initTasks(ctx) {
   }
 
   /* ---------- filtering ---------- */
+  // Excel-style header filters: each column lists its values; S.tf.cf[col] = array of allowed values
+  const shortPer = p => (p || '').replace(/\s*\(AY[^)]*\)/, '');
+  const dueBucket = t => {
+    if (!t.due) return 'No due date';
+    const n = Math.round((new Date(t.due + 'T00:00') - new Date(todayISO() + 'T00:00')) / 864e5);
+    if (n < 0 && !['Completed', 'Cancelled'].includes(t.status)) return 'Overdue';
+    return n === 0 ? 'Today' : n > 0 && n <= 7 ? 'Next 7 days' : t.due.slice(0, 7) === todayISO().slice(0, 7) ? 'Later this month' : n < 0 ? 'Earlier (done)' : 'Later';
+  };
+  const DUE_ORDER = ['Overdue', 'Today', 'Next 7 days', 'Later this month', 'Later', 'Earlier (done)', 'No due date'];
+  const COLS = {
+    no: { label: 'Task no.', sort: t => t.no || 0 },
+    client: { label: 'Client', val: t => t.clientName || '—', sort: t => (t.clientName || '').toLowerCase() },
+    work: { label: 'Work', val: t => t.title || t.cat || '—', sort: t => (t.title || '').toLowerCase() },
+    dept: { label: 'Department', val: t => t.dept || '—' },
+    period: { label: 'Period', val: t => shortPer(t.period) || '—', sort: t => t.period || '' },
+    assignee: { label: 'Assigned to', val: t => t.assignee || 'Unassigned', sort: t => (t.assignee || '~').toLowerCase() },
+    due: { label: 'Due date', val: dueBucket, order: DUE_ORDER, sort: t => t.due || '9999' },
+    status: { label: 'Status', val: t => t.status, order: STATUSES, sort: t => STATUSES.indexOf(t.status) },
+    progress: { label: 'Progress', sort: t => progress(t) },
+    fee: { label: 'Fee', sort: t => +t.fee || 0 },
+  };
+  const colPass = (t, skip) => Object.entries(S.tf.cf || {}).every(([k, vals]) => k === skip || !vals || vals.includes(COLS[k].val(t)));
+
   // everything except the status / due-date filters (those are what the counters show)
-  function scoped() {
+  function scoped(skipCol) {
     const f = S.tf, q = f.q.toLowerCase();
     return S.tasks.filter(t =>
       (!q || [tno(t), t.clientName, t.title, t.cat, t.period, t.assignee].some(v => (v || '').toLowerCase().includes(q))) &&
@@ -170,7 +193,7 @@ export function initTasks(ctx) {
       (!f.dept || t.deptId === f.dept) &&
       (!f.client || t.clientId === f.client) && (!f.cat || t.catId === f.cat) && (!f.period || t.period === f.period) &&
       (!f.prio || (t.priority || 'Normal') === f.prio) && (!f.from || (t.due && t.due >= f.from)) && (!f.to || (t.due && t.due <= f.to)) &&
-      (!f.star || t.starred));
+      (!f.star || t.starred) && colPass(t, skipCol));
   }
   function filtered() {
     const f = S.tf, today = todayISO();
@@ -180,8 +203,33 @@ export function initTasks(ctx) {
       (f.status === 'all' || (f.status === 'open' ? !['Completed', 'Cancelled'].includes(t.status) : t.status === f.status)) &&
       (!f.due || (f.due === 'overdue' ? overdue(t) : f.due === 'today' ? t.due === today && !['Completed', 'Cancelled'].includes(t.status) : f.due === 'week' ? t.due && t.due <= wkISO : f.due === 'month' ? t.due && t.due <= moISO
         : f.due === 'unbilled' ? t.status === 'Completed' && !t.billed && t.fee > 0 : true))
-    ).sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999') || a.no - b.no);
+    ).sort((a, b) => {
+      const so = f.sort; if (so && COLS[so.k]?.sort) { const x = COLS[so.k].sort(a), y = COLS[so.k].sort(b); if (x < y) return -so.d; if (x > y) return so.d; }
+      return (a.due || '9999').localeCompare(b.due || '9999') || a.no - b.no;
+    });
   }
+  // the drop-down under a column header
+  function headMenu(k) {
+    const c = COLS[k], cur = S.tf.cf?.[k];
+    let vals = [];
+    if (c.val) {
+      const cnt = {}; for (const t of scoped(k)) { const v = c.val(t); cnt[v] = (cnt[v] || 0) + 1; }
+      for (const v of cur || []) cnt[v] ??= 0;
+      vals = Object.entries(cnt).sort((a, b) => c.order ? c.order.indexOf(a[0]) - c.order.indexOf(b[0]) : a[0].localeCompare(b[0]));
+    }
+    return `<div class="hmenu" data-col="${k}">
+      ${c.sort ? `<button class="hm-sort" data-act="hsort" data-k="${k}" data-d="1">${k === 'fee' || k === 'progress' || k === 'no' ? 'Sort smallest first' : k === 'due' ? 'Sort earliest first' : 'Sort A to Z'}</button>
+        <button class="hm-sort" data-act="hsort" data-k="${k}" data-d="-1">${k === 'fee' || k === 'progress' || k === 'no' ? 'Sort largest first' : k === 'due' ? 'Sort latest first' : 'Sort Z to A'}</button>` : ''}
+      ${c.val ? `${vals.length > 8 ? '<input class="hm-q" placeholder="Search values" data-hmq="1">' : ''}
+        <label class="hm-all"><input type="checkbox" data-hmall="1" ${!cur ? 'checked' : ''}> Select all</label>
+        <div class="hm-list">${vals.map(([v, n]) => `<label class="hm-v"><input type="checkbox" value="${esc(v)}" ${!cur || cur.includes(v) ? 'checked' : ''}><span>${esc(v)}</span><b>${n}</b></label>`).join('')}</div>
+        <div class="hm-btns"><button class="sm primary" data-act="happly" data-k="${k}">Apply</button><button class="sm" data-act="hclear" data-k="${k}">Clear</button></div>` : ''}
+    </div>`;
+  }
+  const thF = (k, extra = '') => {
+    const on = S.tf.cf?.[k] || S.tf.sort?.k === k;
+    return `<th class="hf ${on ? 'on' : ''} ${extra}"><button class="hbtn" data-act="hopen" data-k="${k}">${COLS[k].label}${S.tf.sort?.k === k ? (S.tf.sort.d > 0 ? ' ↑' : ' ↓') : ''}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 7v6l-4 2v-8z"/></svg></button></th>`;
+  };
 
   /* ---------- views ---------- */
   const card = t => {
@@ -244,7 +292,7 @@ export function initTasks(ctx) {
           <button class="sm" data-act="tselClear">Clear</button></div>` : ''}
         <div class="reg-wrap"><table class="reg"><thead><tr>
           ${adm ? '<th class="cbx"><input type="checkbox" data-change="tselAll" aria-label="Select all"></th>' : ''}
-          <th>Task no.</th><th>Client</th><th>Work</th><th>Period</th><th>Assigned to</th><th>Due date</th><th>Status</th><th>Progress</th><th class="num">Fee</th></tr></thead><tbody>
+          ${thF('no')}${thF('client')}${thF('work')}${thF('period')}${thF('assignee')}${thF('due')}${thF('status')}${thF('progress')}${thF('fee', 'num')}</tr></thead><tbody>
         ${list.map(t => { const p = progress(t); const c = S.clients.find(x => x.id === t.clientId); return `<tr class="${overdue(t) ? 'late' : ''} ${sel.has(t.id) ? 'sel' : ''}">
           ${adm ? `<td class="cbx"><input type="checkbox" data-change="tsel" value="${t.id}" ${sel.has(t.id) ? 'checked' : ''}></td>` : ''}
           <td class="nowrap"><a href="#" data-act="openTask" data-id="${t.id}" class="tno">${tno(t)}</a>${t.starred ? ' <span class="star">★</span>' : ''}${t.priority === 'Urgent' || t.priority === 'High' ? ` <span class="pri ${t.priority === 'Urgent' ? 'u' : 'h'}">${t.priority}</span>` : ''}</td>
@@ -267,39 +315,21 @@ export function initTasks(ctx) {
       <div class="tk-bar">
         <div class="seg">${modes}</div>
         <div class="tk-search"><input id="tq" placeholder="Search task no., client, work, period" value="${esc(f.q)}"></div>
-        <select data-change="tf" data-k="dept" class="tk-due"><option value="">All departments</option>${S.wf.departments.map(d => { const n = base.filter(t => t.deptId === d.id).length; return n || f.dept === d.id ? `<option value="${d.id}" ${d.id === f.dept ? 'selected' : ''}>${esc(d.name)} (${n})</option>` : ''; }).join('')}</select>
-        <select data-change="tf" data-k="assignee" class="tk-due"><option value="">Everyone</option>${staff.map(n => `<option ${n === f.assignee ? 'selected' : ''}>${esc(n)}</option>`).join('')}<option value="_none" ${f.assignee === '_none' ? 'selected' : ''}>Unassigned (${base.filter(t => !t.assignee).length})</option></select>
-        <select data-change="tf" data-k="due" class="tk-due">${[['', 'Any due date'], ['overdue', 'Overdue'], ['today', 'Due today'], ['week', 'Due in 7 days'], ['month', 'Due this month'], ['unbilled', 'Completed, not billed']].map(([v, l]) => `<option value="${v}" ${v === f.due ? 'selected' : ''}>${l}</option>`).join('')}</select>
         <label class="chk"><input type="checkbox" data-change="tf" data-k="star" ${f.star ? 'checked' : ''}> Starred</label>
-        <button class="${S.tfMore ? 'on-f' : ''}" data-act="tfMore">More filters${activeN() ? ` (${activeN()})` : ''}</button>
         ${adm ? `<span class="tk-act"><button data-act="go" data-v="workflow">Work categories &amp; staff</button><button data-act="genTasks">Generate from calendar</button><button class="primary" data-act="newTask">New task</button></span>` : ''}
       </div>
-      ${showSide ? moreFilters(base) : ''}
+      ${showSide ? filterChips() : ''}
       ${showSide ? `<div class="ctrs">${ctrHtml}</div>` : ''}
       <section class="tk-main">${bodyHtml}</section>
+      ${S.hf && f.mode === 'list' ? headMenu(S.hf) : ''}
     </div>`;
   };
-  const FKEYS = { client: 'Client', cat: 'Work', period: 'Period', prio: 'Priority', from: 'Due from', to: 'Due to', dept: 'Department', assignee: 'Assigned to', due: 'Due', star: 'Starred' };
-  const activeN = () => ['client', 'cat', 'period', 'prio', 'from', 'to'].filter(k => S.tf[k]).length;
-  function moreFilters(base) {
-    const f = S.tf;
-    const opt = (arr, cur) => arr.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
-    const clients = [...new Map(base.map(t => [t.clientId, t.clientName])).entries()].sort((a, b) => (a[1] || '').localeCompare(b[1] || ''));
-    const cats = [...new Map(base.map(t => [t.catId, t.cat || t.title])).entries()].sort((a, b) => (a[1] || '').localeCompare(b[1] || ''));
-    const periods = [...new Set(base.map(t => t.period).filter(Boolean))].sort();
-    const label = (k, v) => k === 'client' ? clients.find(c => c[0] === v)?.[1] || v : k === 'cat' ? cats.find(c => c[0] === v)?.[1] || v
-      : k === 'dept' ? S.wf.departments.find(d => d.id === v)?.name || v : k === 'assignee' && v === '_none' ? 'Unassigned'
-      : k === 'from' || k === 'to' ? isoToDisp(v) : k === 'star' ? 'Yes' : k === 'due' ? ({ overdue: 'Overdue', today: 'Today', week: 'In 7 days', month: 'This month', unbilled: 'Completed, not billed' })[v] || v : v;
-    const chips = Object.keys(FKEYS).filter(k => f[k]).map(k => `<span class="fchip2">${FKEYS[k]}: <b>${esc(label(k, f[k]))}</b><button data-act="tfset" data-k="${k}" data-v="" aria-label="Remove filter">✕</button></span>`).join('');
-    return `${S.tfMore ? `<div class="fpanel">
-        <label>Client<select data-change="tf" data-k="client"><option value="">All clients</option>${opt(clients, f.client)}</select></label>
-        <label>Work<select data-change="tf" data-k="cat"><option value="">All work</option>${opt(cats, f.cat)}</select></label>
-        <label>Period<select data-change="tf" data-k="period"><option value="">All periods</option>${opt(periods.map(p => [p, p]), f.period)}</select></label>
-        <label>Priority<select data-change="tf" data-k="prio"><option value="">Any</option>${opt(PRIORITIES.map(p => [p, p]), f.prio)}</select></label>
-        <label>Due from<input type="date" data-change="tf" data-k="from" value="${esc(f.from || '')}"></label>
-        <label>Due to<input type="date" data-change="tf" data-k="to" value="${esc(f.to || '')}"></label>
-      </div>` : ''}
-      ${chips ? `<div class="fchips">${chips}<button class="link" data-act="tfClear">Clear all filters</button></div>` : ''}`;
+  function filterChips() {
+    const f = S.tf, chips = [];
+    for (const [k, vals] of Object.entries(f.cf || {})) if (vals) chips.push(`<span class="fchip2">${COLS[k].label}: <b>${esc(vals.length > 2 ? `${vals.slice(0, 2).join(', ')} +${vals.length - 2}` : vals.join(', ') || 'none')}</b><button data-act="hclear" data-k="${k}" aria-label="Remove filter">✕</button></span>`);
+    if (f.sort) chips.push(`<span class="fchip2">Sorted by ${COLS[f.sort.k].label} ${f.sort.d > 0 ? '↑' : '↓'}<button data-act="hsortClear" aria-label="Remove sort">✕</button></span>`);
+    if (f.dept || f.assignee || f.due || f.client || f.cat || f.period || f.prio || f.from || f.to) chips.push(`<span class="fchip2">Dashboard filter<button data-act="tfClear" aria-label="Remove">✕</button></span>`);
+    return chips.length ? `<div class="fchips">${chips.join('')}<button class="link" data-act="tfClear">Clear all filters</button></div>` : '';
   }
   const statusTag = s => `<span class="tag ${({ 'Completed': 'green', 'Waiting on client': 'amber', 'Under review': 'blue', 'In progress': 'blue', 'Cancelled': '' })[s] ?? ''}">${esc(s)}</span>`;
 
@@ -441,11 +471,25 @@ export function initTasks(ctx) {
   /* ---------- actions ---------- */
   Object.assign(A, {
     taskMode: ({ m }) => { S.tf.mode = m; render(); },
-    tctr: ({ s, d }) => { S.tf.status = s; S.tf.due = d || ''; S.tsel = new Set(); render(); },
+    tctr: ({ s, d }) => { S.tf.status = s; S.tf.due = d || ''; if (S.tf.cf) S.tf.cf.status = null; S.tsel = new Set(); render(); },
     tfset: ({ k, v }) => { S.tf[k] = v || ''; S.tsel = new Set(); render(); },
     tselClear: () => { S.tsel = new Set(); render(); },
-    tfMore: () => { S.tfMore = !S.tfMore; render(); },
-    tfClear: () => { Object.assign(S.tf, { q: '', assignee: '', dept: '', status: 'open', due: '', star: false, client: '', cat: '', period: '', prio: '', from: '', to: '' }); S.tsel = new Set(); render(); },
+    hopen: ({ k }) => {
+      S.hf = S.hf === k ? null : k; render(); if (!S.hf) return;
+      // float the menu under its column header (outside the scrolling table so it is never cut off)
+      const b = document.querySelector(`.hbtn[data-k="${k}"]`)?.getBoundingClientRect(), m = document.querySelector('.hmenu');
+      if (b && m) { const w = m.offsetWidth; m.style.top = `${b.bottom + 4}px`; m.style.left = `${Math.max(8, Math.min(b.left, innerWidth - w - 12))}px`; }
+      m?.querySelector('.hm-q')?.focus();
+    },
+    hsort: ({ k, d }) => { S.tf.sort = { k, d: +d }; S.hf = null; render(); },
+    hsortClear: () => { S.tf.sort = null; render(); },
+    happly: ({ k }) => {
+      const box = document.querySelector(`.hmenu[data-col="${k}"]`); const all = [...box.querySelectorAll('.hm-v input')];
+      const on = all.filter(i => i.checked).map(i => i.value);
+      S.tf.cf ||= {}; S.tf.cf[k] = on.length === all.length ? null : on; if (k === 'status' && S.tf.cf[k]) { S.tf.status = 'all'; S.tf.due = ''; } S.hf = null; S.tsel = new Set(); render();
+    },
+    hclear: ({ k }) => { if (S.tf.cf) S.tf.cf[k] = null; S.hf = null; render(); },
+    tfClear: () => { Object.assign(S.tf, { q: '', assignee: '', dept: '', status: 'open', due: '', star: false, client: '', cat: '', period: '', prio: '', from: '', to: '', cf: {}, sort: null }); S.hf = null; S.tsel = new Set(); render(); },
     openTask: ({ id }) => { S.task = id; S.view = 'task'; render(); window.scrollTo(0, 0); },
     newTask: ({ cid, multi, cat, title } = {}) => {
       S.newMulti = Array.isArray(multi) ? multi : null; // several clients picked on the Compliances page → one task each
@@ -618,6 +662,19 @@ export function initTasks(ctx) {
   document.addEventListener('input', e => {
     if (e.target.id === 'tq') { S.tf.q = e.target.value; const pos = e.target.selectionStart; render(); const s = $('#tq'); s.focus(); s.setSelectionRange(pos, pos); }
   });
+  // header filter menus: search within values, select-all, close when clicking elsewhere
+  document.addEventListener('input', e => {
+    if (!e.target.dataset?.hmq) return;
+    const q = e.target.value.toLowerCase();
+    for (const l of e.target.closest('.hmenu').querySelectorAll('.hm-v')) l.style.display = l.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+  document.addEventListener('change', e => {
+    if (e.target.dataset?.hmall) for (const i of e.target.closest('.hmenu').querySelectorAll('.hm-v input')) if (i.closest('.hm-v').style.display !== 'none') i.checked = e.target.checked;
+    else if (e.target.closest?.('.hm-v')) { const m = e.target.closest('.hmenu'); const a = m.querySelector('[data-hmall]'); if (a) a.checked = [...m.querySelectorAll('.hm-v input')].every(i => i.checked); }
+  });
+  document.addEventListener('click', e => { if (S.hf && !e.target.closest('.hmenu') && !e.target.closest('.hbtn')) { S.hf = null; render(); } });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.hf) { S.hf = null; render(); } });
+  addEventListener('scroll', e => { if (S.hf && !e.target.closest?.('.hmenu')) { S.hf = null; render(); } }, true);
   let dragId = null;
   document.addEventListener('dragstart', e => { const c = e.target.closest?.('[data-tid]'); if (c) { dragId = c.dataset.tid; e.dataTransfer.effectAllowed = 'move'; } });
   document.addEventListener('dragover', e => { const col = e.target.closest?.('.col'); if (col && dragId) { e.preventDefault(); col.classList.add('over'); } });

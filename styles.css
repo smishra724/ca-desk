@@ -459,3 +459,22 @@ input:focus,select:focus,textarea:focus{outline:3px solid var(--brand-2);border-
 .fchip2 button:hover{color:var(--red);background:none}
 @media (max-width:1100px){.fpanel{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:600px){.fpanel{grid-template-columns:1fr 1fr}}
+/* header filters */
+.reg th.hf{padding:0;position:relative}
+.reg-wrap{overflow:auto}
+.hbtn{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:6px;width:100%;padding:9px 10px;cursor:pointer;white-space:nowrap;color:#E3E9F5;font-size:12px;font-weight:500}
+.hbtn svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2;stroke-linejoin:round;opacity:.55;margin-left:auto}
+.hbtn:hover{background:var(--ink-800)}.hbtn:hover svg{opacity:1}
+.reg th.hf.on .hbtn{color:var(--saffron)}.reg th.hf.on svg{opacity:1;fill:var(--saffron);stroke:var(--saffron)}
+.reg th.num .hbtn{justify-content:flex-end}
+.hmenu{position:fixed;z-index:40;min-width:240px;max-width:320px;background:#fff;color:var(--ink);border:1px solid var(--line);border-radius:10px;box-shadow:0 16px 40px rgba(21,35,63,.22);padding:8px;font-weight:400;text-align:left;white-space:normal}
+.hm-sort{display:block;width:100%;text-align:left;border:0;background:none;padding:6px 8px;border-radius:6px;font-size:13px}
+.hm-sort:hover{background:#F2F5FA}
+.hm-sort + .hm-sort{margin-bottom:6px;border-bottom:1px solid var(--line-2);border-radius:6px 6px 0 0}
+.hm-q{margin:4px 0 6px;padding:6px 8px;font-size:13px}
+.hm-all{display:flex;gap:8px;align-items:center;padding:5px 8px;font-size:13px;font-weight:600;color:var(--ink)}
+.hm-list{max-height:260px;overflow:auto;border-top:1px solid var(--line-2);border-bottom:1px solid var(--line-2);padding:4px 0}
+.hm-v{display:flex;gap:8px;align-items:center;padding:4px 8px;font-size:13px;font-weight:400;color:var(--ink);border-radius:5px;cursor:pointer}
+.hm-v:hover{background:#F2F5FA}.hm-v span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hm-v b{font-size:11.5px;color:var(--muted);font-weight:500}
+.hm-all input,.hm-v input{width:auto;margin:0}
+.hm-btns{display:flex;gap:6px;justify-content:flex-end;padding-top:8px}
