@@ -4,6 +4,7 @@ import { extractFromFile, toISO, STATE_CODES } from './extract.js';
 import { dueItems, fmtDate, regsOf, activeRegs, filingFor, isItrOnly, codeOf, flagOn } from './compliance.js';
 import { initTasks } from './tasks.js';
 import { initSend } from './send.js';
+import { initPayslips } from './payslips.js';
 import { initDriveImport } from './drive-import.js';
 
 // Local mode (no login, data in this browser) until firebase-config.js has real keys.
@@ -1646,13 +1647,16 @@ async function afterImport(n) {
 }
 
 /* ================= task manager ================= */
-const T = initTasks({ S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render: () => render(), db, remindBtns: (...a) => remindBtns(...a),
+const T = initTasks({ S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render: () => render(), db, remindBtns: (...a) => remindBtns(...a), payslipSection: t => PS.section(t),
   fs: { doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, where } });
 
 initDriveImport({ S, A, C, esc, toast, modal, closeModal, db, LOCAL, regsOf, regMirror, mergeReg, newRegId, stateOf, GSTIN_RE,
   saveFile, loadClients, render: () => render(), fs: { doc, getDoc, setDoc, updateDoc, addDoc, collection, serverTimestamp } });
 initSend({ S, A, C, esc, toast, modal, closeModal, regsOf, stateOf, isoToDisp, fmtDate, db, saveBlob,
   fs: { doc, getDocs, collection, updateDoc, arrayUnion } });
+
+const PS = initPayslips({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, db, saveBlob, busy, WA_ICON, MAIL_ICON,
+  fs: { doc, getDocs, setDoc, updateDoc, deleteDoc, collection, writeBatch, arrayUnion } });
 
 /* ================= event wiring ================= */
 document.addEventListener('click', e => {

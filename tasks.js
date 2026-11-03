@@ -73,7 +73,7 @@ const catForKey = key => {
 };
 
 export function initTasks(ctx) {
-  const { S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render, fs, remindBtns } = ctx;
+  const { S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render, fs, remindBtns, payslipSection } = ctx;
   const { doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, where } = fs;
   const db = ctx.db;
   const T = {};
@@ -444,7 +444,8 @@ export function initTasks(ctx) {
         <h2 class="mt">History</h2>
         <div class="log">${(t.log || []).slice().reverse().map(l => `<div class="small"><span class="muted tiny">${fmtDT(l.at)} · ${esc(l.by)}</span><br>${esc(l.text)}</div>`).join('')}</div>` : ''}
       </section>
-    </div>`;
+    </div>
+    ${adm ? payslipSection(t) : ''}`;
   };
   const fmtDT = s => { const d = new Date(s); return isNaN(d) ? '' : `${fmtDate(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 
