@@ -66,7 +66,7 @@ const catForKey = key => {
 };
 
 export function initTasks(ctx) {
-  const { S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render, fs } = ctx;
+  const { S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render, fs, remindBtns } = ctx;
   const { doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, where } = fs;
   const db = ctx.db;
   const T = {};
@@ -110,6 +110,8 @@ export function initTasks(ctx) {
       ${cur ? '' : '<option value="">No task yet</option>'}${STATUSES.map(x => `<option ${x === cur ? 'selected' : ''}>${x}</option>`).join('')}</select>
       ${t ? `<a href="#" class="tiny tlink" data-act="openTask" data-id="${t.id}">${tno(t)}${t.assignee ? ' · ' + esc(t.assignee) : ''}</a>` : ''}`;
   };
+  T.docsFor = (cid, key) => { const t = T.taskFor(cid, key); if (t) return (t.list?.docs || []).filter((d, i) => !t.done?.docs?.[i]); return findCat(catForKey(key))?.c.docs || []; };
+  T.logReminder = async (cid, key, text) => { const t = T.taskFor(cid, key); if (t) await patch(t.id, {}, text); };
   T.markDone = async (cid, key, ack) => {
     const t = T.taskFor(cid, key); if (!t || ['Completed', 'Cancelled'].includes(t.status)) return;
     await patch(t.id, { status: 'Completed', ack: ack || t.ack || '', done: { ...t.done, acts: (t.list?.acts || []).map(() => true) } }, `Status: ${t.status} → Completed (marked filed)`);
@@ -304,7 +306,7 @@ export function initTasks(ctx) {
           <button class="sm" data-act="tselClear">Clear</button></div>` : ''}
         <div class="reg-wrap"><table class="reg"><thead><tr>
           ${adm ? '<th class="cbx"><input type="checkbox" data-change="tselAll" aria-label="Select all"></th>' : ''}
-          ${thF('no')}${thF('client')}${thF('work')}${thF('period')}${thF('assignee')}${thF('due')}${thF('status')}${thF('progress')}${thF('fee', 'num')}</tr></thead><tbody>
+          ${thF('no')}${thF('client')}${thF('work')}${thF('period')}${thF('assignee')}${thF('due')}${thF('status')}${thF('progress')}${thF('fee', 'num')}<th class="rcol">Remind</th></tr></thead><tbody>
         ${list.map(t => { const p = progress(t); const c = S.clients.find(x => x.id === t.clientId); return `<tr class="${overdue(t) ? 'late' : ''} ${sel.has(t.id) ? 'sel' : ''}">
           ${adm ? `<td class="cbx"><input type="checkbox" data-change="tsel" value="${t.id}" ${sel.has(t.id) ? 'checked' : ''}></td>` : ''}
           <td class="nowrap"><a href="#" data-act="openTask" data-id="${t.id}" class="tno">${tno(t)}</a>${t.starred ? ' <span class="star">★</span>' : ''}${t.priority === 'Urgent' || t.priority === 'High' ? ` <span class="pri ${t.priority === 'Urgent' ? 'u' : 'h'}">${t.priority}</span>` : ''}</td>
@@ -315,8 +317,9 @@ export function initTasks(ctx) {
           <td class="nowrap">${t.due ? isoToDisp(t.due) : '<span class="muted">—</span>'} ${dueBadge(t)}</td>
           <td>${adm ? `<select class="st-sel ${STC[t.status]}" data-change="tstat" data-id="${t.id}">${stOpts(t.status)}</select>` : `<span class="st ${STC[t.status]}">${esc(t.status)}</span>`}</td>
           <td class="nowrap"><span class="pbar"><i style="width:${p}%" class="${p === 100 ? 'full' : ''}"></i></span><span class="pnum">${p}%</span></td>
-          <td class="num">${t.fee ? '₹' + (+t.fee).toLocaleString('en-IN') : '—'}</td></tr>`; }).join('')
-          || `<tr><td colspan="10" class="empty">No tasks match these filters. ${adm ? '<a href="#" data-act="genTasks">Generate tasks from the compliance calendar</a> or <a href="#" data-act="newTask">create one</a>.' : ''}</td></tr>`}
+          <td class="num">${t.fee ? '₹' + (+t.fee).toLocaleString('en-IN') : '—'}</td>
+          <td class="nowrap">${t.filingKey && !['Completed', 'Cancelled'].includes(t.status) ? remindBtns(t.clientId, t.filingKey) : ''}</td></tr>`; }).join('')
+          || `<tr><td colspan="11" class="empty">No tasks match these filters. ${adm ? '<a href="#" data-act="genTasks">Generate tasks from the compliance calendar</a> or <a href="#" data-act="newTask">create one</a>.' : ''}</td></tr>`}
         </tbody></table></div>
         <div class="reg-foot">${list.length} task${list.length === 1 ? '' : 's'} shown · Fee total ₹${list.reduce((a, t) => a + (+t.fee || 0), 0).toLocaleString('en-IN')}</div>`;
     } else if (f.mode === 'time') bodyHtml = vTime();

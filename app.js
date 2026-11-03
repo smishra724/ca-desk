@@ -438,12 +438,12 @@ function vDue() {
     .sort((x, y) => x.first - y.first || x.name.localeCompare(y.name));
   const today = dayStart(new Date());
   const days = d => { const n = Math.round((d - today) / 864e5); return n < 0 ? `${-n} day${n === -1 ? '' : 's'} overdue` : n === 0 ? 'due today' : `in ${n} day${n === 1 ? '' : 's'}`; };
-  const panel = g => `<div class="cpanel"><table class="tbl"><thead><tr><th>Client</th><th>Period</th><th>Due</th>${isAdmin() ? '<th>Task status</th>' : ''}<th></th></tr></thead><tbody>
+  const panel = g => `<div class="cpanel">${isAdmin() ? `<div class="cp-bar"><button class="sm" data-act="remindAll" data-k="${esc(g.name)}">${WA_ICON} Remind all ${g.clients} pending client${g.clients === 1 ? '' : 's'}</button></div>` : ''}<table class="tbl"><thead><tr><th>Client</th><th>Period</th><th>Due</th>${isAdmin() ? '<th>Task status</th>' : ''}<th></th></tr></thead><tbody>
     ${g.rs.map(r => `<tr class="${r.overdue ? 'od' : ''}">
       <td><a href="#" data-act="open" data-id="${r.c.id}" data-tab="compliance">${esc(r.c.name)}</a>${r.gstin ? `<div class="muted tiny"><span class="mono">${esc(r.gstin)}</span>${r.c.tradeName ? ' · ' + esc(r.c.tradeName) : ''}</div>` : r.c.tradeName ? `<div class="muted tiny">${esc(r.c.tradeName)}</div>` : ''}${r.note ? ` <span class="tag">${esc(r.note)}</span>` : ''}</td>
       <td>${esc(r.period)}</td><td class="nowrap">${fmtDate(r.due)}<div class="tiny ${r.overdue ? 'red' : 'muted'}">${days(r.due)}</div></td>
       ${isAdmin() ? `<td class="nowrap tstat">${T.statusSelect(r)}</td>` : ''}
-      <td>${isAdmin() ? `<button class="sm" data-act="markFiled" data-cid="${r.c.id}" data-key="${r.key}">Mark filed</button>` : ''}</td></tr>`).join('')}
+      <td class="nowrap">${isAdmin() ? `${remindBtns(r.c.id, r.key)} <button class="sm" data-act="markFiled" data-cid="${r.c.id}" data-key="${r.key}">Mark filed</button>` : ''}</td></tr>`).join('')}
     </tbody></table></div>`;
   return `
   <section class="card">
@@ -757,6 +757,75 @@ function vImport() {
 function autoTasks() {
   setTimeout(() => T.autoSync().then(n => { if (n) { render(); toast(`${n} new task(s) created for returns falling due`); } }).catch(e => console.warn('autoTasks', e)), 300);
 }
+/* ---------- reminders to clients on WhatsApp / email ---------- */
+const WA_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.2A9.7 9.7 0 0 0 3.6 16.8L2.3 21.7l5-1.3A9.7 9.7 0 1 0 12 2.2Zm0 17.7a8 8 0 0 1-4.1-1.1l-.3-.2-3 .8.8-2.9-.2-.3A8 8 0 1 1 12 19.9Zm4.4-6c-.2-.1-1.4-.7-1.7-.8-.2-.1-.4-.1-.5.1l-.8 1c-.1.2-.3.2-.5.1a6.6 6.6 0 0 1-3.3-2.9c-.2-.4.2-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.5-.4h-.5a.9.9 0 0 0-.7.3 2.8 2.8 0 0 0-.9 2.1 4.9 4.9 0 0 0 1 2.6 11.2 11.2 0 0 0 4.3 3.8c1.6.7 2.2.7 3 .6a2.5 2.5 0 0 0 1.7-1.2 2 2 0 0 0 .1-1.2c0-.1-.2-.2-.4-.3Z"/></svg>';
+const MAIL_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 6.5 8.5 6.5 8.5-6.5"/></svg>';
+const waNum = s => { const d = String(s || '').replace(/\D/g, ''); return d.length === 10 ? '91' + d : d.replace(/^0+/, ''); };
+function remindBtns(cid, key) {
+  const c = S.clients.find(x => x.id === cid) || {};
+  const last = (c.reminders || []).filter(r => (r.keys || []).includes(key)).pop();
+  return `<span class="rbtns"><button class="rb wa ${c.mobile ? '' : 'off'}" data-act="remind" data-cid="${cid}" data-keys="${esc(key)}" data-via="wa" title="${c.mobile ? 'WhatsApp ' + esc(c.mobile) : 'No mobile saved — add one when sending'}">${WA_ICON}</button><button class="rb em ${c.email ? '' : 'off'}" data-act="remind" data-cid="${cid}" data-keys="${esc(key)}" data-via="mail" title="${c.email ? 'Email ' + esc(c.email) : 'No email saved — add one when sending'}">${MAIL_ICON}</button></span>${last ? `<span class="rlast" title="Last reminder">${isoToDisp(isoLocalD(new Date(last.at)))} · ${last.via === 'wa' ? 'WhatsApp' : 'Email'}</span>` : ''}`;
+}
+// pending returns for a client, by key (works for GST "@GSTIN" keys too)
+function pendingFor(cid, keys) {
+  const c = S.clients.find(x => x.id === cid); const y = new Date().getFullYear();
+  return dueItems(c, new Date(y - 2, 0, 1), new Date(y + 1, 11, 31)).filter(it => keys.includes(it.key) || (it.altKey && keys.includes(it.altKey)));
+}
+function reminderText(c, items) {
+  const L = [`Dear ${c.name || 'Sir/Madam'},`, '', items.length > 1 ? 'Gentle reminder — the following are due:' : 'Gentle reminder — the following is due:', ''];
+  const docs = new Set();
+  for (const it of items) {
+    const late = it.due < dayStart(new Date());
+    L.push(`• ${it.form}${it.gstin ? ` (GSTIN ${it.gstin})` : ''} for ${it.period} — due ${fmtDate(it.due)}${late ? ' (overdue)' : ''}`);
+    for (const d of T.docsFor(c.id, it.key)) docs.add(d);
+  }
+  if (docs.size) { L.push('', 'Please share the following at the earliest:'); for (const d of docs) L.push(`  – ${d}`); }
+  L.push('', 'If already shared, kindly ignore this message.', '', 'Regards,', S.firm || '', S.profile?.name && S.profile.name !== S.firm ? S.profile.name : '');
+  return L.filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n').trim();
+}
+function openReminder(cid, keys, via) {
+  const c = S.clients.find(x => x.id === cid); const items = pendingFor(cid, keys);
+  S.remind = { cid, keys };
+  modal(`<h2>Send reminder — ${esc(c.name)}</h2>
+    <div class="grid">
+      <label>WhatsApp number<input id="rPhone" value="${esc(c.mobile || '')}" placeholder="10-digit mobile"></label>
+      <label>Email<input id="rEmail" type="email" value="${esc(c.email || '')}" placeholder="client@example.com"></label>
+      ${!c.mobile || !c.email ? '<label class="chk span2"><input type="checkbox" id="rSave" checked> Save the number / email to this client</label>' : ''}
+      <label class="span2">Message<textarea id="rMsg" rows="12">${esc(reminderText(c, items))}</textarea></label>
+    </div>
+    <div class="btns mt"><button class="primary wa" data-act="remindSend" data-via="wa">${WA_ICON} Send on WhatsApp</button>
+      <button data-act="remindSend" data-via="gmail">${MAIL_ICON} Send with Gmail</button><button data-act="remindSend" data-via="mail">Email app</button>
+      <button data-act="remindCopy">Copy message</button><button data-act="closeModal">Cancel</button></div>`);
+  setTimeout(() => document.querySelector(via === 'mail' ? '#rEmail' : '#rPhone')?.focus(), 50);
+}
+async function remindSend(via) {
+  const { cid, keys } = S.remind, c = S.clients.find(x => x.id === cid);
+  const phone = $('#rPhone').value.trim(), email = $('#rEmail').value.trim(), text = $('#rMsg').value;
+  const subject = `Reminder: ${[...new Set(pendingFor(cid, keys).map(i => `${baseForm(i.form)} ${i.period}`))].join(', ')} — ${S.firm || ''}`;
+  if (via === 'wa') { if (waNum(phone).length < 11) throw new Error('Enter the client\'s WhatsApp number.'); window.open(`https://wa.me/${waNum(phone)}?text=${encodeURIComponent(text)}`, '_blank', 'noopener'); }
+  else { if (!email) throw new Error('Enter the client\'s email.');
+    if (via === 'gmail') window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`, '_blank', 'noopener');
+    else location.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`; }
+  const rec = { at: new Date().toISOString(), by: S.profile?.email || '', via: via === 'wa' ? 'wa' : 'mail', to: via === 'wa' ? phone : email, keys };
+  const upd = { reminders: arrayUnion(rec) };
+  if ($('#rSave')?.checked) { if (phone && !c.mobile) upd.mobile = phone; if (email && !c.email) upd.email = email; }
+  await updateDoc(doc(db, 'clients', cid), upd);
+  c.reminders = [...(c.reminders || []), rec]; if (upd.mobile) c.mobile = upd.mobile; if (upd.email) c.email = upd.email;
+  for (const k of keys) await T.logReminder(cid, k, `Reminder sent on ${via === 'wa' ? 'WhatsApp' : 'email'} to ${rec.to}`);
+  closeModal(); render();
+}
+// a whole compliance group: one row per client, each with its own WhatsApp / email button
+function openBulkRemind(name) {
+  const rows = dueRows({ back: 365, ahead: 62, history: S.dueF?.history }).filter(r => baseForm(r.form) === name);
+  const by = new Map(); for (const r of rows) (by.get(r.c.id) || by.set(r.c.id, []).get(r.c.id)).push(r.key);
+  S.bulkRem = [...by.entries()];
+  modal(`<h2>Remind everyone pending — ${esc(name)}</h2>
+    <p class="muted small">WhatsApp can't send in bulk from a website, so each button opens WhatsApp (or email) with that client's message ready. Rows turn green once sent.</p>
+    <div class="bulkrem">${S.bulkRem.map(([cid, keys]) => { const c = S.clients.find(x => x.id === cid); return `<div class="br-row" id="br_${cid}"><span><b>${esc(c.name)}</b><small>${esc(c.mobile || 'no mobile')} · ${esc(c.email || 'no email')}</small></span>
+      <span class="rbtns"><button class="rb wa ${c.mobile ? '' : 'off'}" data-act="remindQuick" data-cid="${cid}" data-via="wa" title="WhatsApp">${WA_ICON}</button><button class="rb em ${c.email ? '' : 'off'}" data-act="remindQuick" data-cid="${cid}" data-via="gmail" title="Gmail">${MAIL_ICON}</button><button class="sm" data-act="remind" data-cid="${cid}" data-keys="${esc(keys.join(','))}" data-via="wa">Edit…</button></span></div>`; }).join('')}</div>
+    <div class="btns mt"><button data-act="closeModal">Done</button></div>`);
+}
+
 /* ---------- compliances: pick a compliance / task, tick the clients it applies to ---------- */
 // type 'flag' = client opt-in flag (drives the calendar); 'auto' = applies by law (GSTIN / constitution), can be switched off per client;
 // 'service' = work you do that has no statutory due date (stored in client.services)
@@ -960,6 +1029,19 @@ const A = {
   dueDay: ({ d }) => { S.dueDay = d; S.dueF ||= { range: '30', form: '', q: '', history: false }; if (new Date(d) < dayStart(new Date())) S.dueF.history = false; S.dueOpen = new Set(['*']); S.view = 'due'; render(); },
   dueDayClear: () => { S.dueDay = ''; S.dueOpen = new Set(); render(); },
   dueOverdue: () => { S.dueF ||= { range: '30', form: '', q: '', history: false }; S.dueF.range = 'overdue'; S.dueDay = ''; S.dueOpen = new Set(['*']); S.view = 'due'; render(); },
+  remind: ({ cid, keys, via }) => openReminder(cid, keys.split(','), via),
+  remindSend: ({ via }) => guard(() => remindSend(via), 'Reminder logged'),
+  remindCopy: () => { navigator.clipboard?.writeText($('#rMsg').value); toast('Message copied'); },
+  remindAll: ({ k }) => openBulkRemind(k),
+  remindQuick: ({ cid, via }) => guard(async () => {
+    const keys = S.bulkRem.find(x => x[0] === cid)[1], c = S.clients.find(x => x.id === cid), text = reminderText(c, pendingFor(cid, keys));
+    if (via === 'wa') { if (!c.mobile) throw new Error('No mobile saved for this client — use Edit… to add one.'); window.open(`https://wa.me/${waNum(c.mobile)}?text=${encodeURIComponent(text)}`, '_blank', 'noopener'); }
+    else { if (!c.email) throw new Error('No email saved for this client — use Edit… to add one.'); window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(c.email)}&su=${encodeURIComponent('Reminder — ' + (S.firm || ''))}&body=${encodeURIComponent(text)}`, '_blank', 'noopener'); }
+    const rec = { at: new Date().toISOString(), by: S.profile?.email || '', via: via === 'wa' ? 'wa' : 'mail', to: via === 'wa' ? c.mobile : c.email, keys };
+    await updateDoc(doc(db, 'clients', cid), { reminders: arrayUnion(rec) }); c.reminders = [...(c.reminders || []), rec];
+    for (const k of keys) await T.logReminder(cid, k, `Reminder sent on ${via === 'wa' ? 'WhatsApp' : 'email'} to ${rec.to}`);
+    document.getElementById('br_' + cid)?.classList.add('sent');
+  }),
   clientTab: ({ t }) => { S.consF = ''; S.clientTab = t; S.sel = new Set(); render(); },
   selClear: () => { S.sel = new Set(); render(); },
   moveSel: ({ to }) => {
@@ -1558,7 +1640,7 @@ async function afterImport(n) {
 }
 
 /* ================= task manager ================= */
-const T = initTasks({ S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render: () => render(), db,
+const T = initTasks({ S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render: () => render(), db, remindBtns: (...a) => remindBtns(...a),
   fs: { doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, where } });
 
 initDriveImport({ S, A, C, esc, toast, modal, closeModal, db, LOCAL, regsOf, regMirror, mergeReg, newRegId, stateOf, GSTIN_RE,
