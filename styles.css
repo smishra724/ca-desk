@@ -450,3 +450,12 @@ input:focus,select:focus,textarea:focus{outline:3px solid var(--brand-2);border-
 .tk-bar .tk-due{max-width:190px}
 @media (max-width:600px){.tk-bar .tk-due{max-width:none;flex:1 1 45%}.tk-act{flex-wrap:wrap}.tk-act button{flex:1}}
 .reg td.per{white-space:nowrap;max-width:none}
+.tk-bar button.on-f{background:var(--ink-900);color:#fff;border-color:var(--ink-900)}
+.fpanel{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px}
+.fpanel label{font-size:12px;color:var(--muted)}.fpanel select,.fpanel input{margin-top:3px}
+.fchips{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:10px}
+.fchip2{display:inline-flex;align-items:center;gap:4px;background:#E6EDFA;color:var(--ink-800);border-radius:6px;padding:2px 4px 2px 9px;font-size:12.5px}
+.fchip2 button{border:0;background:none;padding:0 5px;color:var(--ink-700);font-size:12px}
+.fchip2 button:hover{color:var(--red);background:none}
+@media (max-width:1100px){.fpanel{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:600px){.fpanel{grid-template-columns:1fr 1fr}}

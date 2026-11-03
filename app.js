@@ -134,7 +134,7 @@ async function boot(u) {
   S.profile = { uid: u.uid, email: u.email, ...p.data() };
   if (isAdmin()) {
     if (!S.trackFrom) { S.trackFrom = todayISO(); updateDoc(doc(db, 'meta', 'setup'), { trackFrom: S.trackFrom }).catch(() => {}); }
-    await loadClients(); await loadAllFilings(); await T.load(); loadGstLoginFlags(); S.view = 'dashboard';
+    await loadClients(); await loadAllFilings(); await T.load(); loadGstLoginFlags(); S.view = 'dashboard'; autoTasks();
   }
   else { await openClient(S.profile.clientId, 'master'); await T.loadForClient(S.profile.clientId).catch(() => {}); }
   render();
@@ -353,7 +353,7 @@ function vDashboard() {
   const noLogin = regs.filter(r => !r.c._hasGstLogin).length;
   const attn = [
     overdue.length && [`${overdue.length} return(s) overdue since ${isoToDisp(S.trackFrom)}`, 'go" data-v="due', 'red'],
-    noPan && [`${noPan} client(s) without PAN`, 'go" data-v="clients', 'amber'],
+    noPan && [`${noPan} client(s) without PAN`, 'cliShow" data-v="nopan', 'amber'],
     openTasks.filter(t => t.due && t.due < todayISO()).length && [`${openTasks.filter(t => t.due && t.due < todayISO()).length} task(s) past due date`, 'go" data-v="tasks', 'red'],
   ].filter(Boolean);
 
@@ -428,6 +428,9 @@ function vDue() {
   else if (f.range === 'overdue') rows = rows.filter(r => r.overdue);
   const allOpen = open.has('*');
   const q = f.q.toLowerCase(); if (q) rows = rows.filter(r => [r.c.name, r.c.tradeName, r.gstin, r.form].some(v => (v || '').toLowerCase().includes(q)));
+  const consList = [...new Set(rows.map(r => r.c.constitution || 'Not set'))].sort();
+  if (f.ctype) rows = rows.filter(r => f.ctype === 'itr' ? isItrOnly(r.c) : !isItrOnly(r.c));
+  if (f.cons) rows = rows.filter(r => (r.c.constitution || 'Not set') === f.cons);
   // one button per compliance, ordered by its earliest due date
   const groups = new Map();
   for (const r of rows) { const k = baseForm(r.form); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
@@ -448,6 +451,8 @@ function vDue() {
     <div class="filters">
       <select data-change="dueF" data-k="range">${[['overdue', 'Overdue only'], ['7', 'Next 7 days'], ['30', 'Next 30 days'], ['90', 'Next 90 days']].map(([v, l]) => `<option value="${v}" ${v === f.range ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <input id="dueQ" placeholder="Search client or GSTIN…" value="${esc(f.q)}">
+      <select data-change="dueF" data-k="ctype"><option value="">All clients</option><option value="business" ${f.ctype === 'business' ? 'selected' : ''}>Business clients</option><option value="itr" ${f.ctype === 'itr' ? 'selected' : ''}>Individual – ITR only</option></select>
+      <select data-change="dueF" data-k="cons"><option value="">All constitutions</option>${consList.map(k => `<option ${k === f.cons ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>
       <label class="chk"><input type="checkbox" data-change="dueF" data-k="history" ${f.history ? 'checked' : ''}> Include returns due before ${isoToDisp(S.trackFrom)}</label>
     </div>
     <p class="muted small">Tracking compliance from <b>${isoToDisp(S.trackFrom)}</b>. Returns due earlier are treated as filed before CA Desk. ${isAdmin() ? '<a href="#" data-act="setTrackFrom">Change</a>' : ''}</p>
@@ -474,7 +479,11 @@ function vClients() {
   const q = S.search.toLowerCase();
   const itr = S.clients.filter(isItrOnly), biz = S.clients.filter(c => !isItrOnly(c));
   const cf = S.consF; // set from the dashboard's client mix: one constitution, across both tabs
-  const base = cf ? S.clients.filter(c => (c.constitution || 'Not set') === cf) : tab === 'itr' ? itr : biz;
+  let base = cf ? S.clients.filter(c => (c.constitution || 'Not set') === cf) : tab === 'itr' ? itr : biz;
+  const stF = S.stateF || '', shF = S.showF || '';
+  const statesAll = [...new Set(base.flatMap(c => [c.state, ...regsOf(c).map(r => r.state)]).filter(Boolean))].sort();
+  if (stF) base = base.filter(c => c.state === stF || regsOf(c).some(r => r.state === stF));
+  if (shF) base = base.filter(c => ({ gst: regsOf(c).length > 0, nogst: !regsOf(c).length, nopan: !c.pan, nocontact: !c.mobile && !c.email, nologin: !(c.portalUsers || []).some(p => !p.revoked) })[shF]);
   const list = base.filter(c => !q || [c.name, c.tradeName, c.pan, c.gstin, c.code, c.mobile, c.email, ...(c.gstins || []), ...regsOf(c).map(r => r.state)].some(v => (v || '').toLowerCase().includes(q)));
   const sel = S.sel ||= new Set();
   const fy = itrFy(), fyL = `FY ${fy}-${String(fy + 1).slice(2)}`;
@@ -512,6 +521,9 @@ function vClients() {
     </div>
     <div class="consbar"><label class="small muted">Constitution
       <select data-change="consF"><option value="">All</option>${[...new Set(S.clients.map(c => c.constitution || 'Not set'))].sort().map(k => `<option ${k === cf ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></label>
+      <label class="small muted">State<select data-change="stateF"><option value="">All</option>${statesAll.map(k => `<option ${k === stF ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></label>
+      <label class="small muted">Show<select data-change="showF">${[['', 'Everyone'], ['gst', 'With GSTIN'], ['nogst', 'Without GSTIN'], ['nopan', 'PAN missing'], ['nocontact', 'No mobile or email'], ['nologin', 'No client login']].map(([v, l]) => `<option value="${v}" ${v === shF ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      ${stF || shF ? `<a href="#" data-act="cliFClear" class="small">Clear filters</a>` : ''}
       ${cf ? `<span class="fchip">${esc(cf)}: <b>${base.length}</b> client${base.length === 1 ? '' : 's'} (Business + ITR) <a href="#" data-act="consClear">✕ clear</a></span>` : ''}</div>
     ${tab === 'itr' && !cf ? `<p class="muted small">Clients here get only the yearly income tax return in their compliance calendar (plus advance tax if ticked). ITR ${fyL}: <b>${filedCount}</b> of ${itr.length} filed.</p>` : ''}
     <input id="search" class="search" placeholder="${tab === 'itr' ? 'Search name, PAN, mobile, email…' : 'Search name, PAN, any GSTIN, state, code, mobile…'}" value="${esc(S.search)}">
@@ -740,6 +752,10 @@ function vImport() {
   </section>`;
 }
 
+// create tasks for due returns that don't have one yet (runs in the background, then refreshes the screen)
+function autoTasks() {
+  setTimeout(() => T.autoSync().then(n => { if (n) { render(); toast(`${n} new task(s) created for returns falling due`); } }).catch(e => console.warn('autoTasks', e)), 300);
+}
 /* ---------- compliances: pick a compliance / task, tick the clients it applies to ---------- */
 // type 'flag' = client opt-in flag (drives the calendar); 'auto' = applies by law (GSTIN / constitution), can be switched off per client;
 // 'service' = work you do that has no statutory due date (stored in client.services)
@@ -923,11 +939,13 @@ const A = {
   dueToggle: ({ k }) => { const o = S.dueOpen ||= new Set(); if (o.has('*')) { o.delete('*'); for (const b of document.querySelectorAll('[data-act=dueToggle]')) o.add(b.dataset.k); } o.has(k) ? o.delete(k) : o.add(k); render(); },
   dueAll: ({ v }) => { S.dueOpen = new Set(); if (v) for (const b of document.querySelectorAll('[data-act=dueToggle]')) S.dueOpen.add(b.dataset.k); render(); },
   mixOpen: ({ k }) => { S.consF = k; S.search = ''; S.sel = new Set(); S.view = 'clients'; render(); },
+  cliShow: ({ v }) => { S.showF = v; S.stateF = ''; S.consF = ''; S.view = 'clients'; render(); },
+  cliFClear: () => { S.stateF = ''; S.showF = ''; render(); },
   consClear: () => { S.consF = ''; render(); },
   compOpen: ({ id }) => { S.compSel = S.compSel === id ? null : id; S.compPick = null; S.compQ = ''; S.compCons = ''; render(); if (S.compSel) setTimeout(() => document.getElementById('compPanel')?.scrollIntoView({ behavior: 'smooth' }), 50); },
   compClose: () => { S.compSel = null; S.compPick = null; render(); },
   compAll: ({ v }) => { for (const i of document.querySelectorAll('[data-change=compPick]')) v ? S.compPick.add(i.value) : S.compPick.delete(i.value); render(); },
-  compSave: () => guard(async () => { const n = await compSave(compById(S.compSel)); S.compPick = null; render(); toast(n ? `Saved — ${n} client(s) updated` : 'No changes'); }),
+  compSave: () => guard(async () => { const n = await compSave(compById(S.compSel)); S.compPick = null; render(); toast(n ? `Saved — ${n} client(s) updated` : 'No changes'); if (n) autoTasks(); }),
   compNew: () => { const n = prompt('Name of the work (e.g. Monthly MIS, Trademark renewal)'); if (n?.trim()) { S.compSel = 'svc:' + n.trim(); S.compPick = new Set(); render(); } },
   compTasks: () => {
     const cp = compById(S.compSel), ids = [...S.compPick];
@@ -1192,7 +1210,7 @@ const F = {
     data.updatedAt = serverTimestamp();
     if (S.cid) await updateDoc(doc(db, 'clients', S.cid), data);
     else { const itr = S.client?.category === 'itr'; S.cid = (await addDoc(collection(db, 'clients'), { ...data, ...regMirror([]), ...(S.client?.category ? { category: S.client.category } : {}), portalUsers: [], createdAt: serverTimestamp() })).id; S.tab = itr ? 'master' : 'gst'; }
-    await loadClients(); await openClient(S.cid); render();
+    await loadClients(); await openClient(S.cid); render(); autoTasks();
   }, 'Saved'),
   cred: (fd, form) => guard(async () => {
     if (!S.cid) throw new Error('Save the client master data first.');
@@ -1318,6 +1336,8 @@ const C = {
     for (const [k, , t] of FIELDS) { const e = form.elements[k]; if (!e) continue; c[k] = t === 'bool' ? e.checked : e.value; }
     render();
   },
+  stateF: el => { S.stateF = el.value; S.sel = new Set(); render(); },
+  showF: el => { S.showF = el.value; S.sel = new Set(); render(); },
   consF: el => { S.consF = el.value; S.sel = new Set(); render(); },
   compPick: el => { el.checked ? S.compPick.add(el.value) : S.compPick.delete(el.value); el.closest('.cpick')?.classList.toggle('on', el.checked);
     const h = document.querySelector('#compPanel h2 .muted'); if (h) h.textContent = h.textContent.replace(/^\(\d+/, '(' + S.compPick.size); },
@@ -1531,7 +1551,7 @@ async function importDocs(docs) {
   return n;
 }
 async function afterImport(n) {
-  await loadClients(); await loadAllFilings(); await T.load(); render(); loadStaff();
+  await loadClients(); await loadAllFilings(); await T.load(); render(); loadStaff(); autoTasks();
   toast(`Imported ${n} records into the cloud`, 5000);
 }
 

@@ -84,6 +84,24 @@ export function initTasks(ctx) {
     const snap = await getDocs(collection(db, 'tasks'));
     S.tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   };
+  // Every return due from the tracking date up to 30 days ahead gets a task, so the register never misses one
+  // (e.g. TDS payments after TDS is switched on for a client). Returns already filed, or with a task, are skipped.
+  T.autoSync = async () => {
+    if (!isAdmin() || S.wf?.autoTasks === false) return 0;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const tf = S.trackFrom ? new Date(S.trackFrom + 'T00:00') : today;
+    const to = new Date(today); to.setDate(to.getDate() + 30);
+    const have = new Set(S.tasks.map(t => `${t.clientId}|${t.filingKey}`));
+    let n = 0;
+    for (const c of S.clients) for (const it of dueItems(c, tf, to)) {
+      if (it.note === 'Optional') continue;
+      const fl = S.allFilings[`${c.id}|${it.key}`] || (it.altKey && S.allFilings[`${c.id}|${it.altKey}`]);
+      if (fl?.status === 'filed' || have.has(`${c.id}|${it.key}`) || (it.altKey && have.has(`${c.id}|${it.altKey}`))) continue;
+      await createTask({ clientId: c.id, catId: catForKey(it.key), title: it.form, period: it.period, due: isoLocal(it.due), filingKey: it.key });
+      have.add(`${c.id}|${it.key}`); n++;
+    }
+    return n;
+  };
   T.loadForClient = async cid => {
     const snap = await getDocs(query(collection(db, 'tasks'), where('clientId', '==', cid)));
     S.tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -143,16 +161,23 @@ export function initTasks(ctx) {
   }
 
   /* ---------- filtering ---------- */
-  function filtered() {
-    const f = S.tf, q = f.q.toLowerCase(), today = todayISO();
-    const wk = new Date(); wk.setDate(wk.getDate() + 7); const wkISO = wk.toISOString().slice(0, 10);
-    const mo = new Date(); mo.setMonth(mo.getMonth() + 1, 0); const moISO = mo.toISOString().slice(0, 10);
+  // everything except the status / due-date filters (those are what the counters show)
+  function scoped() {
+    const f = S.tf, q = f.q.toLowerCase();
     return S.tasks.filter(t =>
       (!q || [tno(t), t.clientName, t.title, t.cat, t.period, t.assignee].some(v => (v || '').toLowerCase().includes(q))) &&
       (!f.assignee || (f.assignee === '_none' ? !t.assignee : t.assignee === f.assignee)) &&
       (!f.dept || t.deptId === f.dept) &&
+      (!f.client || t.clientId === f.client) && (!f.cat || t.catId === f.cat) && (!f.period || t.period === f.period) &&
+      (!f.prio || (t.priority || 'Normal') === f.prio) && (!f.from || (t.due && t.due >= f.from)) && (!f.to || (t.due && t.due <= f.to)) &&
+      (!f.star || t.starred));
+  }
+  function filtered() {
+    const f = S.tf, today = todayISO();
+    const wk = new Date(); wk.setDate(wk.getDate() + 7); const wkISO = wk.toISOString().slice(0, 10);
+    const mo = new Date(); mo.setMonth(mo.getMonth() + 1, 0); const moISO = mo.toISOString().slice(0, 10);
+    return scoped().filter(t =>
       (f.status === 'all' || (f.status === 'open' ? !['Completed', 'Cancelled'].includes(t.status) : t.status === f.status)) &&
-      (!f.star || t.starred) &&
       (!f.due || (f.due === 'overdue' ? overdue(t) : f.due === 'today' ? t.due === today && !['Completed', 'Cancelled'].includes(t.status) : f.due === 'week' ? t.due && t.due <= wkISO : f.due === 'month' ? t.due && t.due <= moISO
         : f.due === 'unbilled' ? t.status === 'Completed' && !t.billed && t.fee > 0 : true))
     ).sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999') || a.no - b.no);
@@ -182,8 +207,7 @@ export function initTasks(ctx) {
   T.vTasks = () => {
     const f = S.tf, list = filtered(), adm = isAdmin(), today = todayISO();
     const sel = S.tsel ||= new Set();
-    const open = S.tasks.filter(t => !['Completed', 'Cancelled'].includes(t.status));
-    const mo = todayISO().slice(0, 7);
+    const sc = scoped(), open = sc.filter(t => !['Completed', 'Cancelled'].includes(t.status));
     // counters across the top — each one is a filter
     const ctr = [
       ['open', '', 'Open', open.length, 'c-all'],
@@ -193,7 +217,7 @@ export function initTasks(ctx) {
       ['In progress', '', 'In progress', open.filter(t => t.status === 'In progress').length, 'c-ip'],
       ['Waiting on client', '', 'Waiting on client', open.filter(t => t.status === 'Waiting on client').length, 'c-wc'],
       ['Under review', '', 'Under review', open.filter(t => t.status === 'Under review').length, 'c-ur'],
-      ['Completed', '', 'Completed', S.tasks.filter(t => t.status === 'Completed').length, 'c-cp'],
+      ['Completed', '', 'Completed', sc.filter(t => t.status === 'Completed').length, 'c-cp'],
     ];
     const ctrHtml = ctr.map(([st, du, l, n, cls]) => `<button class="ctr ${cls} ${f.status === st && (f.due || '') === du ? 'on' : ''}" data-act="tctr" data-s="${st}" data-d="${du}"><b>${n}</b><span>${l}</span></button>`).join('');
     // left panel: departments and staff with open counts
@@ -247,12 +271,36 @@ export function initTasks(ctx) {
         <select data-change="tf" data-k="assignee" class="tk-due"><option value="">Everyone</option>${staff.map(n => `<option ${n === f.assignee ? 'selected' : ''}>${esc(n)}</option>`).join('')}<option value="_none" ${f.assignee === '_none' ? 'selected' : ''}>Unassigned (${base.filter(t => !t.assignee).length})</option></select>
         <select data-change="tf" data-k="due" class="tk-due">${[['', 'Any due date'], ['overdue', 'Overdue'], ['today', 'Due today'], ['week', 'Due in 7 days'], ['month', 'Due this month'], ['unbilled', 'Completed, not billed']].map(([v, l]) => `<option value="${v}" ${v === f.due ? 'selected' : ''}>${l}</option>`).join('')}</select>
         <label class="chk"><input type="checkbox" data-change="tf" data-k="star" ${f.star ? 'checked' : ''}> Starred</label>
+        <button class="${S.tfMore ? 'on-f' : ''}" data-act="tfMore">More filters${activeN() ? ` (${activeN()})` : ''}</button>
         ${adm ? `<span class="tk-act"><button data-act="go" data-v="workflow">Work categories &amp; staff</button><button data-act="genTasks">Generate from calendar</button><button class="primary" data-act="newTask">New task</button></span>` : ''}
       </div>
+      ${showSide ? moreFilters(base) : ''}
       ${showSide ? `<div class="ctrs">${ctrHtml}</div>` : ''}
       <section class="tk-main">${bodyHtml}</section>
     </div>`;
   };
+  const FKEYS = { client: 'Client', cat: 'Work', period: 'Period', prio: 'Priority', from: 'Due from', to: 'Due to', dept: 'Department', assignee: 'Assigned to', due: 'Due', star: 'Starred' };
+  const activeN = () => ['client', 'cat', 'period', 'prio', 'from', 'to'].filter(k => S.tf[k]).length;
+  function moreFilters(base) {
+    const f = S.tf;
+    const opt = (arr, cur) => arr.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
+    const clients = [...new Map(base.map(t => [t.clientId, t.clientName])).entries()].sort((a, b) => (a[1] || '').localeCompare(b[1] || ''));
+    const cats = [...new Map(base.map(t => [t.catId, t.cat || t.title])).entries()].sort((a, b) => (a[1] || '').localeCompare(b[1] || ''));
+    const periods = [...new Set(base.map(t => t.period).filter(Boolean))].sort();
+    const label = (k, v) => k === 'client' ? clients.find(c => c[0] === v)?.[1] || v : k === 'cat' ? cats.find(c => c[0] === v)?.[1] || v
+      : k === 'dept' ? S.wf.departments.find(d => d.id === v)?.name || v : k === 'assignee' && v === '_none' ? 'Unassigned'
+      : k === 'from' || k === 'to' ? isoToDisp(v) : k === 'star' ? 'Yes' : k === 'due' ? ({ overdue: 'Overdue', today: 'Today', week: 'In 7 days', month: 'This month', unbilled: 'Completed, not billed' })[v] || v : v;
+    const chips = Object.keys(FKEYS).filter(k => f[k]).map(k => `<span class="fchip2">${FKEYS[k]}: <b>${esc(label(k, f[k]))}</b><button data-act="tfset" data-k="${k}" data-v="" aria-label="Remove filter">✕</button></span>`).join('');
+    return `${S.tfMore ? `<div class="fpanel">
+        <label>Client<select data-change="tf" data-k="client"><option value="">All clients</option>${opt(clients, f.client)}</select></label>
+        <label>Work<select data-change="tf" data-k="cat"><option value="">All work</option>${opt(cats, f.cat)}</select></label>
+        <label>Period<select data-change="tf" data-k="period"><option value="">All periods</option>${opt(periods.map(p => [p, p]), f.period)}</select></label>
+        <label>Priority<select data-change="tf" data-k="prio"><option value="">Any</option>${opt(PRIORITIES.map(p => [p, p]), f.prio)}</select></label>
+        <label>Due from<input type="date" data-change="tf" data-k="from" value="${esc(f.from || '')}"></label>
+        <label>Due to<input type="date" data-change="tf" data-k="to" value="${esc(f.to || '')}"></label>
+      </div>` : ''}
+      ${chips ? `<div class="fchips">${chips}<button class="link" data-act="tfClear">Clear all filters</button></div>` : ''}`;
+  }
   const statusTag = s => `<span class="tag ${({ 'Completed': 'green', 'Waiting on client': 'amber', 'Under review': 'blue', 'In progress': 'blue', 'Cancelled': '' })[s] ?? ''}">${esc(s)}</span>`;
 
   function vTime() {
@@ -373,6 +421,9 @@ export function initTasks(ctx) {
   /* ---------- workflow masters ---------- */
   T.vWorkflow = () => `
     <button class="link back" data-act="go" data-v="tasks">← Tasks</button>
+    <section class="card"><h2>Automatic tasks</h2>
+      <label class="chk"><input type="checkbox" data-change="autoTasks" ${S.wf.autoTasks === false ? '' : 'checked'}> Create a task automatically for every return due in the next 30 days (and any still pending since tracking began)</label>
+      <p class="muted small">Runs when CA Desk opens and whenever you change which compliances apply to a client. Returns already filed, or that already have a task, are skipped.</p></section>
     <section class="card"><h2>Staff</h2><p class="muted small">Names used for task assignment and timesheets.</p>
       <div class="pills">${(S.wf.staff || []).map((s, i) => `<span class="pillstat">${esc(s)} <button class="icon" data-act="delStaff" data-i="${i}">✕</button></span>`).join('') || '<span class="muted small">No staff added.</span>'}</div>
       <form data-form="addStaff" class="row"><input name="name" placeholder="Staff name" required style="max-width:260px"><button class="primary">Add staff</button></form></section>
@@ -393,6 +444,8 @@ export function initTasks(ctx) {
     tctr: ({ s, d }) => { S.tf.status = s; S.tf.due = d || ''; S.tsel = new Set(); render(); },
     tfset: ({ k, v }) => { S.tf[k] = v || ''; S.tsel = new Set(); render(); },
     tselClear: () => { S.tsel = new Set(); render(); },
+    tfMore: () => { S.tfMore = !S.tfMore; render(); },
+    tfClear: () => { Object.assign(S.tf, { q: '', assignee: '', dept: '', status: 'open', due: '', star: false, client: '', cat: '', period: '', prio: '', from: '', to: '' }); S.tsel = new Set(); render(); },
     openTask: ({ id }) => { S.task = id; S.view = 'task'; render(); window.scrollTo(0, 0); },
     newTask: ({ cid, multi, cat, title } = {}) => {
       S.newMulti = Array.isArray(multi) ? multi : null; // several clients picked on the Compliances page → one task each
@@ -546,6 +599,7 @@ export function initTasks(ctx) {
       guard(async () => { for (const id of ids) await setStatus(S.tasks.find(x => x.id === id), to); S.tsel = new Set(); render(); }, `${ids.length} task(s) set to ${to}`); },
     tbulkAssign: el => { const v = el.value; if (!v) return; const to = v === '__none' ? '' : v; const ids = [...S.tsel];
       guard(async () => { for (const id of ids) { const t = S.tasks.find(x => x.id === id); if (t.assignee !== to) await patch(id, { assignee: to }, `Assigned to ${to || 'nobody'}`); } S.tsel = new Set(); render(); }, `${ids.length} task(s) reassigned`); },
+    autoTasks: el => guard(async () => { S.wf.autoTasks = el.checked; await saveWf(); const n = el.checked ? await T.autoSync() : 0; render(); if (n) toast(`${n} task(s) created for due returns`); }),
     tf: el => { S.tf[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; render(); },
     tcheck: el => guard(async () => {
       const t = S.tasks.find(x => x.id === S.task), sec = el.dataset.sec, i = +el.dataset.i;
