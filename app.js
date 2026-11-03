@@ -283,17 +283,22 @@ function vDashboard() {
   // this month's GST filing progress (returns due in the current calendar month)
   const mStart = new Date(today.getFullYear(), today.getMonth(), 1), mEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
   const prog = {};
-  for (const c of S.clients) for (const it of dueItems(c, mStart, mEnd)) {
-    if (!/GSTR|CMP-08|PMT-06/.test(it.form)) continue;
-    const k = baseForm(it.form); const p = prog[k] ||= { total: 0, filed: 0, due: it.due, period: it.period };
-    p.total++; if (filingFor(S.allFilings, it, `${c.id}|`)?.status === 'filed') p.filed++;
+  // every compliance due this month (GST, TDS, PF/ESIC, income tax, ROC…), plus earlier ones still pending since tracking began
+  const tf = dayStart(new Date(S.trackFrom || mStart)), back = tf < mStart ? tf : mStart;
+  for (const c of S.clients) for (const it of dueItems(c, back, mEnd)) {
+    if (it.note === 'Optional') continue;
+    const filed = filingFor(S.allFilings, it, `${c.id}|`)?.status === 'filed';
+    if (it.due < mStart && filed) continue; // earlier months: only what is still pending
+    const k = baseForm(it.form); const p = prog[k] ||= { total: 0, filed: 0, due: it.due, period: it.period, periods: new Set() };
+    p.total++; if (filed) p.filed++; p.periods.add(it.period); if (it.due < p.due) p.due = it.due;
   }
-  const progHtml = Object.entries(prog).sort((a, b) => a[1].due - b[1].due).map(([k, p]) => {
+  const progHtml = Object.entries(prog).sort((a, b) => a[1].due - b[1].due).filter(([, p]) => p.total).map(([k, p]) => {
     const pct = Math.round(p.filed / p.total * 100), late = p.due < today && p.filed < p.total;
-    return `<div class="prog"><div class="prog-h"><b>${esc(k)}</b><span class="muted small">${esc(p.period)} · due ${p.due.getDate()} ${MONS[p.due.getMonth()]}</span>
-      <span class="prog-n ${late ? 'red' : ''}">${p.filed}/${p.total}</span></div>
+    const left = p.total - p.filed;
+    return `<div class="prog click" data-act="dueOpenForm" data-k="${esc(k)}" title="Show pending ${esc(k)}"><div class="prog-h"><b>${esc(k)}</b><span class="muted small">${p.periods.size > 1 ? p.periods.size + ' periods' : esc(p.period)} · due ${p.due.getDate()} ${MONS[p.due.getMonth()]}${p.due.getFullYear() !== today.getFullYear() ? ' ' + p.due.getFullYear() : ''}</span>
+      <span class="prog-n ${late ? 'red' : ''}">${left ? `<span class="${late ? 'red' : 'muted'} small">${left} pending</span> ` : ''}${p.filed}/${p.total}</span></div>
       <div class="bar big"><i style="width:${pct}%" class="${pct === 100 ? 'done' : late ? 'late' : ''}"></i></div></div>`;
-  }).join('') || '<p class="muted small">No GST returns due this month.</p>';
+  }).join('') || '<p class="muted small">Nothing due this month. 🎉</p>';
 
   // next 7 days grouped by date
   const byDay = {};
@@ -333,7 +338,7 @@ function vDashboard() {
   </div>
   <div class="dash-grid">
     <div>
-      <section class="card"><div class="row-between"><h2>GST filing — ${MONS[today.getMonth()]} ${today.getFullYear()}</h2><button class="sm" data-act="go" data-v="due">Details →</button></div>${progHtml}</section>
+      <section class="card"><div class="row-between"><h2>Due tasks — ${MONS[today.getMonth()]} ${today.getFullYear()}</h2><button class="sm" data-act="go" data-v="due">Details →</button></div>${progHtml}</section>
       <section class="card"><div class="row-between"><h2>Next 7 days</h2><button class="sm" data-act="go" data-v="due">All due dates →</button></div><div class="days">${weekHtml}</div></section>
     </div>
     <div>
@@ -860,6 +865,7 @@ const A = {
     const catId = cp.type === 'flag' ? ({ tds: 'TDSRET', pfesic: 'EPF', audit: '3CD', advTax: 'ADV' })[cp.id] : cp.type === 'service' ? (cp.id.startsWith('svc:') ? 'GEN' : cp.id) : cp.id;
     A.newTask({ multi: ids, cat: catId, title: cp.id.startsWith('svc:') ? cp.name : '' });
   },
+  dueOpenForm: ({ k }) => { S.dueF ||= { range: '30', form: '', q: '', history: false }; S.dueF.form = k; S.dueF.q = ''; S.view = 'due'; render(); },
   clientTab: ({ t }) => { S.consF = ''; S.clientTab = t; S.sel = new Set(); render(); },
   selClear: () => { S.sel = new Set(); render(); },
   moveSel: ({ to }) => {

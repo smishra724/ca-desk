@@ -240,3 +240,4 @@ button.wa{background:#1f9d55;border-color:#1f9d55;color:#fff}
 .cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px;margin-top:8px}
 .cpick{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line,#e3e6ea);border-radius:8px;padding:8px 10px;cursor:pointer;margin:0}
 .cpick input{width:auto;margin-top:3px}.cpick>span{display:flex;flex-direction:column}.cpick.on{background:var(--brand-2);border-color:var(--brand)}
+.prog.click{cursor:pointer;border-radius:8px;padding:6px 8px;margin:0 -8px}.prog.click:hover{background:#f5f7f8}.prog.click:hover b{color:var(--brand);text-decoration:underline}
