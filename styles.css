@@ -213,3 +213,18 @@ button.wa{background:#1f9d55;border-color:#1f9d55;color:#fff}
 .selbar{display:flex;align-items:center;gap:10px;background:var(--brand-2);border-radius:8px;padding:8px 12px;margin:4px 0 8px}
 .chips .cat{font-weight:600}.chips .cat.itr{background:#f1ecfe;color:#6d3fd1}.chips .cat.biz{background:#e8f0fe;color:#1a56c4}
 .card .filebtn + .note{margin-top:12px}
+/* ---------- due dates: compliance buttons with drop-down ---------- */
+.clist{display:flex;flex-direction:column;gap:8px;margin:10px 0}
+.citem{border:1px solid var(--line,#e3e6ea);border-radius:10px;background:#fff;overflow:hidden}
+.citem.has-od{border-left:4px solid #d64545}
+.chead{all:unset;box-sizing:border-box;cursor:pointer;width:100%;display:grid;grid-template-columns:minmax(120px,1.2fr) 2fr auto 20px;gap:12px;align-items:center;padding:13px 16px}
+.chead:hover{background:#f7f8fa}
+.citem.open .chead{background:var(--brand-2);border-bottom:1px solid var(--line,#e3e6ea)}
+.cname{font-weight:700;font-size:15.5px}
+.ccount b{font-size:17px;color:var(--brand)}
+.cdue{font-size:13px;color:#555;white-space:nowrap}
+.chev{transition:transform .15s;color:#777}
+.citem.open .chev{transform:rotate(180deg)}
+.cpanel{padding:4px 12px 10px}.cpanel .tbl{margin:0}
+.red{color:#c03030}
+@media (max-width:640px){.chead{grid-template-columns:1fr auto 16px}.ccount{grid-column:1/2;grid-row:2}.cdue{grid-column:2/3}}

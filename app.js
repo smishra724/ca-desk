@@ -327,32 +327,46 @@ function vDashboard() {
 /* ---------- due dates page ---------- */
 function vDue() {
   const f = S.dueF ||= { range: '30', form: '', q: '', history: false };
+  const open = S.dueOpen ||= new Set();
+  if (f.form) { open.add(f.form); f.form = ''; } // links from the dashboard open that compliance
   const ahead = f.range === 'overdue' ? 0 : +f.range;
   let rows = dueRows({ back: 365, ahead, history: f.history });
   if (f.range === 'overdue') rows = rows.filter(r => r.overdue);
-  const forms = [...new Set(rows.map(r => baseForm(r.form)))].sort();
-  if (f.form) rows = rows.filter(r => baseForm(r.form) === f.form);
   const q = f.q.toLowerCase(); if (q) rows = rows.filter(r => [r.c.name, r.c.tradeName, r.gstin, r.form].some(v => (v || '').toLowerCase().includes(q)));
-  const shown = rows.slice(0, 500);
+  // one button per compliance, ordered by its earliest due date
+  const groups = new Map();
+  for (const r of rows) { const k = baseForm(r.form); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+  const list = [...groups.entries()].map(([name, rs]) => ({ name, rs, clients: new Set(rs.map(r => r.c.id)).size, od: rs.filter(r => r.overdue).length, first: rs[0].due }))
+    .sort((x, y) => x.first - y.first || x.name.localeCompare(y.name));
+  const today = dayStart(new Date());
+  const days = d => { const n = Math.round((d - today) / 864e5); return n < 0 ? `${-n} day${n === -1 ? '' : 's'} overdue` : n === 0 ? 'due today' : `in ${n} day${n === 1 ? '' : 's'}`; };
+  const panel = g => `<div class="cpanel"><table class="tbl"><thead><tr><th>Client</th><th>Period</th><th>Due</th><th></th></tr></thead><tbody>
+    ${g.rs.map(r => `<tr class="${r.overdue ? 'od' : ''}">
+      <td><a href="#" data-act="open" data-id="${r.c.id}" data-tab="compliance">${esc(r.c.name)}</a>${r.gstin ? `<div class="muted tiny"><span class="mono">${esc(r.gstin)}</span>${r.c.tradeName ? ' · ' + esc(r.c.tradeName) : ''}</div>` : r.c.tradeName ? `<div class="muted tiny">${esc(r.c.tradeName)}</div>` : ''}${r.note ? ` <span class="tag">${esc(r.note)}</span>` : ''}</td>
+      <td>${esc(r.period)}</td><td class="nowrap">${fmtDate(r.due)}<div class="tiny ${r.overdue ? 'red' : 'muted'}">${days(r.due)}</div></td>
+      <td>${isAdmin() ? `<button class="sm" data-act="markFiled" data-cid="${r.c.id}" data-key="${r.key}">Mark filed</button>` : ''}</td></tr>`).join('')}
+    </tbody></table></div>`;
   return `
   <section class="card">
-    <div class="row-between wrap"><h2>Due dates <span class="muted">(${rows.length})</span></h2>
-      <div class="btns">${isAdmin() ? '<button class="sm" data-act="bulkFiled">Mark past returns as filed…</button>' : ''}</div></div>
+    <div class="row-between wrap"><h2>Due dates <span class="muted">(${rows.length} pending · ${list.length} compliance${list.length === 1 ? '' : 's'})</span></h2>
+      <div class="btns">${list.length ? `<button class="sm" data-act="dueAll" data-v="${open.size ? '' : '1'}">${open.size ? 'Collapse all' : 'Expand all'}</button>` : ''}${isAdmin() ? '<button class="sm" data-act="bulkFiled">Mark past returns as filed…</button>' : ''}</div></div>
     <div class="filters">
       <select data-change="dueF" data-k="range">${[['overdue', 'Overdue only'], ['7', 'Next 7 days'], ['30', 'Next 30 days'], ['90', 'Next 90 days']].map(([v, l]) => `<option value="${v}" ${v === f.range ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      <select data-change="dueF" data-k="form"><option value="">All returns</option>${forms.map(x => `<option ${x === f.form ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
       <input id="dueQ" placeholder="Search client or GSTIN…" value="${esc(f.q)}">
       <label class="chk"><input type="checkbox" data-change="dueF" data-k="history" ${f.history ? 'checked' : ''}> Include returns due before ${isoToDisp(S.trackFrom)}</label>
     </div>
     <p class="muted small">Tracking compliance from <b>${isoToDisp(S.trackFrom)}</b>. Returns due earlier are treated as filed before CA Desk. ${isAdmin() ? '<a href="#" data-act="setTrackFrom">Change</a>' : ''}</p>
-    <table class="tbl"><thead><tr><th>Due</th><th>Client</th><th>Return / form</th><th>Period</th><th></th></tr></thead><tbody>
-    ${shown.map(r => `<tr class="${r.overdue ? 'od' : ''}"><td class="nowrap">${fmtDate(r.due)}</td>
-      <td><a href="#" data-act="open" data-id="${r.c.id}" data-tab="compliance">${esc(r.c.name)}</a>${r.c.tradeName ? `<div class="muted tiny">${esc(r.c.tradeName)}</div>` : ''}</td>
-      <td>${esc(r.form)}${r.note ? ` <span class="tag">${esc(r.note)}</span>` : ''}</td><td>${esc(r.period)}</td>
-      <td>${isAdmin() ? `<button class="sm" data-act="markFiled" data-cid="${r.c.id}" data-key="${r.key}">Mark filed</button>` : ''}</td></tr>`).join('')
-      || '<tr><td colspan="5" class="muted empty">Nothing due. 🎉</td></tr>'}
-    </tbody></table>
-    ${rows.length > 500 ? `<p class="muted small">Showing first 500 of ${rows.length}. Narrow the filters.</p>` : ''}
+    <div class="clist">
+    ${list.map(g => `<div class="citem ${open.has(g.name) ? 'open' : ''} ${g.od ? 'has-od' : ''}">
+      <button class="chead" data-act="dueToggle" data-k="${esc(g.name)}">
+        <span class="cname">${esc(g.name)}</span>
+        <span class="ccount"><b>${g.clients}</b> client${g.clients === 1 ? '' : 's'} pending${g.rs.length > g.clients ? ` <span class="muted">(${g.rs.length} returns)</span>` : ''}</span>
+        <span class="cdue">${g.od ? `<span class="tag red">${g.od} overdue</span>` : `next ${fmtDate(g.first)}`}</span>
+        <span class="chev">▾</span>
+      </button>
+      ${open.has(g.name) ? panel(g) : ''}
+    </div>`).join('') || '<p class="muted empty">Nothing pending. 🎉</p>'}
+    </div>
     <p class="muted small">Statutory due dates. Check CBIC / CBDT / MCA notifications for extensions.</p>
   </section>`;
 }
@@ -713,6 +727,8 @@ const A = {
   go: ({ v }) => { S.view = v; S.importRows = v === 'import' ? S.importRows : null; render(); if (v === 'settings') loadStaff(); },
   open: ({ id, tab }) => guard(async () => { await openClient(id, tab || 'master'); render(); }),
   tab: ({ t }) => { S.tab = t; render(); },
+  dueToggle: ({ k }) => { const o = S.dueOpen ||= new Set(); o.has(k) ? o.delete(k) : o.add(k); render(); },
+  dueAll: ({ v }) => { S.dueOpen = new Set(); if (v) for (const b of document.querySelectorAll('[data-act=dueToggle]')) S.dueOpen.add(b.dataset.k); render(); },
   clientTab: ({ t }) => { S.clientTab = t; S.sel = new Set(); render(); },
   selClear: () => { S.sel = new Set(); render(); },
   moveSel: ({ to }) => {
