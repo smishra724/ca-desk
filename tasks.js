@@ -7,6 +7,16 @@ const BOARD = STATUSES.filter(s => s !== 'Cancelled');
 const PRIORITIES = ['Low', 'Normal', 'High', 'Urgent'];
 
 const cat = (id, name, docs, acts, outs) => ({ id, name, docs, acts: acts.map(([n, w]) => ({ name: n, weight: w })), outs });
+const LABOUR_CATS = () => [
+  cat('EPF', 'EPF ECR & payment', ['Attendance / salary sheet', 'New joiners & exits (UAN, KYC)'], [['Prepare ECR', 40], ['Upload ECR', 30], ['Pay challan (TRRN)', 30]], ['ECR receipt / TRRN', 'Challan']),
+  cat('ESIC', 'ESIC contribution', ['Attendance / salary sheet', 'New joiners (IP registration)'], [['Upload monthly contribution', 50], ['Pay challan', 50]], ['ESIC challan']),
+  cat('PT', 'Professional tax (PT)', ['Salary register', 'Employee count by slab'], [['Compute PT by slab', 40], ['Pay challan', 40], ['File return', 20]], ['PT challan / return acknowledgement']),
+  cat('LWF', 'Labour welfare fund (LWF)', ['Employee count for the period'], [['Compute employee & employer share', 50], ['Deposit & file', 50]], ['LWF challan / receipt']),
+  cat('PAYROLL', 'Monthly payroll processing', ['Attendance & leave', 'Salary changes, joiners & exits', 'Reimbursement claims'],
+    [['Process salary', 40], ['Payslips', 20], ['Bank transfer file', 20], ['TDS on salary computed', 20]], ['Salary register', 'Payslips']),
+  cat('SHOPS', 'Shops & Establishment registration / renewal', ['Address proof', 'Owner ID & photo', 'Employee details'], [['Apply / renew online', 70], ['Certificate received', 30]], ['Registration certificate']),
+  cat('CLRA', 'Contract Labour (CLRA) returns', ['Contractor details', 'Muster & wage registers'], [['Prepare return', 60], ['File', 40]], ['Return acknowledgement']),
+];
 export const DEFAULT_WORKFLOW = {
   departments: [
     { id: 'gst', name: 'GST', assignee: '', categories: [
@@ -44,10 +54,7 @@ export const DEFAULT_WORKFLOW = {
       cat('INC', 'Company / LLP incorporation', ['Director/partner KYC', 'Registered office proof', 'DSC'],
         [['Name reservation', 20], ['Draft MOA/AOA / agreement', 30], ['File SPICe+ / FiLLiP', 30], ['Certificate received', 20]], ['Certificate of Incorporation', 'PAN / TAN']),
     ]},
-    { id: 'payroll', name: 'Payroll', assignee: '', categories: [
-      cat('EPF', 'EPF ECR & payment', ['Attendance / salary sheet'], [['Prepare ECR', 50], ['Upload & pay', 50]], ['ECR receipt / TRRN']),
-      cat('ESIC', 'ESIC contribution', ['Attendance / salary sheet'], [['Monthly contribution', 50], ['Pay challan', 50]], ['Challan']),
-    ]},
+    { id: 'payroll', name: 'Labour law & payroll', assignee: '', categories: LABOUR_CATS() },
     { id: 'acc', name: 'Accounting', assignee: '', categories: [
       cat('BOOKS', 'Monthly bookkeeping', ['Bank statements', 'Sales & purchase bills', 'Expense vouchers'],
         [['Voucher entry', 60], ['Bank reconciliation', 30], ['Review', 10]], ['MIS / trial balance']),
@@ -81,6 +88,11 @@ export function initTasks(ctx) {
     const w = await getDoc(doc(db, 'meta', 'workflow'));
     S.wf = w.exists() ? w.data() : structuredClone(DEFAULT_WORKFLOW);
     if (!S.wf.staff) S.wf.staff = [];
+    // add newer work categories (labour law) to a workflow saved before they existed
+    let pr = S.wf.departments.find(d => d.id === 'payroll');
+    if (!pr) S.wf.departments.push(pr = { id: 'payroll', name: 'Labour law & payroll', assignee: '', categories: [] });
+    for (const c of LABOUR_CATS()) if (!pr.categories.some(x => x.id === c.id)) pr.categories.push(c);
+    if (pr.name === 'Payroll') pr.name = 'Labour law & payroll';
     const snap = await getDocs(collection(db, 'tasks'));
     S.tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   };

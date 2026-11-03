@@ -1,7 +1,7 @@
 import { firebaseConfig } from './firebase-config.js';
 import { PORTALS, portalByKey } from './portals.js';
 import { extractFromFile, toISO, STATE_CODES } from './extract.js';
-import { dueItems, fmtDate, regsOf, activeRegs, filingFor, isItrOnly, codeOf } from './compliance.js';
+import { dueItems, fmtDate, regsOf, activeRegs, filingFor, isItrOnly, codeOf, flagOn } from './compliance.js';
 import { initTasks } from './tasks.js';
 import { initSend } from './send.js';
 import { initDriveImport } from './drive-import.js';
@@ -41,7 +41,7 @@ const FIELDS = [
   ['aadhaar', 'Aadhaar (proprietor)'], ['email', 'Email'], ['mobile', 'Mobile'],
   ['address', 'Address', 'textarea'], ['state', 'State'], ['pincode', 'PIN code'],
   ['gstFreq', 'GST filing', 'select', ['Monthly', 'QRMP', 'Composition', 'Not registered']],
-  ['tds', 'TDS / TCS applicable', 'bool'], ['pfesic', 'PF / ESIC applicable', 'bool'],
+  ['tds', 'TDS / TCS applicable', 'bool'], ['epf', 'EPF applicable', 'bool'], ['esic', 'ESIC applicable', 'bool'], ['pt', 'Professional tax (PT)', 'bool'], ['lwf', 'Labour welfare fund (LWF)', 'bool'],
   ['audit', 'Tax audit applicable', 'bool'], ['advTax', 'Advance tax applicable', 'bool'],
   ['people', 'Partners / directors (name, DIN)', 'textarea'], ['notes', 'Notes', 'textarea'],
 ];
@@ -583,13 +583,13 @@ function tMaster() {
   const c = S.client || {};
   if (!isAdmin()) {
     return `<dl class="dl">${formFields(c.constitution).filter(f => c[f[0]] !== undefined && c[f[0]] !== '' && f[0] !== 'notes' && !GST_KEYS.has(f[0])).map(([k, l, t]) => `<dt>${l}</dt><dd>${
-      t === 'bool' ? (c[k] ? 'Yes' : 'No') : t === 'date' ? isoToDisp(c[k]) : k === 'aadhaar' ? 'XXXX XXXX ' + esc(String(c[k]).slice(-4)) : esc(c[k]).replace(/\n/g, '<br>')}</dd>`).join('')}</dl>`;
+      t === 'bool' ? (flagOn(c, k) ? 'Yes' : 'No') : t === 'date' ? isoToDisp(c[k]) : k === 'aadhaar' ? 'XXXX XXXX ' + esc(String(c[k]).slice(-4)) : esc(c[k]).replace(/\n/g, '<br>')}</dd>`).join('')}</dl>`;
   }
   return `<form data-form="master" class="grid">
     ${formFields(c.constitution).filter(f => f[2] !== 'bool' && !GST_KEYS.has(f[0])).map(f => fieldInput(f, c[f[0]])).join('')}
     ${FIELDS.filter(f => f[2] !== 'bool' && !GST_KEYS.has(f[0]) && !formFields(c.constitution).some(x => x[0] === f[0]) && c[f[0]]).map(f => `<input type="hidden" name="${f[0]}" value="${esc(c[f[0]])}">`).join('')}
     <p class="span2 muted small">GSTINs are managed in the <a href="#" data-act="tab" data-t="gst">GST registrations</a> tab — add one per state.</p>
-    <div class="span2 bools">${FIELDS.filter(f => f[2] === 'bool').map(f => fieldInput(f, c[f[0]])).join('')}</div>
+    <div class="span2 bools">${FIELDS.filter(f => f[2] === 'bool').map(f => fieldInput(f, flagOn(c, f[0]))).join('')}</div>
     <div class="span2 btns"><button class="primary">Save master data</button>
       ${S.client?.createdAt ? `<button type="button" class="danger" data-act="delClient">Delete client</button>` : ''}</div>
   </form>`;
@@ -723,13 +723,13 @@ const XL_FIELDS = [
   ['GST Reg Date (DD-MM-YYYY)', 'gstRegDate'], ['Aadhaar', 'aadhaar'], ['Email', 'email'], ['Mobile', 'mobile'],
   ['Address', 'address'], ['State', 'state'], ['PIN', 'pincode'],
   ['GST Filing (Monthly/QRMP/Composition/Not registered)', 'gstFreq'],
-  ['TDS (Y/N)', 'tds'], ['PF/ESIC (Y/N)', 'pfesic'], ['Tax Audit (Y/N)', 'audit'], ['Advance Tax (Y/N)', 'advTax'],
+  ['TDS (Y/N)', 'tds'], ['EPF (Y/N)', 'epf'], ['ESIC (Y/N)', 'esic'], ['PT (Y/N)', 'pt'], ['LWF (Y/N)', 'lwf'], ['Tax Audit (Y/N)', 'audit'], ['Advance Tax (Y/N)', 'advTax'],
   ['Partners/Directors', 'people'], ['Notes', 'notes'],
 ];
 const XL_PORTALS = PORTALS.filter(p => p.key !== 'other');
 const xlHeaders = () => [...XL_FIELDS.map(x => x[0]), ...XL_PORTALS.flatMap(p => [`${p.short} User`, `${p.short} Password`])];
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-const BOOLS = new Set(['tds', 'pfesic', 'audit', 'advTax']);
+const BOOLS = new Set(['tds', 'epf', 'esic', 'pt', 'lwf', 'audit', 'advTax']);
 
 function vImport() {
   const r = S.importRows;
@@ -838,8 +838,14 @@ const COMPS = [
   { id: 'ITR', name: 'Income tax return', type: 'auto', codes: ['ITR'], grp: 'Income tax' },
   { id: 'audit', name: 'Tax audit (3CD)', type: 'flag', flag: 'audit', grp: 'Income tax' },
   { id: 'advTax', name: 'Advance tax', type: 'flag', flag: 'advTax', grp: 'Income tax' },
-  { id: 'tds', name: 'TDS / TCS (payment & returns)', type: 'flag', flag: 'tds', grp: 'TDS & payroll' },
-  { id: 'pfesic', name: 'PF / ESIC', type: 'flag', flag: 'pfesic', grp: 'TDS & payroll' },
+  { id: 'tds', name: 'TDS / TCS (payment & returns)', type: 'flag', flag: 'tds', grp: 'TDS' },
+  { id: 'epf', name: 'EPF (ECR & payment)', type: 'flag', flag: 'epf', grp: 'Labour law' },
+  { id: 'esic', name: 'ESIC contribution', type: 'flag', flag: 'esic', grp: 'Labour law' },
+  { id: 'pt', name: 'Professional tax (PT)', type: 'flag', flag: 'pt', grp: 'Labour law' },
+  { id: 'lwf', name: 'Labour welfare fund (LWF)', type: 'flag', flag: 'lwf', grp: 'Labour law' },
+  { id: 'PAYROLL', name: 'Monthly payroll processing', type: 'service', grp: 'Labour law' },
+  { id: 'SHOPS', name: 'Shops & Establishment registration / renewal', type: 'service', grp: 'Labour law' },
+  { id: 'CLRA', name: 'Contract Labour (CLRA) returns', type: 'service', grp: 'Labour law' },
   { id: 'AOC4', name: 'AOC-4 (financials)', type: 'auto', codes: ['AOC4'], grp: 'ROC' },
   { id: 'MGT7', name: 'MGT-7 / 7A', type: 'auto', codes: ['MGT7'], grp: 'ROC' },
   { id: 'DPT3', name: 'DPT-3', type: 'auto', codes: ['DPT3'], grp: 'ROC' },
@@ -858,7 +864,7 @@ const compEligible = (cp, c) => {
   const y = new Date().getFullYear(), its = dueItems({ ...c, off: [] }, new Date(y - 1, 0, 1), new Date(y + 1, 11, 31));
   return its.some(i => cp.codes.includes(codeOf(i.key)));
 };
-const compOn = (cp, c) => cp.type === 'flag' ? !!c[cp.flag] && !isItrOnly(c)
+const compOn = (cp, c) => cp.type === 'flag' ? flagOn(c, cp.flag) && !isItrOnly(c)
   : cp.type === 'service' ? (c.services || []).includes(cp.id)
   : compEligible(cp, c) && !cp.codes.some(k => (c.off || []).includes(k));
 function vComps() {
@@ -884,7 +890,7 @@ function compPanel(cp) {
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   const notElig = S.clients.length - elig.length;
   const why = cp.type === 'auto' ? `Only clients for whom ${esc(cp.name)} can arise are listed (GSTIN / filing type / constitution)${notElig ? ` — ${notElig} others don't qualify` : ''}.`
-    : cp.type === 'flag' ? `Ticking switches on ${esc(cp.name)} in the client's compliance calendar.${notElig ? ` ITR-only clients (${notElig}) are excluded.` : ''}`
+    : cp.type === 'flag' ? `Ticking switches on ${esc(cp.name)} in the client's compliance calendar.${cp.id === 'pt' ? ' Due dates follow the state in the client\'s address; states without PT (e.g. UP, Delhi, Haryana, Rajasthan) get no PT dates.' : cp.id === 'lwf' ? ' Monthly, half-yearly or annual depending on the client\'s state.' : ''}${notElig ? ` ITR-only clients (${notElig}) are excluded.` : ''}`
     : 'Work without a statutory due date. Use "Create tasks" to raise a task for every ticked client.';
   return `<section class="card" id="compPanel">
     <div class="row-between wrap"><h2>${esc(cp.name)} <span class="muted">(${pick.size} of ${elig.length} ticked)</span></h2>
@@ -1021,7 +1027,7 @@ const A = {
     const cp = compById(S.compSel), ids = [...S.compPick];
     if (!ids.length) return toast('Tick at least one client first');
     guard(() => compSave(cp)); // keep the ticks as the clients this work applies to
-    const catId = cp.type === 'flag' ? ({ tds: 'TDSRET', pfesic: 'EPF', audit: '3CD', advTax: 'ADV' })[cp.id] : cp.type === 'service' ? (cp.id.startsWith('svc:') ? 'GEN' : cp.id) : cp.id;
+    const catId = cp.type === 'flag' ? ({ tds: 'TDSRET', epf: 'EPF', esic: 'ESIC', pt: 'PT', lwf: 'LWF', audit: '3CD', advTax: 'ADV' })[cp.id] : cp.type === 'service' ? (cp.id.startsWith('svc:') ? 'GEN' : cp.id) : cp.id;
     A.newTask({ multi: ids, cat: catId, title: cp.id.startsWith('svc:') ? cp.name : '' });
   },
   dueOpenForm: ({ k }) => { S.dueF ||= { range: '30', form: '', q: '', history: false }; S.dueF.form = k; S.dueF.q = ''; S.view = 'due'; render(); },
@@ -1244,7 +1250,7 @@ const A = {
     const c = S.client || {};
     const wb = XLSX.utils.book_new();
     const m = [['Field', 'Value'], ...FIELDS.filter(f => (f[0] !== 'notes' || isAdmin()) && !GST_KEYS.has(f[0]))
-      .map(([k, l, t]) => [l, t === 'bool' ? (c[k] ? 'Yes' : 'No') : t === 'date' ? isoToDisp(c[k]) : c[k] || ''])];
+      .map(([k, l, t]) => [l, t === 'bool' ? (flagOn(c, k) ? 'Yes' : 'No') : t === 'date' ? isoToDisp(c[k]) : c[k] || ''])];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(m), 'Master data');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['State', 'GSTIN', 'Trade name', 'Address', 'GST filing', 'Registration date', 'Status'],
       ...regsOf(c).map(r => [r.state || stateOf(r.gstin), r.gstin, r.tradeName || '', r.address || '', r.gstFreq || '', isoToDisp(r.regDate), r.status || 'Active'])]), 'GST registrations');

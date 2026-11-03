@@ -43,9 +43,17 @@ export function isItrOnly(c) {
 // Compliance code from a due-item key: "GSTR1-2026-10@09AB…" → "GSTR1", "ADV2-2025" → "ADV", "MSME1H1-2025" → "MSME1"
 export const codeOf = key => { const p = key.split('@')[0].split('-')[0]; return /^ADV\d$/.test(p) ? 'ADV' : p.replace(/H\d$/, ''); };
 
+// Labour law. EPF/ESIC: 15th of next month. PT and LWF dates differ by state — the state of the client's address is used.
+const PT_DAY = { 'Maharashtra': 0, 'Karnataka': 20, 'West Bengal': 21, 'Telangana': 10, 'Andhra Pradesh': 10, 'Gujarat': 15, 'Madhya Pradesh': 10,
+  'Odisha': 10, 'Assam': 28, 'Tamil Nadu': 0, 'Kerala': 0, 'Bihar': 15, 'Jharkhand': 15, 'Punjab': 15, 'Sikkim': 15, 'Meghalaya': 15, 'Tripura': 7, 'Mizoram': 15, 'Manipur': 15, 'Nagaland': 15 }; // 0 = last day of the same month
+const NO_PT = new Set(['Uttar Pradesh', 'Delhi', 'Haryana', 'Rajasthan', 'Himachal Pradesh', 'Uttarakhand', 'Jammu and Kashmir', 'Chandigarh', 'Arunachal Pradesh']);
+const LWF_ANNUAL = new Set(['Karnataka', 'Tamil Nadu', 'Andhra Pradesh', 'Telangana', 'Gujarat', 'Kerala', 'Goa', 'Punjab', 'Chandigarh']);
+const LWF_MONTHLY = new Set(['Haryana']);
+export const flagOn = (c, k) => k === 'epf' || k === 'esic' ? (c[k] ?? !!c.pfesic) : !!c[k];
+
 export function dueItems(c, from, to) {
   const out = [];
-  if (isItrOnly(c)) c = { ...c, gstRegs: [], gstin: '', tds: false, pfesic: false, constitution: c.constitution || 'Individual', _itr: true };
+  if (isItrOnly(c)) c = { ...c, gstRegs: [], gstin: '', tds: false, pfesic: false, epf: false, esic: false, pt: false, lwf: false, constitution: c.constitution || 'Individual', _itr: true };
   const add = (key, form, period, due, note = '') => {
     if (due >= from && due <= to) out.push({ key, form, period, due, note });
   };
@@ -86,10 +94,13 @@ export function dueItems(c, from, to) {
       }
     }
     if (c.tds) add(`TDSPAY-${id}`, 'TDS/TCS payment', per, m === 2 ? new Date(y, 3, 30) : nx(7));
-    if (c.pfesic) {
-      add(`EPF-${id}`, 'EPF ECR & payment', per, nx(15));
-      add(`ESIC-${id}`, 'ESIC contribution', per, nx(15));
-    }
+    if (flagOn(c, 'epf')) add(`EPF-${id}`, 'EPF ECR & payment', per, nx(15));
+    if (flagOn(c, 'esic')) add(`ESIC-${id}`, 'ESIC contribution', per, nx(15));
+    if (c.pt && !NO_PT.has(c.state)) { const st = c.state || '', d = PT_DAY[st]; add(`PT-${id}`, 'Professional tax (PT)', per, d === 0 ? new Date(y, m + 1, 0) : nx(d || 15), st ? '' : 'Set client state for exact date'); }
+    if (c.lwf && LWF_MONTHLY.has(c.state)) add(`LWF-${id}`, 'Labour welfare fund (LWF)', per, nx(15));
+    if (c.lwf && !LWF_MONTHLY.has(c.state) && !LWF_ANNUAL.has(c.state) && (m === 5 || m === 11))
+      add(`LWF-${id}`, 'Labour welfare fund (LWF)', `${m === 5 ? 'Jan–Jun' : 'Jul–Dec'} ${y}`, nx(15), c.state ? '' : 'Half-yearly; check state');
+    if (c.lwf && LWF_ANNUAL.has(c.state) && m === 11) add(`LWF-${id}`, 'Labour welfare fund (LWF)', `${y}`, nx(15), 'Annual');
   }
 
   // Annual / quarterly items, by financial year (fy = starting calendar year)
