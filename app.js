@@ -438,10 +438,11 @@ function vDue() {
     .sort((x, y) => x.first - y.first || x.name.localeCompare(y.name));
   const today = dayStart(new Date());
   const days = d => { const n = Math.round((d - today) / 864e5); return n < 0 ? `${-n} day${n === -1 ? '' : 's'} overdue` : n === 0 ? 'due today' : `in ${n} day${n === 1 ? '' : 's'}`; };
-  const panel = g => `<div class="cpanel"><table class="tbl"><thead><tr><th>Client</th><th>Period</th><th>Due</th><th></th></tr></thead><tbody>
+  const panel = g => `<div class="cpanel"><table class="tbl"><thead><tr><th>Client</th><th>Period</th><th>Due</th>${isAdmin() ? '<th>Task status</th>' : ''}<th></th></tr></thead><tbody>
     ${g.rs.map(r => `<tr class="${r.overdue ? 'od' : ''}">
       <td><a href="#" data-act="open" data-id="${r.c.id}" data-tab="compliance">${esc(r.c.name)}</a>${r.gstin ? `<div class="muted tiny"><span class="mono">${esc(r.gstin)}</span>${r.c.tradeName ? ' · ' + esc(r.c.tradeName) : ''}</div>` : r.c.tradeName ? `<div class="muted tiny">${esc(r.c.tradeName)}</div>` : ''}${r.note ? ` <span class="tag">${esc(r.note)}</span>` : ''}</td>
       <td>${esc(r.period)}</td><td class="nowrap">${fmtDate(r.due)}<div class="tiny ${r.overdue ? 'red' : 'muted'}">${days(r.due)}</div></td>
+      ${isAdmin() ? `<td class="nowrap tstat">${T.statusSelect(r)}</td>` : ''}
       <td>${isAdmin() ? `<button class="sm" data-act="markFiled" data-cid="${r.c.id}" data-key="${r.key}">Mark filed</button>` : ''}</td></tr>`).join('')}
     </tbody></table></div>`;
   return `
@@ -1255,6 +1256,7 @@ const F = {
     const data = { status: 'filed', filedOn: fd.get('filedOn'), ack: fd.get('ack').trim(), remarks: fd.get('remarks').trim(), by: S.profile.email, at: serverTimestamp() };
     await setDoc(doc(db, 'clients', cid, 'filings', key), data);
     S.allFilings[`${cid}|${key}`] = data; if (cid === S.cid) S.filings[key] = data;
+    await T.markDone(cid, key, data.ack); // its task (if any) moves to Completed
     closeModal(); render();
   }, 'Marked as filed'),
   newClientLogin: fd => guard(async () => {

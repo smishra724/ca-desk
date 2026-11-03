@@ -102,6 +102,18 @@ export function initTasks(ctx) {
     }
     return n;
   };
+  // used by the Due dates page: the task behind a due return, and changing its status there
+  T.taskFor = (cid, key, altKey) => S.tasks.find(t => t.clientId === cid && (t.filingKey === key || (altKey && t.filingKey === altKey)));
+  T.statusSelect = (r) => {
+    const t = T.taskFor(r.c.id, r.key, r.altKey), cur = t?.status || '';
+    return `<select class="st-sel ${cur ? STC[cur] : 'ns'}" data-change="dueStatus" data-cid="${r.c.id}" data-key="${esc(r.key)}" data-alt="${esc(r.altKey || '')}" data-form="${esc(r.form)}" data-period="${esc(r.period)}" data-due="${isoLocal(r.due)}">
+      ${cur ? '' : '<option value="">No task yet</option>'}${STATUSES.map(x => `<option ${x === cur ? 'selected' : ''}>${x}</option>`).join('')}</select>
+      ${t ? `<a href="#" class="tiny tlink" data-act="openTask" data-id="${t.id}">${tno(t)}${t.assignee ? ' · ' + esc(t.assignee) : ''}</a>` : ''}`;
+  };
+  T.markDone = async (cid, key, ack) => {
+    const t = T.taskFor(cid, key); if (!t || ['Completed', 'Cancelled'].includes(t.status)) return;
+    await patch(t.id, { status: 'Completed', ack: ack || t.ack || '', done: { ...t.done, acts: (t.list?.acts || []).map(() => true) } }, `Status: ${t.status} → Completed (marked filed)`);
+  };
   T.loadForClient = async cid => {
     const snap = await getDocs(query(collection(db, 'tasks'), where('clientId', '==', cid)));
     S.tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -644,6 +656,14 @@ export function initTasks(ctx) {
     tbulkAssign: el => { const v = el.value; if (!v) return; const to = v === '__none' ? '' : v; const ids = [...S.tsel];
       guard(async () => { for (const id of ids) { const t = S.tasks.find(x => x.id === id); if (t.assignee !== to) await patch(id, { assignee: to }, `Assigned to ${to || 'nobody'}`); } S.tsel = new Set(); render(); }, `${ids.length} task(s) reassigned`); },
     autoTasks: el => guard(async () => { S.wf.autoTasks = el.checked; await saveWf(); const n = el.checked ? await T.autoSync() : 0; render(); if (n) toast(`${n} task(s) created for due returns`); }),
+    dueStatus: el => {
+      const d = el.dataset, to = el.value; if (!to) return;
+      guard(async () => {
+        let t = T.taskFor(d.cid, d.key, d.alt);
+        if (!t) { const id = await createTask({ clientId: d.cid, catId: catForKey(d.key), title: d.form, period: d.period, due: d.due, filingKey: d.key }); t = S.tasks.find(x => x.id === id); }
+        await setStatus(t, to); render();
+      }, `${to === 'Completed' ? 'Completed and marked filed' : 'Status: ' + to}`);
+    },
     tf: el => { S.tf[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; render(); },
     tcheck: el => guard(async () => {
       const t = S.tasks.find(x => x.id === S.task), sec = el.dataset.sec, i = +el.dataset.i;
