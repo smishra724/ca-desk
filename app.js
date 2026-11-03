@@ -208,18 +208,50 @@ async function openClient(cid, tab) {
 }
 
 /* ================= rendering ================= */
+const NAV_ICON = {
+  dashboard: '<path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 4v4h6V4z"/>',
+  due: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  tasks: '<path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>',
+  clients: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6M16 4.5a3.5 3.5 0 0 1 0 7M18 14c2.2.6 3.5 2.7 3.5 6"/>',
+  comps: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13l2 2 4-4"/>',
+  import: '<path d="M12 3v12M7 10l5 5 5-5M4 19h16"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+};
+const PAGE_TITLE = { dashboard: 'Dashboard', due: 'Due dates', tasks: 'Tasks', task: 'Task', workflow: 'Work categories', clients: 'Clients', client: 'Client', comps: 'Compliances', import: 'Excel import', settings: 'Settings' };
 function render() {
   if (!S.profile) return;
-  const nav = isAdmin() ? [['dashboard', 'Dashboard'], ['due', 'Due dates'], ['tasks', 'Tasks'], ['clients', 'Clients'], ['comps', 'Compliances'], ['import', 'Excel import'], ['settings', 'Settings']]
-    .map(([v, l]) => `<button class="nav ${(S.view === v || (v === 'tasks' && ['task', 'workflow'].includes(S.view))) ? 'on' : ''}" data-act="go" data-v="${v}">${l}</button>`).join('') : '';
+  const items = isAdmin() ? [['dashboard', 'Dashboard'], ['due', 'Due dates'], ['tasks', 'Tasks'], ['clients', 'Clients'], ['comps', 'Compliances'], ['import', 'Excel import'], ['settings', 'Settings']] : [];
+  const active = v => S.view === v || (v === 'tasks' && ['task', 'workflow'].includes(S.view)) || (v === 'clients' && S.view === 'client');
+  const nav = items.map(([v, l]) => `<button class="nav ${active(v) ? 'on' : ''}" data-act="go" data-v="${v}"><svg viewBox="0 0 24 24" aria-hidden="true">${NAV_ICON[v]}</svg><span>${l}</span></button>`).join('');
+  const who = S.profile.name || S.profile.email || '';
+  const ini = who.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
   $('#app').innerHTML = `
-  <header class="top">
-    <div class="brand"><span class="logo sm">₹</span>${esc(S.firm || 'CA Desk')}</div>
-    <nav>${nav}</nav>
-    <div class="who">${LOCAL ? '<span class="tag amber">Local mode</span>' : `<span class="muted small">${esc(S.profile.email)}</span><button class="ghost" data-act="logout">Sign out</button>`}</div>
-  </header>
-  ${LOCAL ? `<div class="localbar">Data is saved in this browser on this computer only. Take a backup from <a href="#" data-act="go" data-v="settings">Settings</a> regularly. Client and staff logins switch on once Firebase is connected.</div>` : ''}
-  <main>${body()}</main>`;
+  <div class="shell ${isAdmin() ? '' : 'noside'}">
+    ${isAdmin() ? `<aside class="side">
+      <div class="brand"><span class="logo sm">₹</span><span class="firm">${esc(S.firm || 'CA Desk')}</span></div>
+      <nav>${nav}</nav>
+      <div class="side-foot">${LOCAL ? '<span class="tag amber">Local mode</span>' : `<span class="avatar lg">${esc(ini)}</span><span class="side-who"><b>${esc(S.profile.name || 'Owner')}</b><small>${esc(S.profile.email)}</small></span><button class="ghost signout" data-act="logout" title="Sign out" aria-label="Sign out"><svg viewBox="0 0 24 24"><path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h11"/></svg></button>`}</div>
+    </aside>` : ''}
+    <div class="work">
+      <header class="topbar">
+        <h1 class="ptitle">${isAdmin() ? PAGE_TITLE[S.view] || '' : esc(S.firm || 'CA Desk')}</h1>
+        ${isAdmin() ? `<div class="gsearch"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="gq" placeholder="Find a client by name, PAN or GSTIN" autocomplete="off" value="${esc(S.gq || '')}"><div id="gqres" class="gqres"></div></div>
+          <button class="primary" data-act="fromDoc" data-mode="new">New client</button>`
+          : `<button class="ghost" data-act="logout">Sign out</button>`}
+      </header>
+      ${LOCAL ? `<div class="localbar">Data is saved in this browser on this computer only. Take a backup from <a href="#" data-act="go" data-v="settings">Settings</a> regularly. Client and staff logins switch on once Firebase is connected.</div>` : ''}
+      <main>${body()}</main>
+    </div>
+  </div>`;
+}
+function gqResults() {
+  const box = $('#gqres'); if (!box) return;
+  const q = (S.gq || '').trim().toLowerCase();
+  if (q.length < 2) { box.innerHTML = ''; box.classList.remove('show'); return; }
+  const hits = S.clients.filter(c => [c.name, c.tradeName, c.pan, c.code, ...(c.gstins || [])].some(v => (v || '').toLowerCase().includes(q))).slice(0, 8);
+  box.innerHTML = hits.map(c => `<button data-act="gqOpen" data-id="${c.id}"><b>${esc(c.name)}</b><span>${esc(c.constitution || '')}${c.pan ? ` <code>${esc(c.pan)}</code>` : ''}</span></button>`).join('')
+    || `<p class="muted small">No client matches "${esc(S.gq)}".</p>`;
+  box.classList.add('show');
 }
 function body() {
   switch (S.view) {
@@ -258,6 +290,7 @@ function dueRows({ back = 0, ahead = 45, history = false } = {}) {
   return rows.sort((a, b) => a.due - b.due || (a.c.name || '').localeCompare(b.c.name || ''));
 }
 const dashRows = () => dueRows({ back: 365, ahead: 0, history: true }); // used by bulk "mark filed"
+const isoLocalD = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const baseForm = f => f.replace(/ — .*$/, '').replace(/ \(QRMP\)$/, '');
 const MONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const ICON = {
@@ -296,7 +329,7 @@ function vDashboard() {
     const pct = Math.round(p.filed / p.total * 100), late = p.due < today && p.filed < p.total;
     const left = p.total - p.filed;
     return `<div class="prog click" data-act="dueOpenForm" data-k="${esc(k)}" title="Show pending ${esc(k)}"><div class="prog-h"><b>${esc(k)}</b><span class="muted small">${p.periods.size > 1 ? p.periods.size + ' periods' : esc(p.period)} · due ${p.due.getDate()} ${MONS[p.due.getMonth()]}${p.due.getFullYear() !== today.getFullYear() ? ' ' + p.due.getFullYear() : ''}</span>
-      <span class="prog-n ${late ? 'red' : ''}">${left ? `<span class="${late ? 'red' : 'muted'} small">${left} pending</span> ` : ''}${p.filed}/${p.total}</span></div>
+      <span class="prog-n ${late ? 'red' : ''}">${left ? `<span class="${late ? 'red' : ''}">${left} pending</span>` : '<span class="ok">All filed</span>'}<small class="muted"> ${p.filed}/${p.total}</small></span></div>
       <div class="bar big"><i style="width:${pct}%" class="${pct === 100 ? 'done' : late ? 'late' : ''}"></i></div></div>`;
   }).join('') || '<p class="muted small">Nothing due this month. 🎉</p>';
 
@@ -324,22 +357,57 @@ function vDashboard() {
     openTasks.filter(t => t.due && t.due < todayISO()).length && [`${openTasks.filter(t => t.due && t.due < todayISO()).length} task(s) past due date`, 'go" data-v="tasks', 'red'],
   ].filter(Boolean);
 
+  // the month at a glance: every day, with what falls due and how much is still open
+  const mDays = mEnd.getDate(), dayMap = {};
+  for (const c of S.clients) for (const it of dueItems(c, mStart, mEnd)) {
+    if (it.note === 'Optional') continue;
+    const d = it.due.getDate(), m = dayMap[d] ||= { total: 0, filed: 0, forms: {} };
+    const filed = it.due < dayStart(new Date(S.trackFrom || mStart)) || filingFor(S.allFilings, it, `${c.id}|`)?.status === 'filed';
+    m.total++; if (filed) m.filed++;
+    const f = baseForm(it.form); m.forms[f] = (m.forms[f] || 0) + (filed ? 0 : 1);
+  }
+  const SHORT = f => ({ 'GSTR-1': 'R1', 'GSTR-3B': '3B', 'TDS/TCS payment': 'TDS', 'TDS/TCS returns': 'TDS-R', 'PMT-06 tax payment': 'PMT', 'EPF ECR & payment': 'PF', 'ESIC contribution': 'ESI',
+    'Income tax return': 'ITR', 'MGT-7 / 7A (annual return)': 'MGT7', 'AOC-4 (financials)': 'AOC4', 'GSTR-9 annual return': 'R9', 'DIR-3 KYC (directors)': 'KYC', 'CMP-08': 'CMP8',
+    'Tax audit report': '3CD', 'DPT-3': 'DPT3', 'LLP Form 8': 'LLP8', 'LLP Form 11': 'LLP11' })[f] || f.split(/[\s(]/)[0];
+  const dTxt = n => `${n} ${MONS[today.getMonth()]}`;
+  const strip = Array.from({ length: mDays }, (_, i) => {
+    const d = i + 1, m = dayMap[d], dt = new Date(today.getFullYear(), today.getMonth(), d);
+    const isT = d === today.getDate(), past = dt < today, wd = dt.getDay();
+    const open = m ? m.total - m.filed : 0;
+    const st = !m ? '' : open === 0 ? 'done' : past ? 'late' : 'due';
+    const tip = m ? `${dTxt(d)}: ${Object.entries(m.forms).map(([f, n]) => `${f}${n ? ` (${n} pending)` : ' (all filed)'}`).join(', ')}` : dTxt(d);
+    return `<button class="sday ${st} ${isT ? 'today' : ''} ${wd === 0 ? 'sun' : ''}" ${m ? `data-act="dueDay" data-d="${isoLocalD(dt)}"` : 'disabled'} title="${esc(tip)}">
+      <span class="sd-w">${'SMTWTFS'[wd]}</span><b>${d}</b>${m ? `<span class="sd-f">${Object.keys(m.forms).slice(0, 2).map(SHORT).join(' ')}</span><span class="sd-n">${open || '✓'}</span>` : ''}</button>`;
+  }).join('');
+  const monthOpen = Object.values(dayMap).reduce((a, m) => a + m.total - m.filed, 0);
+  const monthAll = Object.values(dayMap).reduce((a, m) => a + m.total, 0);
+  const nextDue = week[0];
+  const lead = overdue.length ? `${overdue.length} return${overdue.length === 1 ? '' : 's'} overdue. Clear these first.`
+    : nextDue ? `Next up: ${baseForm(nextDue.form)} on ${dTxt(nextDue.due.getDate())} for ${new Set(week.filter(r => +r.due === +nextDue.due).map(r => r.c.id)).size} client(s).`
+    : 'Nothing falls due in the next seven days.';
+
   return `
-  <div class="hero">
-    <div><h1>${hello}${who ? ', ' + esc(who) : ''}</h1><p class="muted">${today.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p></div>
-    <div class="btns"><button data-act="go" data-v="due">All due dates</button><button data-act="genTasks">Generate tasks</button><button class="primary" data-act="fromDoc" data-mode="new">+ New client</button></div>
-  </div>
+  <section class="hero2">
+    <div class="h2-top">
+      <div><p class="h2-date">${today.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+        <h2 class="h2-hello">${hello}${who ? ', ' + esc(who) : ''}</h2><p class="h2-lead">${esc(lead)}</p></div>
+      <div class="h2-meter"><b>${monthAll - monthOpen}<small>/${monthAll}</small></b><span>returns filed in ${MONS[today.getMonth()]}</span>
+        <div class="bar"><i style="width:${monthAll ? Math.round((monthAll - monthOpen) / monthAll * 100) : 0}%"></i></div></div>
+    </div>
+    <div class="strip" role="list" aria-label="Due dates this month" style="grid-template-columns:repeat(${mDays},minmax(30px,1fr))">${strip}</div>
+    <div class="h2-key"><span><i class="k-due"></i>Due, open</span><span><i class="k-late"></i>Missed</span><span><i class="k-done"></i>All filed</span><span><i class="k-today"></i>Today</span><span class="muted">Click a date to see who is pending.</span></div>
+  </section>
   <div class="kpis">
-    <a href="#" class="kpi" data-act="go" data-v="clients"><i class="ic blue">${ICON.users}</i><div><b>${S.clients.length}</b><span>Clients</span><small>${biz.length} businesses · ${S.clients.length - biz.length} individuals</small></div></a>
-    <a href="#" class="kpi" data-act="go" data-v="clients"><i class="ic green">${ICON.gst}</i><div><b>${regs.length}</b><span>Active GSTINs</span><small>${states.size} state(s)</small></div></a>
-    <a href="#" class="kpi" data-act="go" data-v="due"><i class="ic amber">${ICON.clock}</i><div><b>${week.length}</b><span>Due in 7 days</span><small>${new Set(week.map(r => r.c.id)).size} client(s)</small></div></a>
-    <a href="#" class="kpi" data-act="go" data-v="due"><i class="ic ${overdue.length ? 'red' : 'green'}">${ICON.alert}</i><div><b>${overdue.length}</b><span>Overdue</span><small>since ${isoToDisp(S.trackFrom)}</small></div></a>
+    <a href="#" class="kpi" data-act="go" data-v="clients"><i class="ic blue">${ICON.users}</i><div><b>${S.clients.length}</b><span>Clients</span><small>${biz.length} businesses, ${S.clients.length - biz.length} individuals</small></div></a>
+    <a href="#" class="kpi" data-act="go" data-v="comps"><i class="ic green">${ICON.gst}</i><div><b>${regs.length}</b><span>Active GSTINs</span><small>across ${states.size} state${states.size === 1 ? '' : 's'}</small></div></a>
+    <a href="#" class="kpi" data-act="go" data-v="due"><i class="ic amber">${ICON.clock}</i><div><b>${week.length}</b><span>Due in 7 days</span><small>for ${new Set(week.map(r => r.c.id)).size} client(s)</small></div></a>
+    <a href="#" class="kpi ${overdue.length ? 'alert' : ''}" data-act="dueOverdue"><i class="ic ${overdue.length ? 'red' : 'green'}">${ICON.alert}</i><div><b>${overdue.length}</b><span>Overdue</span><small>since ${isoToDisp(S.trackFrom)}</small></div></a>
     <a href="#" class="kpi" data-act="go" data-v="tasks"><i class="ic violet">${ICON.task}</i><div><b>${openTasks.length}</b><span>Open tasks</span><small>${openTasks.filter(t => t.status === 'Waiting on client').length} waiting on client</small></div></a>
   </div>
   <div class="dash-grid">
     <div>
-      <section class="card"><div class="row-between"><h2>Due tasks — ${MONS[today.getMonth()]} ${today.getFullYear()}</h2><button class="sm" data-act="go" data-v="due">Details →</button></div>${progHtml}</section>
-      <section class="card"><div class="row-between"><h2>Next 7 days</h2><button class="sm" data-act="go" data-v="due">All due dates →</button></div><div class="days">${weekHtml}</div></section>
+      <section class="card"><div class="row-between"><h2>Due this month</h2><button class="sm" data-act="go" data-v="due">Open due dates</button></div>${progHtml}</section>
+      <section class="card"><div class="row-between"><h2>Next 7 days</h2></div><div class="days">${weekHtml}</div></section>
     </div>
     <div>
       ${attn.length ? `<section class="card attn"><h2>Needs attention</h2>${attn.map(([t, act, cls]) => `<a href="#" class="attn-row ${cls}" data-act="${act}">${esc(t)} <span>→</span></a>`).join('')}</section>` : ''}
@@ -355,8 +423,10 @@ function vDue() {
   const open = S.dueOpen ||= new Set();
   if (f.form) { open.add(f.form); f.form = ''; } // links from the dashboard open that compliance
   const ahead = f.range === 'overdue' ? 0 : +f.range;
-  let rows = dueRows({ back: 365, ahead, history: f.history });
-  if (f.range === 'overdue') rows = rows.filter(r => r.overdue);
+  let rows = dueRows({ back: 365, ahead: S.dueDay ? 62 : ahead, history: f.history });
+  if (S.dueDay) rows = rows.filter(r => isoLocalD(r.due) === S.dueDay);
+  else if (f.range === 'overdue') rows = rows.filter(r => r.overdue);
+  const allOpen = open.has('*');
   const q = f.q.toLowerCase(); if (q) rows = rows.filter(r => [r.c.name, r.c.tradeName, r.gstin, r.form].some(v => (v || '').toLowerCase().includes(q)));
   // one button per compliance, ordered by its earliest due date
   const groups = new Map();
@@ -382,14 +452,15 @@ function vDue() {
     </div>
     <p class="muted small">Tracking compliance from <b>${isoToDisp(S.trackFrom)}</b>. Returns due earlier are treated as filed before CA Desk. ${isAdmin() ? '<a href="#" data-act="setTrackFrom">Change</a>' : ''}</p>
     <div class="clist">
-    ${list.map(g => `<div class="citem ${open.has(g.name) ? 'open' : ''} ${g.od ? 'has-od' : ''}">
+    ${S.dueDay ? `<div class="fchip">Showing returns due on <b>${isoToDisp(S.dueDay)}</b> <a href="#" data-act="dueDayClear">✕ show all</a></div>` : ''}
+    ${list.map(g => `<div class="citem ${open.has(g.name) || allOpen ? 'open' : ''} ${g.od ? 'has-od' : ''}">
       <button class="chead" data-act="dueToggle" data-k="${esc(g.name)}">
         <span class="cname">${esc(g.name)}</span>
         <span class="ccount"><b>${g.clients}</b> client${g.clients === 1 ? '' : 's'} pending${g.rs.length > g.clients ? ` <span class="muted">(${g.rs.length} returns)</span>` : ''}</span>
         <span class="cdue">${g.od ? `<span class="tag red">${g.od} overdue</span>` : `next ${fmtDate(g.first)}`}</span>
         <span class="chev">▾</span>
       </button>
-      ${open.has(g.name) ? panel(g) : ''}
+      ${open.has(g.name) || allOpen ? panel(g) : ''}
     </div>`).join('') || '<p class="muted empty">Nothing pending. 🎉</p>'}
     </div>
     <p class="muted small">Statutory due dates. Check CBIC / CBDT / MCA notifications for extensions.</p>
@@ -846,10 +917,10 @@ const A = {
     const email = prompt('Enter your login email. A password reset link will be sent.');
     if (email) guard(() => sendPasswordResetEmail(auth, email.trim()), 'Reset link sent — check your inbox.');
   },
-  go: ({ v }) => { S.view = v; S.importRows = v === 'import' ? S.importRows : null; render(); if (v === 'settings') loadStaff(); },
+  go: ({ v }) => { if (v === 'due') { S.dueDay = ''; if (S.dueOpen?.has('*')) S.dueOpen = new Set(); } S.view = v; window.scrollTo(0, 0); S.importRows = v === 'import' ? S.importRows : null; render(); if (v === 'settings') loadStaff(); },
   open: ({ id, tab }) => guard(async () => { await openClient(id, tab || 'master'); render(); }),
   tab: ({ t }) => { S.tab = t; render(); },
-  dueToggle: ({ k }) => { const o = S.dueOpen ||= new Set(); o.has(k) ? o.delete(k) : o.add(k); render(); },
+  dueToggle: ({ k }) => { const o = S.dueOpen ||= new Set(); if (o.has('*')) { o.delete('*'); for (const b of document.querySelectorAll('[data-act=dueToggle]')) o.add(b.dataset.k); } o.has(k) ? o.delete(k) : o.add(k); render(); },
   dueAll: ({ v }) => { S.dueOpen = new Set(); if (v) for (const b of document.querySelectorAll('[data-act=dueToggle]')) S.dueOpen.add(b.dataset.k); render(); },
   mixOpen: ({ k }) => { S.consF = k; S.search = ''; S.sel = new Set(); S.view = 'clients'; render(); },
   consClear: () => { S.consF = ''; render(); },
@@ -866,6 +937,10 @@ const A = {
     A.newTask({ multi: ids, cat: catId, title: cp.id.startsWith('svc:') ? cp.name : '' });
   },
   dueOpenForm: ({ k }) => { S.dueF ||= { range: '30', form: '', q: '', history: false }; S.dueF.form = k; S.dueF.q = ''; S.view = 'due'; render(); },
+  gqOpen: ({ id }) => { S.gq = ''; guard(async () => { await openClient(id, 'master'); render(); }); },
+  dueDay: ({ d }) => { S.dueDay = d; S.dueF ||= { range: '30', form: '', q: '', history: false }; if (new Date(d) < dayStart(new Date())) S.dueF.history = false; S.dueOpen = new Set(['*']); S.view = 'due'; render(); },
+  dueDayClear: () => { S.dueDay = ''; S.dueOpen = new Set(); render(); },
+  dueOverdue: () => { S.dueF ||= { range: '30', form: '', q: '', history: false }; S.dueF.range = 'overdue'; S.dueDay = ''; S.dueOpen = new Set(['*']); S.view = 'due'; render(); },
   clientTab: ({ t }) => { S.consF = ''; S.clientTab = t; S.sel = new Set(); render(); },
   selClear: () => { S.sel = new Set(); render(); },
   moveSel: ({ to }) => {
@@ -1471,6 +1546,7 @@ initSend({ S, A, C, esc, toast, modal, closeModal, regsOf, stateOf, isoToDisp, f
 
 /* ================= event wiring ================= */
 document.addEventListener('click', e => {
+  if (!e.target.closest('.gsearch')) $('#gqres')?.classList.remove('show');
   if (e.target.closest('[data-stop]') && !e.target.closest('button')) return;
   const el = e.target.closest('[data-act]'); if (!el) return;
   if (e.target.closest('input,select,textarea') && el.tagName === 'TR') return;
@@ -1485,6 +1561,7 @@ document.addEventListener('change', e => {
   const el = e.target.closest('[data-change]'); if (el && C[el.dataset.change]) C[el.dataset.change](el, e);
 });
 document.addEventListener('input', e => {
+  if (e.target.id === 'gq') { S.gq = e.target.value; gqResults(); return; }
   if (e.target.id === 'dueQ') {
     S.dueF.q = e.target.value; const pos = e.target.selectionStart; render();
     const s = $('#dueQ'); s.focus(); s.setSelectionRange(pos, pos); return;

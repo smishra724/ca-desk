@@ -312,7 +312,7 @@ export function initTasks(ctx) {
     const total = open.length || 1;
     const seg = Object.entries(cols).map(([s, c]) => { const n = open.filter(t => t.status === s).length; return n ? `<i style="width:${n / total * 100}%;background:${c}" title="${s}: ${n}"></i>` : ''; }).join('');
     const by = {}; for (const t of open) by[t.assignee || 'Unassigned'] = (by[t.assignee || 'Unassigned'] || 0) + 1;
-    return `<section class="card"><div class="row-between"><h2>Tasks</h2><button class="sm" data-act="go" data-v="tasks">Task board →</button></div>
+    return `<section class="card"><div class="row-between"><h2>Tasks</h2><button class="sm" data-act="go" data-v="tasks">Open board</button></div>
       ${open.length ? `<div class="stack">${seg}</div>
       <div class="legend">${Object.entries(cols).map(([s, c]) => `<span><i style="background:${c}"></i>${s} <b>${open.filter(t => t.status === s).length}</b></span>`).join('')}
         <span class="red"><i style="background:var(--red)"></i>Overdue <b>${open.filter(overdue).length}</b></span></div>
