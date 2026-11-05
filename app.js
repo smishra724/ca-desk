@@ -6,6 +6,7 @@ import { initTasks } from './tasks.js';
 import { initSend } from './send.js';
 import { initPayslips } from './payslips.js';
 import { initPayments, isPayKey } from './payments.js';
+import { initTaskFiles } from './taskfiles.js';
 import { initDriveImport } from './drive-import.js';
 
 // Local mode (no login, data in this browser) until firebase-config.js has real keys.
@@ -1809,7 +1810,7 @@ async function afterImport(n) {
 
 /* ================= task manager ================= */
 const T = initTasks({ S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render: () => render(), db, remindBtns: (...a) => remindBtns(...a), payslipSection: t => PS.section(t),
-  payCard: t => PAY.card(t), isPayTask: t => PAY.isPay(t), openPay: (tid, filing) => PAY.challanForm(tid, filing),
+  payCard: t => PAY.card(t), taskFiles: t => TF.section(t), isPayTask: t => PAY.isPay(t), openPay: (tid, filing) => PAY.challanForm(tid, filing),
   fs: { doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, where } });
 
 initDriveImport({ S, A, C, esc, toast, modal, closeModal, db, LOCAL, regsOf, regMirror, mergeReg, newRegId, stateOf, GSTIN_RE,
@@ -1819,6 +1820,8 @@ initSend({ S, A, C, esc, toast, modal, closeModal, regsOf, stateOf, isoToDisp, f
 
 const PAY = initPayments({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, todayISO, db, saveFile, saveBlob, T, WA_ICON, MAIL_ICON,
   fs: { doc, getDocs, setDoc, collection } });
+const TF = initTaskFiles({ S, A, C, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, db, saveFile, saveBlob, T, WA_ICON, MAIL_ICON, busy,
+  fs: { doc, getDocs, deleteDoc, collection, query, where } });
 const PS = initPayslips({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, db, saveBlob, busy, WA_ICON, MAIL_ICON,
   fs: { doc, getDocs, setDoc, updateDoc, deleteDoc, collection, writeBatch, arrayUnion } });
 

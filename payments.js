@@ -24,7 +24,7 @@ export function initPayments(ctx) {
     return new File([Uint8Array.from(atob(b64), c => c.charCodeAt(0))], d.name, { type: d.mime || 'application/octet-stream' });
   }
   async function upload(t, file, category) {
-    const before = Date.now(); const id = await saveFile(t.clientId, file, category, { taskId: t.id, filingKey: t.filingKey || '', byRole: isAdmin() ? 'ca' : 'client' });
+    const before = Date.now(); const id = await saveFile(t.clientId, file, category, { taskId: t.id || '', filingKey: t.filingKey || '', kind: category === 'Payment challan' ? 'output' : 'working', byRole: isAdmin() ? 'ca' : 'client' });
     return { docId: id, name: file.name, mime: file.type || '', at: new Date(before).toISOString(), by: me() };
   }
 

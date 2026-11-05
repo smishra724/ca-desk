@@ -562,3 +562,17 @@ main{padding-bottom:72px}
 .paydue h3{margin:0 0 6px}
 .pd-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #F0D9A8}
 .pd-row:first-of-type{border-top:0}.pd-row span:first-child{display:flex;flex-direction:column}.pd-row small{color:var(--muted)}
+/* task files */
+.tfiles{margin-top:0}
+.tf-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:8px}
+.tf-col{border:1px solid var(--line);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px;background:#FCFDFE}
+.tf-h{display:flex;justify-content:space-between;align-items:center}
+.tf-f{display:grid;grid-template-columns:auto 1fr auto;gap:2px 8px;align-items:center;background:#fff;border:1px solid var(--line-2);border-radius:7px;padding:6px 8px}
+.tf-f input{width:auto;margin:0;grid-row:span 2}.tf-f a{font-size:13px;word-break:break-all}.tf-f .tiny{grid-column:2}.tf-f .icon{grid-row:1/span 2;grid-column:3;color:var(--muted)}
+.tf-f.sel{border-color:var(--brand);background:var(--brand-2)}
+.tf-empty{margin:4px 2px}
+.tf-drop{display:block;text-align:center;border:1.5px dashed #C8D1E0;border-radius:8px;padding:9px;color:var(--ink-700);font-size:13px;font-weight:500;cursor:pointer;margin-top:auto}
+.tf-drop:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-2)}.tf-drop input{display:none}
+.tfiles .btns button svg{width:15px;height:15px;vertical-align:-3px;margin-right:3px}.tfiles .btns button:not(.wa) svg{fill:none;stroke:currentColor;stroke-width:1.8}
+.tfiles button:disabled{opacity:.45;cursor:default}
+@media (max-width:820px){.tf-grid{grid-template-columns:1fr}}

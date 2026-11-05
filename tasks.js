@@ -75,7 +75,7 @@ const catForKey = key => {
 };
 
 export function initTasks(ctx) {
-  const { S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render, fs, remindBtns, payslipSection, payCard, isPayTask, openPay } = ctx;
+  const { S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render, fs, remindBtns, payslipSection, payCard, isPayTask, openPay, taskFiles } = ctx;
   const { doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, where } = fs;
   const db = ctx.db;
   const T = {};
@@ -425,6 +425,7 @@ export function initTasks(ctx) {
       <div class="bar big"><i style="width:${p}%"></i></div><div class="muted small">${p}% complete</div>
     </section>
     ${payCard(t)}
+    ${taskFiles(t)}
     <div class="split">
       <section class="card">
         <h2>Checklist</h2>

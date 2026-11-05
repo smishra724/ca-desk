@@ -40,9 +40,9 @@ service cloud.firestore {
       }
     }
 
-    // A client may upload a payment challan for itself and mark that payment as paid — nothing else.
+    // A client may upload input data / a payment challan for itself and mark that payment as paid — nothing else.
     match /clients/{cid}/docs/{d} {
-      allow create: if isClientOf(cid) && request.resource.data.category == 'Payment challan' && request.resource.data.byRole == 'client';
+      allow create: if isClientOf(cid) && request.resource.data.category in ['Payment challan', 'Input data'] && request.resource.data.byRole == 'client';
     }
     match /clients/{cid}/docs/{d}/chunks/{k} {
       allow create: if isClientOf(cid); // file pieces of the challan above (written just before the challan record)
