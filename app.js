@@ -242,7 +242,7 @@ function render() {
           : `<button class="ghost" data-act="logout">Sign out</button>`}
       </header>
       ${LOCAL ? `<div class="localbar">Data is saved in this browser on this computer only. Take a backup from <a href="#" data-act="go" data-v="settings">Settings</a> regularly. Client and staff logins switch on once Firebase is connected.</div>` : ''}
-      <main>${body()}</main>
+      <main class="v-${S.view}">${body()}</main>
     </div>
   </div>
   ${isAdmin() ? `<div class="fab ${S.fab ? 'open' : ''}">

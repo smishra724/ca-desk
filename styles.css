@@ -523,3 +523,25 @@ button.wa svg{width:16px;height:16px;fill:currentColor;vertical-align:-3px;margi
 .gqres button code{font-size:11.5px}
 .gqres{min-width:380px}
 @media (max-width:980px){.gqres{min-width:0}}
+/* wider work area; the task register uses the full width so it never needs a sideways scrollbar */
+main{max-width:1560px}
+main.v-tasks,main.v-due{max-width:none}
+.reg th.hf{position:sticky}
+.reg{min-width:0;table-layout:auto}
+.reg td,.reg th{padding-left:8px;padding-right:8px}
+.reg td:nth-child(3){min-width:170px}.reg td:nth-child(4){min-width:120px}
+.reg .pbar{width:48px}
+.reg td .st-sel{max-width:140px}
+.reg-wrap{overflow-x:auto;overflow-y:auto}
+@media (min-width:1500px){.reg td:nth-child(3){min-width:220px}.reg .pbar{width:64px}}
+main{padding-bottom:72px}
+@media (max-width:1440px){
+  .reg td:nth-child(3){min-width:150px}.reg td:nth-child(4){min-width:120px}
+  .reg .pnum{display:none}.reg .pbar{width:44px;margin-right:0}
+  .reg td .st-sel{max-width:122px;font-size:11.5px;padding-right:20px}
+  .reg .dd{display:block;margin:2px 0 0;width:max-content}
+  .reg .rb{width:26px;height:26px}
+  .side{width:auto}.shell{grid-template-columns:200px minmax(0,1fr)}
+  main{padding-left:20px;padding-right:20px}
+}
+@media (max-width:980px){.shell{grid-template-columns:minmax(0,1fr)}}
