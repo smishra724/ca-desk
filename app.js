@@ -243,7 +243,16 @@ function render() {
       ${LOCAL ? `<div class="localbar">Data is saved in this browser on this computer only. Take a backup from <a href="#" data-act="go" data-v="settings">Settings</a> regularly. Client and staff logins switch on once Firebase is connected.</div>` : ''}
       <main>${body()}</main>
     </div>
-  </div>`;
+  </div>
+  ${isAdmin() ? `<div class="fab ${S.fab ? 'open' : ''}">
+    ${S.fab ? `<div class="fab-menu" role="menu">
+      <button role="menuitem" data-act="fabGo" data-to="task"><i>${ICON.task}</i><span>New task</span></button>
+      <button role="menuitem" data-act="fabGo" data-to="client"><i>${ICON.users}</i><span>New client</span></button>
+      <button role="menuitem" data-act="fabGo" data-to="reminder"><i>${ICON.clock}</i><span>Add a reminder</span></button>
+      <button role="menuitem" data-act="fabGo" data-to="remind"><i class="wa">${WA_ICON}</i><span>Remind a client</span></button>
+    </div>` : ''}
+    <button class="fab-btn" data-act="fabToggle" aria-label="${S.fab ? 'Close menu' : 'Add task, client or reminder'}" aria-expanded="${!!S.fab}"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  </div>` : ''}`;
 }
 function gqResults() {
   const box = $('#gqres'); if (!box) return;
@@ -352,7 +361,9 @@ function vDashboard() {
   // needs attention
   const noPan = S.clients.filter(c => !c.pan).length;
   const noLogin = regs.filter(r => !r.c._hasGstLogin).length;
+  const remDue = S.tasks.filter(t => t.kind === 'reminder' && !['Completed', 'Cancelled'].includes(t.status) && t.due && t.due <= todayISO());
   const attn = [
+    remDue.length && [`${remDue.length} reminder${remDue.length === 1 ? '' : 's'} for today: ${remDue.slice(0, 2).map(t => t.title).join('; ')}${remDue.length > 2 ? '…' : ''}`, 'remToday', 'amber'],
     overdue.length && [`${overdue.length} return(s) overdue since ${isoToDisp(S.trackFrom)}`, 'go" data-v="due', 'red'],
     noPan && [`${noPan} client(s) without PAN`, 'cliShow" data-v="nopan', 'amber'],
     openTasks.filter(t => t.due && t.due < todayISO()).length && [`${openTasks.filter(t => t.due && t.due < todayISO()).length} task(s) past due date`, 'go" data-v="tasks', 'red'],
@@ -773,7 +784,7 @@ function pendingFor(cid, keys) {
   return dueItems(c, new Date(y - 2, 0, 1), new Date(y + 1, 11, 31)).filter(it => keys.includes(it.key) || (it.altKey && keys.includes(it.altKey)));
 }
 function reminderText(c, items) {
-  const L = [`Dear ${c.name || 'Sir/Madam'},`, '', items.length > 1 ? 'Gentle reminder — the following are due:' : 'Gentle reminder — the following is due:', ''];
+  const L = [`Dear ${c.name || 'Sir/Madam'},`, '', !items.length ? 'Gentle reminder from our side regarding your pending work.' : items.length > 1 ? 'Gentle reminder — the following are due:' : 'Gentle reminder — the following is due:', ''];
   const docs = new Set();
   for (const it of items) {
     const late = it.due < dayStart(new Date());
@@ -826,6 +837,23 @@ function openBulkRemind(name) {
       <span class="rbtns"><button class="rb wa ${c.mobile ? '' : 'off'}" data-act="remindQuick" data-cid="${cid}" data-via="wa" title="WhatsApp">${WA_ICON}</button><button class="rb em ${c.email ? '' : 'off'}" data-act="remindQuick" data-cid="${cid}" data-via="gmail" title="Gmail">${MAIL_ICON}</button><button class="sm" data-act="remind" data-cid="${cid}" data-keys="${esc(keys.join(','))}" data-via="wa">Edit…</button></span></div>`; }).join('')}</div>
     <div class="btns mt"><button data-act="closeModal">Done</button></div>`);
 }
+
+// personal reminders ("call X about pending bills on 10 Nov 4 pm") are kept as tasks of kind 'reminder'
+function reminderForm() {
+  const tm = new Date(); tm.setDate(tm.getDate() + 1);
+  modal(`<h2>Add a reminder</h2><form data-form="fabReminder" class="grid">
+    <label class="span2">Remind me to<input name="title" required placeholder="e.g. Call for October purchase bills, collect DSC, follow up on fees"></label>
+    <label class="span2">Client (optional)<input name="c" list="remClients" placeholder="Type a name, PAN or GSTIN" autocomplete="off"></label>
+    <datalist id="remClients">${S.clients.map(c => `<option value="${esc(c.name)}${c.pan ? ' · ' + esc(c.pan) : ''}">`).join('')}</datalist>
+    <label>Date<input type="date" name="due" value="${isoLocalD(tm)}" required></label>
+    <label>Time<input type="time" name="time" value="10:00"></label>
+    <label>For<select name="assignee"><option value="">Me</option>${(S.wf?.staff || []).map(x => `<option>${esc(x)}</option>`).join('')}</select></label>
+    <label>Priority<select name="priority"><option>Normal</option><option>High</option><option>Urgent</option><option>Low</option></select></label>
+    <label class="span2">Note<textarea name="note" rows="2" placeholder="Anything to remember"></textarea></label>
+    <div class="span2 btns"><button class="primary">Save reminder</button><button type="button" data-act="closeModal">Cancel</button></div></form>`);
+}
+const pickClient = v => { const s = (v || '').trim().toLowerCase(); if (!s) return null; const nm = s.split(' · ')[0];
+  return S.clients.find(c => c.name?.toLowerCase() === nm) || S.clients.find(c => [c.pan, c.gstin, ...(c.gstins || [])].some(x => x && s.includes(x.toLowerCase()))) || S.clients.find(c => c.name?.toLowerCase().includes(nm)); };
 
 /* ---------- compliances: pick a compliance / task, tick the clients it applies to ---------- */
 // type 'flag' = client opt-in flag (drives the calendar); 'auto' = applies by law (GSTIN / constitution), can be switched off per client;
@@ -1035,6 +1063,7 @@ const A = {
   gqOpen: ({ id }) => { S.gq = ''; guard(async () => { await openClient(id, 'master'); render(); }); },
   dueDay: ({ d }) => { S.dueDay = d; S.dueF ||= { range: '30', form: '', q: '', history: false }; if (new Date(d) < dayStart(new Date())) S.dueF.history = false; S.dueOpen = new Set(['*']); S.view = 'due'; render(); },
   dueDayClear: () => { S.dueDay = ''; S.dueOpen = new Set(); render(); },
+  remToday: () => { Object.assign(S.tf, { q: '', status: 'open', due: '', kind: 'reminder', mode: 'list' }); S.view = 'tasks'; render(); },
   dueOverdue: () => { S.dueF ||= { range: '30', form: '', q: '', history: false }; S.dueF.range = 'overdue'; S.dueDay = ''; S.dueOpen = new Set(['*']); S.view = 'due'; render(); },
   remind: ({ cid, keys, via }) => openReminder(cid, keys.split(','), via),
   remindSend: ({ via }) => guard(() => remindSend(via), 'Reminder logged'),
@@ -1049,6 +1078,19 @@ const A = {
     for (const k of keys) await T.logReminder(cid, k, `Reminder sent on ${via === 'wa' ? 'WhatsApp' : 'email'} to ${rec.to}`);
     document.getElementById('br_' + cid)?.classList.add('sent');
   }),
+  fabToggle: () => { S.fab = !S.fab; render(); },
+  fabGo: ({ to }) => {
+    S.fab = false; render();
+    if (to === 'task') A.newTask({});
+    else if (to === 'client') modal(`<h2>New client</h2><p class="muted small">Upload a GST certificate, PAN, incorporation certificate or deed and the details are filled in for you — or start with a blank form.</p>
+      <div class="btns mt"><button class="primary" data-act="fabClient" data-m="doc">From documents</button><button data-act="fabClient" data-m="blank">Blank business client</button><button data-act="fabClient" data-m="itr">Blank ITR-only individual</button><button data-act="closeModal">Cancel</button></div>`);
+    else if (to === 'reminder') reminderForm();
+    else modal(`<h2>Remind a client</h2><form data-form="fabRemind" class="grid narrow"><label class="span2">Client<input name="c" list="fabClients" placeholder="Type a name, PAN or GSTIN" required autocomplete="off"></label>
+      <datalist id="fabClients">${S.clients.map(c => `<option value="${esc(c.name)}${c.pan ? ' · ' + esc(c.pan) : ''}">`).join('')}</datalist>
+      <p class="muted small span2">The message lists everything pending for this client in the next 30 days, with the documents needed.</p>
+      <div class="span2 btns"><button class="primary">Continue</button><button type="button" data-act="closeModal">Cancel</button></div></form>`);
+  },
+  fabClient: ({ m }) => { closeModal(); if (m === 'doc') A.fromDoc({ mode: 'new' }); else A.newClient({ cat: m === 'itr' ? 'itr' : '' }); },
   clientTab: ({ t }) => { S.consF = ''; S.clientTab = t; S.sel = new Set(); render(); },
   selClear: () => { S.sel = new Set(); render(); },
   moveSel: ({ to }) => {
@@ -1340,6 +1382,20 @@ const F = {
     }
     await b.commit(); closeModal(); render(); toast(`${n} return(s) marked as filed`);
   }),
+  fabReminder: fd => guard(async () => {
+    const cv = fd.get('c'), c = pickClient(cv);
+    if (cv.trim() && !c) throw new Error(`No client matches "${cv}". Pick one from the list or leave it blank.`);
+    const id = await T.create({ clientId: c?.id || '', catId: 'GEN', title: fd.get('title').trim(), due: fd.get('due'), priority: fd.get('priority'),
+      assignee: fd.get('assignee') || '', extra: { kind: 'reminder', remindTime: fd.get('time') || '' } });
+    const note = fd.get('note').trim(); if (note) { const t = S.tasks.find(x => x.id === id); t.notes = [{ at: new Date().toISOString(), by: S.profile?.name || S.profile?.email || 'Owner', text: note }]; await updateDoc(doc(db, 'tasks', id), { notes: t.notes }); }
+    closeModal(); render();
+  }, 'Reminder saved — it shows on the Dashboard and in Tasks'),
+  fabRemind: fd => {
+    const c = pickClient(fd.get('c')); if (!c) return toast('Pick a client from the list');
+    const t = dayStart(new Date()), to = new Date(t); to.setDate(to.getDate() + 30);
+    const keys = dueRows({ back: 365, ahead: 30 }).filter(r => r.c.id === c.id).map(r => r.key);
+    closeModal(); openReminder(c.id, keys, 'wa');
+  },
   filed: (fd, form) => guard(async () => {
     const { cid, key } = form.dataset;
     const data = { status: 'filed', filedOn: fd.get('filedOn'), ack: fd.get('ack').trim(), remarks: fd.get('remarks').trim(), by: S.profile.email, at: serverTimestamp() };
@@ -1690,4 +1746,5 @@ document.addEventListener('input', e => {
   }
 });
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); if (S.fab) { S.fab = false; render(); } } });
+document.addEventListener('click', e => { if (S.fab && !e.target.closest('.fab')) { S.fab = false; render(); } });

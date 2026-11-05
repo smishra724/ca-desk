@@ -124,6 +124,7 @@ export function initTasks(ctx) {
   };
   T.docsFor = (cid, key) => { const t = T.taskFor(cid, key); if (t) return (t.list?.docs || []).filter((d, i) => !t.done?.docs?.[i]); return findCat(catForKey(key))?.c.docs || []; };
   T.logReminder = async (cid, key, text) => { const t = T.taskFor(cid, key); if (t) await patch(t.id, {}, text); };
+  T.create = createTask;
   T.markDone = async (cid, key, ack) => {
     const t = T.taskFor(cid, key); if (!t || ['Completed', 'Cancelled'].includes(t.status)) return;
     await patch(t.id, { status: 'Completed', ack: ack || t.ack || '', done: { ...t.done, acts: (t.list?.acts || []).map(() => true) } }, `Status: ${t.status} → Completed (marked filed)`);
@@ -157,7 +158,8 @@ export function initTasks(ctx) {
       assignee: data.assignee ?? (found?.d.assignee || ''), priority: data.priority || 'Normal', status: 'Not started',
       list: { docs: [...(found?.c.docs || [])], acts: (found?.c.acts || []).map(a => ({ ...a })), outs: [...(found?.c.outs || [])] },
       done: { docs: [], acts: [], outs: [] }, filingKey: data.filingKey || '', fee: +data.fee || 0, billed: false, received: 0,
-      notes: [], time: [], log: [{ at: nowISO(), by: me(), text: 'Task created' }], starred: false, createdAt: nowISO(), updatedAt: nowISO(),
+      notes: [], time: [], log: [{ at: nowISO(), by: me(), text: data.extra?.kind === 'reminder' ? 'Reminder created' : 'Task created' }], starred: false, createdAt: nowISO(), updatedAt: nowISO(),
+      ...(data.extra || {}),
     };
     const r = await addDoc(collection(db, 'tasks'), t);
     S.tasks.push({ id: r.id, ...t }); return r.id;
@@ -219,7 +221,7 @@ export function initTasks(ctx) {
       (!f.dept || t.deptId === f.dept) &&
       (!f.client || t.clientId === f.client) && (!f.cat || t.catId === f.cat) && (!f.period || t.period === f.period) &&
       (!f.prio || (t.priority || 'Normal') === f.prio) && (!f.from || (t.due && t.due >= f.from)) && (!f.to || (t.due && t.due <= f.to)) &&
-      (!f.star || t.starred) && colPass(t, skipCol));
+      (!f.star || t.starred) && (!f.kind || t.kind === f.kind) && colPass(t, skipCol));
   }
   function filtered() {
     const f = S.tf, today = todayISO();
@@ -293,7 +295,8 @@ export function initTasks(ctx) {
       ['Under review', '', 'Under review', open.filter(t => t.status === 'Under review').length, 'c-ur'],
       ['Completed', '', 'Completed', sc.filter(t => t.status === 'Completed').length, 'c-cp'],
     ];
-    const ctrHtml = ctr.map(([st, du, l, n, cls]) => `<button class="ctr ${cls} ${f.status === st && (f.due || '') === du ? 'on' : ''}" data-act="tctr" data-s="${st}" data-d="${du}"><b>${n}</b><span>${l}</span></button>`).join('');
+    const remN = S.tasks.filter(t => t.kind === 'reminder' && !['Completed', 'Cancelled'].includes(t.status)).length;
+    const ctrHtml = (remN ? `<button class="ctr c-rem ${f.kind === 'reminder' ? 'on' : ''}" data-act="tkind"><b>${remN}</b><span>My reminders</span></button>` : '') + ctr.map(([st, du, l, n, cls]) => `<button class="ctr ${cls} ${f.status === st && (f.due || '') === du ? 'on' : ''}" data-act="tctr" data-s="${st}" data-d="${du}"><b>${n}</b><span>${l}</span></button>`).join('');
     // left panel: departments and staff with open counts
     const base = S.tasks.filter(t => f.status === 'all' || (f.status === 'open' ? !['Completed', 'Cancelled'].includes(t.status) : t.status === f.status));
     const deptRows = [['', 'All departments', base.length], ...S.wf.departments.map(d => [d.id, d.name, base.filter(t => t.deptId === d.id).length])]
@@ -323,7 +326,7 @@ export function initTasks(ctx) {
           ${adm ? `<td class="cbx"><input type="checkbox" data-change="tsel" value="${t.id}" ${sel.has(t.id) ? 'checked' : ''}></td>` : ''}
           <td class="nowrap"><a href="#" data-act="openTask" data-id="${t.id}" class="tno">${tno(t)}</a>${t.starred ? ' <span class="star">★</span>' : ''}${t.priority === 'Urgent' || t.priority === 'High' ? ` <span class="pri ${t.priority === 'Urgent' ? 'u' : 'h'}">${t.priority}</span>` : ''}</td>
           <td><a href="#" data-act="openTask" data-id="${t.id}" class="cl">${esc(t.clientName || '—')}</a>${c?.pan || c?.gstin ? `<div class="sub mono">${esc(c.gstin || c.pan)}</div>` : ''}</td>
-          <td>${esc(t.title)}${t.dept ? `<div class="sub"><span class="dept">${esc(t.dept)}</span></div>` : ''}</td>
+          <td>${esc(t.title)}${t.kind === 'reminder' ? `<div class="sub"><span class="dept rem">Reminder${t.remindTime ? ' · ' + esc(t.remindTime) : ''}</span></div>` : t.dept ? `<div class="sub"><span class="dept">${esc(t.dept)}</span></div>` : ''}</td>
           <td class="per" title="${esc(t.period || '')}">${esc((t.period || '—').replace(/\s*\(AY[^)]*\)/, ''))}</td>
           <td class="nowrap">${t.assignee ? `<i class="av">${esc(initials(t.assignee))}</i>${esc(t.assignee)}` : '<span class="muted">Unassigned</span>'}</td>
           <td class="nowrap">${t.due ? isoToDisp(t.due) : '<span class="muted">—</span>'} ${dueBadge(t)}</td>
@@ -354,6 +357,7 @@ export function initTasks(ctx) {
   function filterChips() {
     const f = S.tf, chips = [];
     for (const [k, vals] of Object.entries(f.cf || {})) if (vals) chips.push(`<span class="fchip2">${COLS[k].label}: <b>${esc(vals.length > 2 ? `${vals.slice(0, 2).join(', ')} +${vals.length - 2}` : vals.join(', ') || 'none')}</b><button data-act="hclear" data-k="${k}" aria-label="Remove filter">✕</button></span>`);
+    if (f.kind) chips.push(`<span class="fchip2">Showing <b>my reminders</b><button data-act="tkind" aria-label="Remove filter">✕</button></span>`);
     if (f.sort) chips.push(`<span class="fchip2">Sorted by ${COLS[f.sort.k].label} ${f.sort.d > 0 ? '↑' : '↓'}<button data-act="hsortClear" aria-label="Remove sort">✕</button></span>`);
     if (f.dept || f.assignee || f.due || f.client || f.cat || f.period || f.prio || f.from || f.to) chips.push(`<span class="fchip2">Dashboard filter<button data-act="tfClear" aria-label="Remove">✕</button></span>`);
     return chips.length ? `<div class="fchips">${chips.join('')}<button class="link" data-act="tfClear">Clear all filters</button></div>` : '';
@@ -499,7 +503,8 @@ export function initTasks(ctx) {
   /* ---------- actions ---------- */
   Object.assign(A, {
     taskMode: ({ m }) => { S.tf.mode = m; render(); },
-    tctr: ({ s, d }) => { S.tf.status = s; S.tf.due = d || ''; if (S.tf.cf) S.tf.cf.status = null; S.tsel = new Set(); render(); },
+    tkind: () => { S.tf.kind = S.tf.kind === 'reminder' ? '' : 'reminder'; S.tf.status = 'open'; S.tsel = new Set(); render(); },
+    tctr: ({ s, d }) => { S.tf.kind = ''; S.tf.status = s; S.tf.due = d || ''; if (S.tf.cf) S.tf.cf.status = null; S.tsel = new Set(); render(); },
     tfset: ({ k, v }) => { S.tf[k] = v || ''; S.tsel = new Set(); render(); },
     tselClear: () => { S.tsel = new Set(); render(); },
     hopen: ({ k }) => {
@@ -517,7 +522,7 @@ export function initTasks(ctx) {
       S.tf.cf ||= {}; S.tf.cf[k] = on.length === all.length ? null : on; if (k === 'status' && S.tf.cf[k]) { S.tf.status = 'all'; S.tf.due = ''; } S.hf = null; S.tsel = new Set(); render();
     },
     hclear: ({ k }) => { if (S.tf.cf) S.tf.cf[k] = null; S.hf = null; render(); },
-    tfClear: () => { Object.assign(S.tf, { q: '', assignee: '', dept: '', status: 'open', due: '', star: false, client: '', cat: '', period: '', prio: '', from: '', to: '', cf: {}, sort: null }); S.hf = null; S.tsel = new Set(); render(); },
+    tfClear: () => { Object.assign(S.tf, { q: '', assignee: '', dept: '', status: 'open', due: '', star: false, client: '', cat: '', period: '', prio: '', from: '', to: '', cf: {}, sort: null, kind: '' }); S.hf = null; S.tsel = new Set(); render(); },
     openTask: ({ id }) => { S.task = id; S.view = 'task'; render(); window.scrollTo(0, 0); },
     newTask: ({ cid, multi, cat, title } = {}) => {
       S.newMulti = Array.isArray(multi) ? multi : null; // several clients picked on the Compliances page → one task each
