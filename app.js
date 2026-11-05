@@ -180,7 +180,8 @@ async function loadClients() {
 async function loadGstLoginFlags() {
   try {
     const snap = await getDocs(collectionGroup(db, 'credentials'));
-    const has = new Set(); snap.forEach(d => { if (d.data().portal === 'gst') has.add(d.ref.parent.parent.id); });
+    const has = new Set(); S.credIdx = [];
+    snap.forEach(d => { const x = d.data(), cid = d.ref.parent.parent.id; if (x.portal === 'gst') has.add(cid); if (x.username) S.credIdx.push({ cid, portal: x.portal, label: x.label || '', username: x.username }); });
     for (const c of S.clients) c._hasGstLogin = has.has(c.id);
   } catch {}
 }
@@ -236,7 +237,7 @@ function render() {
     <div class="work">
       <header class="topbar">
         <h1 class="ptitle">${isAdmin() ? PAGE_TITLE[S.view] || '' : esc(S.firm || 'CA Desk')}</h1>
-        ${isAdmin() ? `<div class="gsearch"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="gq" placeholder="Find a client by name, PAN or GSTIN" autocomplete="off" value="${esc(S.gq || '')}"><div id="gqres" class="gqres"></div></div>
+        ${isAdmin() ? `<div class="gsearch"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="gq" placeholder="Search anything — client, PAN, GSTIN, task, compliance, login" title="Ctrl+K" autocomplete="off" value="${esc(S.gq || '')}"><div id="gqres" class="gqres"></div></div>
           <button class="primary" data-act="fromDoc" data-mode="new">New client</button>`
           : `<button class="ghost" data-act="logout">Sign out</button>`}
       </header>
@@ -250,17 +251,37 @@ function render() {
       <button role="menuitem" data-act="fabGo" data-to="client"><i>${ICON.users}</i><span>New client</span></button>
       <button role="menuitem" data-act="fabGo" data-to="reminder"><i>${ICON.clock}</i><span>Add a reminder</span></button>
       <button role="menuitem" data-act="fabGo" data-to="remind"><i class="wa">${WA_ICON}</i><span>Remind a client</span></button>
+      <button role="menuitem" data-act="go" data-v="comps"><i>${ICON.gst}</i><span>Assign compliance / work to clients</span></button>
     </div>` : ''}
     <button class="fab-btn" data-act="fabToggle" aria-label="${S.fab ? 'Close menu' : 'Add task, client or reminder'}" aria-expanded="${!!S.fab}"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
   </div>` : ''}`;
 }
+// "Search anything": pages & actions, compliances, clients, portal logins (usernames only) and tasks
+const GO = [
+  ['Dashboard', 'go', 'dashboard', 'home overview'], ['Due dates', 'go', 'due', 'pending returns calendar'], ['Tasks', 'go', 'tasks', 'register board work'],
+  ['Clients', 'go', 'clients', 'list business itr'], ['Compliances — tick clients for each compliance or work', 'go', 'comps', 'compliances applicable assign multiple clients select tick applicability work'],
+  ['Excel import', 'go', 'import', 'upload excel bulk'], ['Settings', 'go', 'settings', 'firm backup drive staff logins'], ['Work categories & staff', 'go', 'workflow', 'departments checklist staff automatic tasks'],
+  ['New task', 'newTask', '', 'add create task'], ['New client', 'fabGo', 'client', 'add create client'], ['Add a reminder', 'fabGo', 'reminder', 'add create reminder note follow up'],
+  ['Remind a client on WhatsApp / email', 'fabGo', 'remind', 'whatsapp email reminder send message'],
+];
 function gqResults() {
   const box = $('#gqres'); if (!box) return;
-  const q = (S.gq || '').trim().toLowerCase();
+  const raw = (S.gq || '').trim(), q = raw.toLowerCase(), qn = q.replace(/[^a-z0-9]/g, '');
   if (q.length < 2) { box.innerHTML = ''; box.classList.remove('show'); return; }
-  const hits = S.clients.filter(c => [c.name, c.tradeName, c.pan, c.code, ...(c.gstins || [])].some(v => (v || '').toLowerCase().includes(q))).slice(0, 8);
-  box.innerHTML = hits.map(c => `<button data-act="gqOpen" data-id="${c.id}"><b>${esc(c.name)}</b><span>${esc(c.constitution || '')}${c.pan ? ` <code>${esc(c.pan)}</code>` : ''}</span></button>`).join('')
-    || `<p class="muted small">No client matches "${esc(S.gq)}".</p>`;
+  const has = (...v) => v.some(x => { const s = String(x || '').toLowerCase(); return s.includes(q) || (qn.length > 2 && s.replace(/[^a-z0-9]/g, '').includes(qn)); });
+  const groups = [];
+  const go = GO.filter(([l, , , k]) => has(l, k)).slice(0, 4);
+  if (go.length) groups.push(['Go to', go.map(([l, act, v]) => `<button data-act="gqDo" data-a="${act}" data-v="${v}"><b>${esc(l)}</b></button>`)]);
+  const comps = COMPS.filter(cp => has(cp.name, cp.id, cp.grp)).slice(0, 4);
+  if (comps.length) groups.push(['Compliances & work', comps.map(cp => `<button data-act="gqComp" data-id="${esc(cp.id)}"><b>${esc(cp.name)}</b><span>${S.clients.filter(c => compOn(cp, c)).length} client(s) · tick clients, see due dates</span></button>`)]);
+  const cl = S.clients.filter(c => has(c.name, c.tradeName, c.pan, c.code, c.tan, c.cin, c.mobile, c.email, ...(c.gstins || []))).slice(0, 6);
+  if (cl.length) groups.push(['Clients', cl.map(c => `<button data-act="gqOpen" data-id="${c.id}"><b>${esc(c.name)}</b><span>${esc(c.constitution || '')}${c.pan ? ` · <code>${esc(c.pan)}</code>` : ''}${regsOf(c)[0] ? ` · <code>${esc(regsOf(c)[0].gstin)}</code>` : ''}${isItrOnly(c) ? ' · ITR only' : ''}</span></button>`)]);
+  const lg = (S.credIdx || []).filter(x => has(x.username, x.label)).slice(0, 4);
+  if (lg.length) groups.push(['Portal logins', lg.map(x => { const c = S.clients.find(y => y.id === x.cid); return `<button data-act="gqLogin" data-id="${x.cid}"><b>${esc(x.username)}</b><span>${esc((x.portal || '').toUpperCase())} login · ${esc(c?.name || '')}</span></button>`; })]);
+  const tk = (S.tasks || []).filter(t => has('T-' + String(t.no || 0).padStart(4, '0'), t.title, t.clientName, t.period)).sort((a, b) => (a.status === 'Completed') - (b.status === 'Completed') || (a.due || '9').localeCompare(b.due || '9')).slice(0, 5);
+  if (tk.length) groups.push(['Tasks', tk.map(t => `<button data-act="gqTask" data-id="${t.id}"><b><code>T-${String(t.no || 0).padStart(4, '0')}</code> ${esc(t.title)}${t.period ? ' · ' + esc(t.period) : ''}</b><span>${esc(t.clientName || '')} · ${esc(t.status)}${t.due ? ' · due ' + isoToDisp(t.due) : ''}</span></button>`)]);
+  box.innerHTML = groups.map(([h, items]) => `<div class="gq-h">${h}</div>${items.join('')}`).join('') || `<p class="muted small">Nothing matches "${esc(raw)}".</p>`;
+  box.querySelector('button')?.classList.add('active');
   box.classList.add('show');
 }
 function body() {
@@ -1038,7 +1059,7 @@ const A = {
     const email = prompt('Enter your login email. A password reset link will be sent.');
     if (email) guard(() => sendPasswordResetEmail(auth, email.trim()), 'Reset link sent — check your inbox.');
   },
-  go: ({ v }) => { if (v === 'due') { S.dueDay = ''; if (S.dueOpen?.has('*')) S.dueOpen = new Set(); } S.view = v; window.scrollTo(0, 0); S.importRows = v === 'import' ? S.importRows : null; render(); if (v === 'settings') loadStaff(); },
+  go: ({ v }) => { S.fab = false; if (v === 'due') { S.dueDay = ''; if (S.dueOpen?.has('*')) S.dueOpen = new Set(); } S.view = v; window.scrollTo(0, 0); S.importRows = v === 'import' ? S.importRows : null; render(); if (v === 'settings') loadStaff(); },
   open: ({ id, tab }) => guard(async () => { await openClient(id, tab || 'master'); render(); }),
   tab: ({ t }) => { S.tab = t; render(); },
   dueToggle: ({ k }) => { const o = S.dueOpen ||= new Set(); if (o.has('*')) { o.delete('*'); for (const b of document.querySelectorAll('[data-act=dueToggle]')) o.add(b.dataset.k); } o.has(k) ? o.delete(k) : o.add(k); render(); },
@@ -1061,6 +1082,10 @@ const A = {
   },
   dueOpenForm: ({ k }) => { S.dueF ||= { range: '30', form: '', q: '', history: false }; S.dueF.form = k; S.dueF.q = ''; S.view = 'due'; render(); },
   gqOpen: ({ id }) => { S.gq = ''; guard(async () => { await openClient(id, 'master'); render(); }); },
+  gqLogin: ({ id }) => { S.gq = ''; guard(async () => { await openClient(id, 'logins'); render(); }); },
+  gqTask: ({ id }) => { S.gq = ''; A.openTask({ id }); },
+  gqComp: ({ id }) => { S.gq = ''; S.view = 'comps'; S.compSel = id; S.compPick = null; S.compQ = ''; S.compCons = ''; render(); setTimeout(() => document.getElementById('compPanel')?.scrollIntoView({ behavior: 'smooth' }), 50); },
+  gqDo: ({ a, v }) => { S.gq = ''; if (a === 'go') A.go({ v }); else if (a === 'newTask') { render(); A.newTask({}); } else A.fabGo({ to: v }); },
   dueDay: ({ d }) => { S.dueDay = d; S.dueF ||= { range: '30', form: '', q: '', history: false }; if (new Date(d) < dayStart(new Date())) S.dueF.history = false; S.dueOpen = new Set(['*']); S.view = 'due'; render(); },
   dueDayClear: () => { S.dueDay = ''; S.dueOpen = new Set(); render(); },
   remToday: () => { Object.assign(S.tf, { q: '', status: 'open', due: '', kind: 'reminder', mode: 'list' }); S.view = 'tasks'; render(); },
@@ -1746,5 +1771,15 @@ document.addEventListener('input', e => {
   }
 });
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
+document.addEventListener('keydown', e => {
+  // Ctrl+K or "/" jumps to search; arrows + Enter pick a result
+  if ((e.key === 'k' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName))) { const g = $('#gq'); if (g) { e.preventDefault(); g.focus(); g.select(); } return; }
+  if (e.target.id === 'gq' && ['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) {
+    const bs = [...document.querySelectorAll('#gqres button')]; if (!bs.length) return; e.preventDefault();
+    let i = bs.findIndex(b => b.classList.contains('active'));
+    if (e.key === 'Enter') { (bs[i] || bs[0]).click(); return; }
+    bs[i]?.classList.remove('active'); i = (i + (e.key === 'ArrowDown' ? 1 : -1) + bs.length) % bs.length; bs[i].classList.add('active'); bs[i].scrollIntoView({ block: 'nearest' });
+  }
+});
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); if (S.fab) { S.fab = false; render(); } } });
 document.addEventListener('click', e => { if (S.fab && !e.target.closest('.fab')) { S.fab = false; render(); } });

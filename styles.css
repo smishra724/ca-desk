@@ -517,3 +517,9 @@ button.wa svg{width:16px;height:16px;fill:currentColor;vertical-align:-3px;margi
 @media (max-width:600px){.fab{right:16px;bottom:16px}}
 @media (prefers-reduced-motion:reduce){.fab-menu{animation:none}}
 .ctrs{grid-template-columns:repeat(auto-fit,minmax(112px,1fr))}
+.gsearch{width:min(460px,46vw)}
+.gq-h{font-size:11.5px;font-weight:600;color:var(--muted);padding:8px 10px 3px}
+.gqres button.active{background:var(--brand-2)}
+.gqres button code{font-size:11.5px}
+.gqres{min-width:380px}
+@media (max-width:980px){.gqres{min-width:0}}
