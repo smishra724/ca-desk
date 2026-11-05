@@ -2,8 +2,10 @@
 // tasks with checklist progress, board & list views, reassign log, notes, timesheet, task-wise fees,
 // bulk generation from the compliance calendar, and a read-only view for clients.
 
-const STATUSES = ['Not started', 'In progress', 'Waiting on client', 'Under review', 'Completed', 'Cancelled'];
-const BOARD = STATUSES.filter(s => s !== 'Cancelled');
+const STATUSES = ['Not started', 'In progress', 'Waiting on client', 'Under review', 'Completed', 'Not required', 'Cancelled'];
+const CLOSED = ['Completed', 'Not required', 'Cancelled'];
+const DONE_ST = { filed: 1, na: 1 };
+const BOARD = STATUSES.filter(s => s !== 'Cancelled' && s !== 'Not required');
 const PRIORITIES = ['Low', 'Normal', 'High', 'Urgent'];
 
 const cat = (id, name, docs, acts, outs) => ({ id, name, docs, acts: acts.map(([n, w]) => ({ name: n, weight: w })), outs });
@@ -73,7 +75,7 @@ const catForKey = key => {
 };
 
 export function initTasks(ctx) {
-  const { S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render, fs, remindBtns, payslipSection } = ctx;
+  const { S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render, fs, remindBtns, payslipSection, payCard, isPayTask, openPay } = ctx;
   const { doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, where } = fs;
   const db = ctx.db;
   const T = {};
@@ -108,7 +110,7 @@ export function initTasks(ctx) {
     for (const c of S.clients) for (const it of dueItems(c, tf, to)) {
       if (it.note === 'Optional') continue;
       const fl = S.allFilings[`${c.id}|${it.key}`] || (it.altKey && S.allFilings[`${c.id}|${it.altKey}`]);
-      if (fl?.status === 'filed' || have.has(`${c.id}|${it.key}`) || (it.altKey && have.has(`${c.id}|${it.altKey}`))) continue;
+      if (fl?.status in DONE_ST || have.has(`${c.id}|${it.key}`) || (it.altKey && have.has(`${c.id}|${it.altKey}`))) continue;
       await createTask({ clientId: c.id, catId: catForKey(it.key), title: it.form, period: it.period, due: isoLocal(it.due), filingKey: it.key });
       have.add(`${c.id}|${it.key}`); n++;
     }
@@ -125,9 +127,10 @@ export function initTasks(ctx) {
   T.docsFor = (cid, key) => { const t = T.taskFor(cid, key); if (t) return (t.list?.docs || []).filter((d, i) => !t.done?.docs?.[i]); return findCat(catForKey(key))?.c.docs || []; };
   T.logReminder = async (cid, key, text) => { const t = T.taskFor(cid, key); if (t) await patch(t.id, {}, text); };
   T.create = createTask;
-  T.cancelForClient = async (cid, why) => { for (const t of S.tasks.filter(t => t.clientId === cid && !['Completed', 'Cancelled'].includes(t.status))) await patch(t.id, { status: 'Cancelled' }, why); };
+  T.patch = patch;
+  T.cancelForClient = async (cid, why) => { for (const t of S.tasks.filter(t => t.clientId === cid && !['Completed', 'Not required', 'Cancelled'].includes(t.status))) await patch(t.id, { status: 'Cancelled' }, why); };
   T.markDone = async (cid, key, ack) => {
-    const t = T.taskFor(cid, key); if (!t || ['Completed', 'Cancelled'].includes(t.status)) return;
+    const t = T.taskFor(cid, key); if (!t || ['Completed', 'Not required', 'Cancelled'].includes(t.status)) return;
     await patch(t.id, { status: 'Completed', ack: ack || t.ack || '', done: { ...t.done, acts: (t.list?.acts || []).map(() => true) } }, `Status: ${t.status} → Completed (marked filed)`);
   };
   T.loadForClient = async cid => {
@@ -146,7 +149,7 @@ export function initTasks(ctx) {
     if (!tot) return t.status === 'Completed' ? 100 : 0;
     return Math.round(acts.reduce((s, a, i) => s + (t.done?.acts?.[i] ? +a.weight || 0 : 0), 0) / tot * 100);
   };
-  const overdue = t => t.due && t.due < todayISO() && !['Completed', 'Cancelled'].includes(t.status);
+  const overdue = t => t.due && t.due < todayISO() && !['Completed', 'Not required', 'Cancelled'].includes(t.status);
   const staffOpts = (v, blank = 'Unassigned') => `<option value="">${blank}</option>` + (S.wf?.staff || []).map(s => `<option ${s === v ? 'selected' : ''}>${esc(s)}</option>`).join('');
   const clientName = cid => S.clients.find(c => c.id === cid)?.name || '';
 
@@ -183,10 +186,16 @@ export function initTasks(ctx) {
 
   async function setStatus(t, to) {
     if (!t || t.status === to) return;
-    const upd = { status: to };
+    const upd = { status: to }, was = t.status;
     if (to === 'Completed') upd.done = { ...t.done, acts: (t.list?.acts || []).map(() => true) };
-    await patch(t.id, upd, `Status: ${t.status} → ${to}`);
+    await patch(t.id, upd, `Status: ${was} → ${to}`);
     if (to === 'Completed') await syncFiling(t);
+    if (t.filingKey && t.clientId && to === 'Not required') { // drops off Due dates, shown as "Not required"
+      const rec = { status: 'na', filedOn: todayISO(), remarks: `Not required — task ${tno(t)}`, by: me(), at: nowISO() };
+      await setDoc(doc(db, 'clients', t.clientId, 'filings', t.filingKey), rec); S.allFilings[`${t.clientId}|${t.filingKey}`] = rec; if (S.cid === t.clientId && S.filings) S.filings[t.filingKey] = rec;
+    } else if (t.filingKey && t.clientId && was === 'Not required' && S.allFilings[`${t.clientId}|${t.filingKey}`]?.status === 'na') {
+      await deleteDoc(doc(db, 'clients', t.clientId, 'filings', t.filingKey)); delete S.allFilings[`${t.clientId}|${t.filingKey}`]; if (S.filings) delete S.filings[t.filingKey];
+    }
   }
 
   /* ---------- filtering ---------- */
@@ -195,7 +204,7 @@ export function initTasks(ctx) {
   const dueBucket = t => {
     if (!t.due) return 'No due date';
     const n = Math.round((new Date(t.due + 'T00:00') - new Date(todayISO() + 'T00:00')) / 864e5);
-    if (n < 0 && !['Completed', 'Cancelled'].includes(t.status)) return 'Overdue';
+    if (n < 0 && !['Completed', 'Not required', 'Cancelled'].includes(t.status)) return 'Overdue';
     return n === 0 ? 'Today' : n > 0 && n <= 7 ? 'Next 7 days' : t.due.slice(0, 7) === todayISO().slice(0, 7) ? 'Later this month' : n < 0 ? 'Earlier (done)' : 'Later';
   };
   const DUE_ORDER = ['Overdue', 'Today', 'Next 7 days', 'Later this month', 'Later', 'Earlier (done)', 'No due date'];
@@ -229,8 +238,8 @@ export function initTasks(ctx) {
     const wk = new Date(); wk.setDate(wk.getDate() + 7); const wkISO = wk.toISOString().slice(0, 10);
     const mo = new Date(); mo.setMonth(mo.getMonth() + 1, 0); const moISO = mo.toISOString().slice(0, 10);
     return scoped().filter(t =>
-      (f.status === 'all' || (f.status === 'open' ? !['Completed', 'Cancelled'].includes(t.status) : t.status === f.status)) &&
-      (!f.due || (f.due === 'overdue' ? overdue(t) : f.due === 'today' ? t.due === today && !['Completed', 'Cancelled'].includes(t.status) : f.due === 'week' ? t.due && t.due <= wkISO : f.due === 'month' ? t.due && t.due <= moISO
+      (f.status === 'all' || (f.status === 'open' ? !['Completed', 'Not required', 'Cancelled'].includes(t.status) : t.status === f.status)) &&
+      (!f.due || (f.due === 'overdue' ? overdue(t) : f.due === 'today' ? t.due === today && !['Completed', 'Not required', 'Cancelled'].includes(t.status) : f.due === 'week' ? t.due && t.due <= wkISO : f.due === 'month' ? t.due && t.due <= moISO
         : f.due === 'unbilled' ? t.status === 'Completed' && !t.billed && t.fee > 0 : true))
     ).sort((a, b) => {
       const so = f.sort; if (so && COLS[so.k]?.sort) { const x = COLS[so.k].sort(a), y = COLS[so.k].sort(b); if (x < y) return -so.d; if (x > y) return so.d; }
@@ -274,17 +283,17 @@ export function initTasks(ctx) {
   };
   const initials = n => n ? n.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() : '—';
 
-  const STC = { 'Not started': 'ns', 'In progress': 'ip', 'Waiting on client': 'wc', 'Under review': 'ur', 'Completed': 'cp', 'Cancelled': 'cx' };
+  const STC = { 'Not started': 'ns', 'In progress': 'ip', 'Waiting on client': 'wc', 'Under review': 'ur', 'Completed': 'cp', 'Not required': 'nr', 'Cancelled': 'cx' };
   const daysTo = d => d ? Math.round((new Date(d + 'T00:00') - new Date(todayISO() + 'T00:00')) / 864e5) : null;
   const dueBadge = t => {
-    if (!t.due || ['Completed', 'Cancelled'].includes(t.status)) return '';
+    if (!t.due || ['Completed', 'Not required', 'Cancelled'].includes(t.status)) return '';
     const n = daysTo(t.due);
     return n < 0 ? `<span class="dd late">${-n}d late</span>` : n === 0 ? '<span class="dd today">Today</span>' : n <= 3 ? `<span class="dd soon">${n}d left</span>` : `<span class="dd">${n}d left</span>`;
   };
   T.vTasks = () => {
     const f = S.tf, list = filtered(), adm = isAdmin(), today = todayISO();
     const sel = S.tsel ||= new Set();
-    const sc = scoped(), open = sc.filter(t => !['Completed', 'Cancelled'].includes(t.status));
+    const sc = scoped(), open = sc.filter(t => !['Completed', 'Not required', 'Cancelled'].includes(t.status));
     // counters across the top — each one is a filter
     const ctr = [
       ['open', '', 'Open', open.length, 'c-all'],
@@ -296,10 +305,10 @@ export function initTasks(ctx) {
       ['Under review', '', 'Under review', open.filter(t => t.status === 'Under review').length, 'c-ur'],
       ['Completed', '', 'Completed', sc.filter(t => t.status === 'Completed').length, 'c-cp'],
     ];
-    const remN = S.tasks.filter(t => t.kind === 'reminder' && !['Completed', 'Cancelled'].includes(t.status)).length;
+    const remN = S.tasks.filter(t => t.kind === 'reminder' && !['Completed', 'Not required', 'Cancelled'].includes(t.status)).length;
     const ctrHtml = (remN ? `<button class="ctr c-rem ${f.kind === 'reminder' ? 'on' : ''}" data-act="tkind"><b>${remN}</b><span>My reminders</span></button>` : '') + ctr.map(([st, du, l, n, cls]) => `<button class="ctr ${cls} ${f.status === st && (f.due || '') === du ? 'on' : ''}" data-act="tctr" data-s="${st}" data-d="${du}"><b>${n}</b><span>${l}</span></button>`).join('');
     // left panel: departments and staff with open counts
-    const base = S.tasks.filter(t => f.status === 'all' || (f.status === 'open' ? !['Completed', 'Cancelled'].includes(t.status) : t.status === f.status));
+    const base = S.tasks.filter(t => f.status === 'all' || (f.status === 'open' ? !['Completed', 'Not required', 'Cancelled'].includes(t.status) : t.status === f.status));
     const deptRows = [['', 'All departments', base.length], ...S.wf.departments.map(d => [d.id, d.name, base.filter(t => t.deptId === d.id).length])]
       .filter(([id, , n]) => !id || n).map(([id, l, n]) => `<button class="fl ${f.dept === id ? 'on' : ''}" data-act="tfset" data-k="dept" data-v="${id}"><span>${esc(l)}</span><b>${n}</b></button>`).join('');
     const staff = [...new Set([...(S.wf.staff || []), ...base.map(t => t.assignee).filter(Boolean)])];
@@ -334,7 +343,7 @@ export function initTasks(ctx) {
           <td>${adm ? `<select class="st-sel ${STC[t.status]}" data-change="tstat" data-id="${t.id}">${stOpts(t.status)}</select>` : `<span class="st ${STC[t.status]}">${esc(t.status)}</span>`}</td>
           <td class="nowrap"><span class="pbar"><i style="width:${p}%" class="${p === 100 ? 'full' : ''}"></i></span><span class="pnum">${p}%</span></td>
           <td class="num">${t.fee ? '₹' + (+t.fee).toLocaleString('en-IN') : '—'}</td>
-          <td class="nowrap">${t.filingKey && !['Completed', 'Cancelled'].includes(t.status) ? remindBtns(t.clientId, t.filingKey) : ''}</td></tr>`; }).join('')
+          <td class="nowrap">${t.filingKey && !['Completed', 'Not required', 'Cancelled'].includes(t.status) ? remindBtns(t.clientId, t.filingKey) : ''}</td></tr>`; }).join('')
           || `<tr><td colspan="11" class="empty">No tasks match these filters. ${adm ? '<a href="#" data-act="genTasks">Generate tasks from the compliance calendar</a> or <a href="#" data-act="newTask">create one</a>.' : ''}</td></tr>`}
         </tbody></table></div>
         <div class="reg-foot">${list.length} task${list.length === 1 ? '' : 's'} shown · Fee total ₹${list.reduce((a, t) => a + (+t.fee || 0), 0).toLocaleString('en-IN')}</div>`;
@@ -363,7 +372,7 @@ export function initTasks(ctx) {
     if (f.dept || f.assignee || f.due || f.client || f.cat || f.period || f.prio || f.from || f.to) chips.push(`<span class="fchip2">Dashboard filter<button data-act="tfClear" aria-label="Remove">✕</button></span>`);
     return chips.length ? `<div class="fchips">${chips.join('')}<button class="link" data-act="tfClear">Clear all filters</button></div>` : '';
   }
-  const statusTag = s => `<span class="tag ${({ 'Completed': 'green', 'Waiting on client': 'amber', 'Under review': 'blue', 'In progress': 'blue', 'Cancelled': '' })[s] ?? ''}">${esc(s)}</span>`;
+  const statusTag = s => `<span class="tag ${({ 'Completed': 'green', 'Waiting on client': 'amber', 'Under review': 'blue', 'In progress': 'blue', 'Cancelled': '', 'Not required': 'grey' })[s] ?? ''}">${esc(s)}</span>`;
 
   function vTime() {
     const from = S.tf.tFrom || todayISO().slice(0, 8) + '01', to = S.tf.tTo || todayISO();
@@ -415,6 +424,7 @@ export function initTasks(ctx) {
       </div>
       <div class="bar big"><i style="width:${p}%"></i></div><div class="muted small">${p}% complete</div>
     </section>
+    ${payCard(t)}
     <div class="split">
       <section class="card">
         <h2>Checklist</h2>
@@ -434,11 +444,11 @@ export function initTasks(ctx) {
           <label>Priority<select name="priority">${PRIORITIES.map(s => `<option ${s === t.priority ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
           <label class="span2">Title<input name="title" value="${esc(t.title)}"></label>
           <label>Period<input name="period" value="${esc(t.period)}"></label>
-          <label>ARN / acknowledgement<input name="ack" value="${esc(t.ack)}"></label>
+          ${isPayTask(t) ? `<input type="hidden" name="ack" value="${esc(t.ack)}">` : `<label>ARN / acknowledgement<input name="ack" value="${esc(t.ack)}"></label>`}
           <label>Fee (₹)<input type="number" min="0" name="fee" value="${t.fee || ''}"></label>
           <label>Received (₹)<input type="number" min="0" name="received" value="${t.received || ''}"></label>
           <label class="chk span2"><input type="checkbox" name="billed" ${t.billed ? 'checked' : ''}> Bill raised</label>
-          ${t.filingKey ? '<p class="muted small span2">Linked to the compliance calendar — completing this task marks the return as filed.</p>' : ''}
+          ${t.filingKey ? `<p class="muted small span2">Linked to the compliance calendar — ${isPayTask(t) ? 'uploading the challan marks it paid and closes this task.' : 'completing this task marks the return as filed.'} "Not required" removes it from Due dates.</p>` : ''}
           <div class="span2 btns"><button class="primary">Save</button><button type="button" class="danger" data-act="delTask">Delete task</button></div>
         </form>` : `<dl class="dl one"><dt>Status</dt><dd>${statusTag(t.status)}</dd><dt>Due date</dt><dd>${isoToDisp(t.due) || '—'}</dd>
           ${t.ack ? `<dt>ARN / ack</dt><dd class="mono">${esc(t.ack)}</dd>` : ''}</dl>`}
@@ -458,9 +468,12 @@ export function initTasks(ctx) {
   T.tClientTasks = () => {
     const list = S.tasks.filter(t => t.clientId === S.cid && t.status !== 'Cancelled').sort((a, b) => (b.due || '').localeCompare(a.due || ''));
     const pendingDocs = [];
-    for (const t of list) if (!['Completed', 'Cancelled'].includes(t.status)) (t.list?.docs || []).forEach((d, i) => { if (!t.done?.docs?.[i]) pendingDocs.push(`${d} — for ${t.title}${t.period ? ' ' + t.period : ''}`); });
+    for (const t of list) if (!['Completed', 'Not required', 'Cancelled'].includes(t.status)) (t.list?.docs || []).forEach((d, i) => { if (!t.done?.docs?.[i]) pendingDocs.push(`${d} — for ${t.title}${t.period ? ' ' + t.period : ''}`); });
     return `
     <div class="row-between wrap"><h2>Work & tasks</h2>${isAdmin() ? `<button class="primary" data-act="newTask" data-cid="${S.cid}">+ New task</button>` : ''}</div>
+    ${!isAdmin() && list.some(t => isPayTask(t) && !CLOSED.includes(t.status)) ? `<div class="paydue"><h3>Payments due</h3>${list.filter(t => isPayTask(t) && !CLOSED.includes(t.status)).map(t => `<div class="pd-row">
+      <span><b>${esc(t.title)}${t.period ? ' — ' + esc(t.period) : ''}</b><small>Due ${isoToDisp(t.due) || '—'}${t.pay?.amount ? ` · Amount ₹${(+t.pay.amount).toLocaleString('en-IN')}` : ''}${t.pay?.work ? ' · working shared' : ''}</small></span>
+      <span class="btns">${t.pay?.work ? `<button class="sm" data-act="payOpen" data-tid="${t.id}" data-w="work">View working</button>` : ''}<button class="sm primary" data-act="payChallan" data-tid="${t.id}">Upload challan</button></span></div>`).join('')}</div>` : ''}
     ${pendingDocs.length ? `<div class="warn"><b>Documents ${isAdmin() ? 'pending from client' : 'we need from you'}:</b><ul>${pendingDocs.map(d => `<li>${esc(d)}</li>`).join('')}</ul></div>` : ''}
     <table class="tbl"><thead><tr><th>No.</th><th>Work</th><th>Period</th><th>Due</th><th>Status</th><th>Progress</th>${isAdmin() ? '<th>Assignee</th>' : ''}</tr></thead><tbody>
     ${list.map(t => `<tr class="click" data-act="openTask" data-id="${t.id}"><td class="mono">${tno(t)}</td><td>${esc(t.title)}</td><td>${esc(t.period)}</td>
@@ -468,7 +481,7 @@ export function initTasks(ctx) {
       || `<tr><td colspan="7" class="muted empty">No tasks yet.</td></tr>`}</tbody></table>`;
   };
   T.dashCard = () => {
-    const open = S.tasks.filter(t => !['Completed', 'Cancelled'].includes(t.status));
+    const open = S.tasks.filter(t => !['Completed', 'Not required', 'Cancelled'].includes(t.status));
     const cols = { 'Not started': '#94a3b8', 'In progress': '#3b82f6', 'Waiting on client': '#f59e0b', 'Under review': '#8b5cf6' };
     const total = open.length || 1;
     const seg = Object.entries(cols).map(([s, c]) => { const n = open.filter(t => t.status === s).length; return n ? `<i style="width:${n / total * 100}%;background:${c}" title="${s}: ${n}"></i>` : ''; }).join('');
@@ -613,7 +626,7 @@ export function initTasks(ctx) {
       for (const c of S.clients) for (const it of dueItems(c, from, to)) {
         if (it.note === 'Optional') continue;
         const fl = S.allFilings[`${c.id}|${it.key}`] || (it.altKey && S.allFilings[`${c.id}|${it.altKey}`]);
-        if (fl?.status === 'filed' || have.has(`${c.id}|${it.key}`) || (it.altKey && have.has(`${c.id}|${it.altKey}`))) continue;
+        if (fl?.status in DONE_ST || have.has(`${c.id}|${it.key}`) || (it.altKey && have.has(`${c.id}|${it.altKey}`))) continue;
         items.push({ ...it, c });
       }
       S.genPending = { items, assignee: fd.get('assignee') };
@@ -633,10 +646,15 @@ export function initTasks(ctx) {
       if (upd.due !== t.due) changes.push(`Due date: ${isoToDisp(t.due) || '—'} → ${isoToDisp(upd.due) || '—'}`);
       if (upd.received !== (t.received || 0)) changes.push(`Received: ₹${t.received || 0} → ₹${upd.received}`);
       if (upd.billed && !t.billed) changes.push('Bill raised');
+      const wantPaid = upd.status === 'Completed' && t.status !== 'Completed' && isPayTask(t) && !t.pay?.challan;
+      if (wantPaid) upd.status = t.status; // payments close only with the challan
+      const nowNR = upd.status === 'Not required' && t.status !== 'Not required', wasNR = t.status === 'Not required' && upd.status !== 'Not required';
+      if (nowNR || wasNR) { await setStatus(t, upd.status); } // also writes / clears the 'not required' mark on Due dates
       if (upd.status === 'Completed' && t.status !== 'Completed') upd.done = { ...t.done, acts: (t.list?.acts || []).map(() => true) };
       await patch(t.id, upd, changes.join('; ') || 'Details updated');
       if (upd.status === 'Completed' && t.filingKey) await syncFiling(t, upd.ack);
       render();
+      if (wantPaid) openPay(t.id);
     }, 'Saved'),
     taskNote: (fd, form) => guard(async () => {
       const t = S.tasks.find(x => x.id === S.task);
@@ -670,7 +688,9 @@ export function initTasks(ctx) {
 
   /* ---------- change handlers ---------- */
   Object.assign(C, {
-    tstat: el => { const t = S.tasks.find(x => x.id === el.dataset.id); guard(async () => { await setStatus(t, el.value); render(); }, `${tno(t)}: ${el.value}`); },
+    tstat: el => { const t = S.tasks.find(x => x.id === el.dataset.id);
+      if (el.value === 'Completed' && isPayTask(t) && !t.pay?.challan) { render(); return openPay(t.id); } // payments close with a challan
+      guard(async () => { await setStatus(t, el.value); render(); }, `${tno(t)}: ${el.value}`); },
     tsel: el => { el.checked ? S.tsel.add(el.value) : S.tsel.delete(el.value); render(); },
     tselAll: el => { for (const i of document.querySelectorAll('[data-change=tsel]')) el.checked ? S.tsel.add(i.value) : S.tsel.delete(i.value); render(); },
     tbulkStatus: el => { const to = el.value; if (!to) return; const ids = [...S.tsel];
@@ -682,6 +702,7 @@ export function initTasks(ctx) {
       const d = el.dataset, to = el.value; if (!to) return;
       guard(async () => {
         let t = T.taskFor(d.cid, d.key, d.alt);
+        if (to === 'Completed' && isPayTask(t || { filingKey: d.key }) && !t?.pay?.challan) { render(); return openPay(t?.id, { cid: d.cid, key: d.key, catId: catForKey(d.key), title: d.form, period: d.period, due: d.due }); }
         if (!t) { const id = await createTask({ clientId: d.cid, catId: catForKey(d.key), title: d.form, period: d.period, due: d.due, filingKey: d.key }); t = S.tasks.find(x => x.id === id); }
         await setStatus(t, to); render();
       }, `${to === 'Completed' ? 'Completed and marked filed' : 'Status: ' + to}`);

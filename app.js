@@ -5,6 +5,7 @@ import { dueItems, fmtDate, regsOf, activeRegs, filingFor, isItrOnly, codeOf, fl
 import { initTasks } from './tasks.js';
 import { initSend } from './send.js';
 import { initPayslips } from './payslips.js';
+import { initPayments, isPayKey } from './payments.js';
 import { initDriveImport } from './drive-import.js';
 
 // Local mode (no login, data in this browser) until firebase-config.js has real keys.
@@ -316,13 +317,14 @@ function dueRows({ back = 0, ahead = 45, history = false } = {}) {
   if (start > to) return rows;
   for (const c of S.clients) for (const it of dueItems(c, start, to)) {
     const f = filingFor(S.allFilings, it, `${c.id}|`);
-    if (f?.status === 'filed') continue;
+    if (f?.status in DONE_ST) continue;
     if (it.note === 'Optional' && it.due < today) continue;
     rows.push({ ...it, c, overdue: it.due < today });
   }
   return rows.sort((a, b) => a.due - b.due || (a.c.name || '').localeCompare(b.c.name || ''));
 }
 const dashRows = () => dueRows({ back: 365, ahead: 0, history: true }); // used by bulk "mark filed"
+const DONE_ST = { filed: 1, na: 1 }; // a due date is closed when filed / paid, or marked not required
 const isoLocalD = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const baseForm = f => f.replace(/ — .*$/, '').replace(/ \(QRMP\)$/, '');
 const MONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -341,7 +343,7 @@ function vDashboard() {
   const biz = S.clients.filter(c => c.constitution !== 'Individual');
   const regs = S.clients.flatMap(c => regsOf(c).filter(r => r.status !== 'Cancelled').map(r => ({ ...r, c })));
   const states = new Set(regs.map(r => r.state).filter(Boolean));
-  const openTasks = S.tasks.filter(t => !['Completed', 'Cancelled'].includes(t.status));
+  const openTasks = S.tasks.filter(t => !['Completed', 'Not required', 'Cancelled'].includes(t.status));
   const hr = new Date().getHours();
   const hello = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
   const who = (S.profile.name || '').split(' ')[0];
@@ -353,7 +355,7 @@ function vDashboard() {
   const tf = dayStart(new Date(S.trackFrom || mStart)), back = tf < mStart ? tf : mStart;
   for (const c of S.clients) for (const it of dueItems(c, back, mEnd)) {
     if (it.note === 'Optional') continue;
-    const filed = filingFor(S.allFilings, it, `${c.id}|`)?.status === 'filed';
+    const filed = filingFor(S.allFilings, it, `${c.id}|`)?.status in DONE_ST;
     if (it.due < mStart && filed) continue; // earlier months: only what is still pending
     const k = baseForm(it.form); const p = prog[k] ||= { total: 0, filed: 0, due: it.due, period: it.period, periods: new Set() };
     p.total++; if (filed) p.filed++; p.periods.add(it.period); if (it.due < p.due) p.due = it.due;
@@ -384,7 +386,7 @@ function vDashboard() {
   // needs attention
   const noPan = S.clients.filter(c => !c.pan).length;
   const noLogin = regs.filter(r => !r.c._hasGstLogin).length;
-  const remDue = S.tasks.filter(t => t.kind === 'reminder' && !['Completed', 'Cancelled'].includes(t.status) && t.due && t.due <= todayISO());
+  const remDue = S.tasks.filter(t => t.kind === 'reminder' && !['Completed', 'Not required', 'Cancelled'].includes(t.status) && t.due && t.due <= todayISO());
   const attn = [
     remDue.length && [`${remDue.length} reminder${remDue.length === 1 ? '' : 's'} for today: ${remDue.slice(0, 2).map(t => t.title).join('; ')}${remDue.length > 2 ? '…' : ''}`, 'remToday', 'amber'],
     overdue.length && [`${overdue.length} return(s) overdue since ${isoToDisp(S.trackFrom)}`, 'go" data-v="due', 'red'],
@@ -397,7 +399,7 @@ function vDashboard() {
   for (const c of S.clients) for (const it of dueItems(c, mStart, mEnd)) {
     if (it.note === 'Optional') continue;
     const d = it.due.getDate(), m = dayMap[d] ||= { total: 0, filed: 0, forms: {} };
-    const filed = it.due < dayStart(new Date(S.trackFrom || mStart)) || filingFor(S.allFilings, it, `${c.id}|`)?.status === 'filed';
+    const filed = it.due < dayStart(new Date(S.trackFrom || mStart)) || filingFor(S.allFilings, it, `${c.id}|`)?.status in DONE_ST;
     m.total++; if (filed) m.filed++;
     const f = baseForm(it.form); m.forms[f] = (m.forms[f] || 0) + (filed ? 0 : 1);
   }
@@ -478,7 +480,7 @@ function vDue() {
       <td><a href="#" data-act="open" data-id="${r.c.id}" data-tab="compliance">${esc(r.c.name)}</a>${r.gstin ? `<div class="muted tiny"><span class="mono">${esc(r.gstin)}</span>${r.c.tradeName ? ' · ' + esc(r.c.tradeName) : ''}</div>` : r.c.tradeName ? `<div class="muted tiny">${esc(r.c.tradeName)}</div>` : ''}${r.note ? ` <span class="tag">${esc(r.note)}</span>` : ''}</td>
       <td>${esc(r.period)}</td><td class="nowrap">${fmtDate(r.due)}<div class="tiny ${r.overdue ? 'red' : 'muted'}">${days(r.due)}</div></td>
       ${isAdmin() ? `<td class="nowrap tstat">${T.statusSelect(r)}</td>` : ''}
-      <td class="nowrap">${isAdmin() ? `${remindBtns(r.c.id, r.key)} <button class="sm" data-act="markFiled" data-cid="${r.c.id}" data-key="${r.key}">Mark filed</button>` : ''}</td></tr>`).join('')}
+      <td class="nowrap">${isAdmin() ? `${remindBtns(r.c.id, r.key)} <button class="sm" data-act="markFiled" data-cid="${r.c.id}" data-key="${r.key}">${isPayKey(r.key) ? 'Mark paid' : 'Mark filed'}</button>` : ''}</td></tr>`).join('')}
     </tbody></table></div>`;
   return `
   <section class="card">
@@ -524,9 +526,9 @@ function vClients() {
   const list = base.filter(c => !q || [c.name, c.tradeName, c.pan, c.gstin, c.code, c.mobile, c.email, ...(c.gstins || []), ...regsOf(c).map(r => r.state)].some(v => (v || '').toLowerCase().includes(q)));
   const sel = S.sel ||= new Set();
   const fy = itrFy(), fyL = `FY ${fy}-${String(fy + 1).slice(2)}`;
-  const itrStatus = c => { const f = S.allFilings[`${c.id}|ITR-${fy}`]; return f?.status === 'filed' ? `<span class="tag green">Filed${f.filedOn ? ' ' + isoToDisp(f.filedOn) : ''}</span>` : '<span class="tag amber">Pending</span>'; };
+  const itrStatus = c => { const f = S.allFilings[`${c.id}|ITR-${fy}`]; return f?.status in DONE_ST ? `<span class="tag green">Filed${f.filedOn ? ' ' + isoToDisp(f.filedOn) : ''}</span>` : '<span class="tag amber">Pending</span>'; };
   const cb = c => isAdmin() ? `<td class="cbx" data-stop="1"><input type="checkbox" data-change="selClient" value="${c.id}" ${sel.has(c.id) ? 'checked' : ''}></td>` : '';
-  const filedCount = itr.filter(c => S.allFilings[`${c.id}|ITR-${fy}`]?.status === 'filed').length;
+  const filedCount = itr.filter(c => S.allFilings[`${c.id}|ITR-${fy}`]?.status in DONE_ST).length;
   const tv = cf ? 'business' : tab;
   const head = tv === 'itr'
     ? `<tr>${isAdmin() ? '<th class="cbx"><input type="checkbox" data-change="selAll"></th>' : ''}<th class="srn">Sr.</th><th>Name</th><th>PAN</th><th>Date of birth</th><th>Mobile / email</th><th>ITR ${fyL}</th><th></th></tr>`
@@ -751,13 +753,13 @@ function tCompliance() {
   <div class="row-between wrap"><h2>Compliance calendar</h2><span class="muted small">Last 6 months and next 3 months, based on master data</span></div>
   <table class="tbl"><thead><tr><th>Due</th><th>Return / form</th><th>Period</th><th>Status</th><th></th></tr></thead><tbody>
   ${rows.map(r => {
-    const filed = r.f?.status === 'filed';
-    const st = filed ? `<span class="tag green">Filed ${r.f.filedOn ? isoToDisp(r.f.filedOn) : ''}</span>${r.f.ack ? `<div class="muted tiny mono">${esc(r.f.ack)}</div>` : ''}`
+    const filed = r.f?.status in DONE_ST;
+    const st = filed ? (r.f.status === 'na' ? '<span class="tag">Not required</span>' : `<span class="tag green">${r.f.paid ? 'Paid' : 'Filed'} ${r.f.filedOn ? isoToDisp(r.f.filedOn) : ''}</span>${r.f.amount ? `<div class="muted tiny">₹${(+r.f.amount).toLocaleString('en-IN')}</div>` : ''}${r.f.ack ? `<div class="muted tiny mono">${esc(r.f.ack)}</div>` : ''}`)
       : r.overdue ? (r.note === 'Optional' ? '<span class="tag">Not filed</span>' : '<span class="tag red">Overdue</span>') : '<span class="tag amber">Pending</span>';
     return `<tr><td class="nowrap">${fmtDate(r.due)}</td><td>${esc(r.form)}${r.note ? ` <span class="tag">${esc(r.note)}</span>` : ''}</td>
       <td>${esc(r.period)}</td><td>${st}</td>
       <td>${isAdmin() ? (filed ? `<button class="sm" data-act="unfile" data-key="${r.key}" data-alt="${r.altKey || ''}">Undo</button>`
-        : `<button class="sm" data-act="markFiled" data-cid="${S.cid}" data-key="${r.key}">Mark filed</button>`) : ''}</td></tr>`;
+        : `<button class="sm" data-act="markFiled" data-cid="${S.cid}" data-key="${r.key}">${isPayKey(r.key) ? 'Mark paid' : 'Mark filed'}</button>`) : (!filed && isPayKey(r.key) ? `<button class="sm primary" data-act="markFiled" data-cid="${S.cid}" data-key="${r.key}">Upload challan</button>` : '')}</td></tr>`;
   }).join('') || '<tr><td colspan="5" class="muted empty">Add GST registrations, constitution and the applicability ticks in master data to see due dates.</td></tr>'}
   </tbody></table>
   <p class="muted small">Statutory due dates; government extensions are not applied automatically.</p>`;
@@ -1164,7 +1166,7 @@ const A = {
   moveOne: ({ to }) => guard(async () => { await moveClients([S.cid], to); render(); }, `Moved to ${to === 'itr' ? 'Individual – ITR only' : 'Business clients'}`),
   newClient: ({ cat } = {}) => { S.client = { id: null, ...(cat === 'itr' ? { category: 'itr', constitution: 'Individual' } : {}) }; S.cid = null; S.creds = []; S.docs = []; S.filings = {}; S.tab = 'master'; S.view = 'client'; render(); },
   exAsk: () => {
-    const c = S.client, open = S.tasks.filter(t => t.clientId === S.cid && !['Completed', 'Cancelled'].includes(t.status)).length;
+    const c = S.client, open = S.tasks.filter(t => t.clientId === S.cid && !['Completed', 'Not required', 'Cancelled'].includes(t.status)).length;
     const logins = (c.portalUsers || []).filter(u => !u.revoked).length;
     modal(`<h2>Move ${esc(c.name)} to ex-clients</h2>
       <p class="muted small">Nothing is deleted — master data, portal logins, documents and filing history stay. The client just stops appearing in due dates, tasks and the dashboard. You can restore them any time.</p>
@@ -1295,6 +1297,10 @@ const A = {
       </form>`);
   },
   markFiled: ({ cid, key }) => {
+    if (isPayKey(key)) { // payments are closed with the challan and the date paid
+      const t = T.taskFor(cid, key), y = new Date().getFullYear(), it = dueItems(S.clients.find(c => c.id === cid) || S.client, new Date(y - 2, 0, 1), new Date(y + 1, 11, 31)).find(i => i.key === key || i.altKey === key);
+      return PAY.challanForm(t?.id, { cid, key, catId: '', title: it?.form || 'Payment', period: it?.period || '', due: it ? isoLocalD(it.due) : '' });
+    }
     modal(`<h2>Mark as filed</h2><form data-form="filed" data-cid="${cid}" data-key="${key}" class="grid narrow">
       <label>Filed on<input type="date" name="filedOn" value="${todayISO()}" required></label>
       <label>ARN / acknowledgement no.<input name="ack"></label>
@@ -1388,7 +1394,7 @@ const A = {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Portal', 'GSTIN', 'Login URL', 'User ID', 'Password', 'Notes'],
       ...S.creds.map(cr => [cr.label || portalByKey(cr.portal).name, cr.gstin || '', cr.url || portalByKey(cr.portal).url, cr.username || '', cr.password || '', cr.notes || ''])]), 'Portal logins');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Due date', 'Return / form', 'Period', 'Status', 'Filed on', 'ARN / Ack'],
-      ...complianceRows().map(r => [fmtDate(r.due), r.form, r.period, r.f?.status === 'filed' ? 'Filed' : r.overdue ? 'Overdue' : 'Pending', isoToDisp(r.f?.filedOn), r.f?.ack || ''])]), 'Compliance');
+      ...complianceRows().map(r => [fmtDate(r.due), r.form, r.period, r.f?.status in DONE_ST ? 'Filed' : r.overdue ? 'Overdue' : 'Pending', isoToDisp(r.f?.filedOn), r.f?.ack || ''])]), 'Compliance');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Document', 'Category', 'Uploaded'],
       ...S.docs.map(d => [d.name, d.category, d.uploadedAt ? fmtDate(d.uploadedAt.toDate()) : ''])]), 'Documents');
     XLSX.writeFile(wb, `${(c.name || 'client').replace(/[^\w ]+/g, '').trim()}-${todayISO()}.xlsx`);
@@ -1703,7 +1709,7 @@ const CHUNK = 700000;
 function fileToB64(file) {
   return new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] || ''); r.onerror = bad; r.readAsDataURL(file); });
 }
-async function saveFile(cid, file, category) {
+async function saveFile(cid, file, category, extra = {}) {
   if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name} is over 10 MB.`);
   const b64 = await fileToB64(file);
   const n = Math.max(1, Math.ceil(b64.length / CHUNK));
@@ -1713,8 +1719,9 @@ async function saveFile(cid, file, category) {
     batch.set(doc(db, 'clients', cid, 'docs', ref.id, 'chunks', String(i).padStart(4, '0')), { d: b64.slice(i * CHUNK, (i + 1) * CHUNK) });
     if (++ops >= 6) { await batch.commit(); batch = writeBatch(db); ops = 0; }
   }
-  batch.set(ref, { name: file.name, mime: file.type || 'application/octet-stream', size: file.size, category: category || 'Other', chunks: n, uploadedAt: serverTimestamp(), uploadedBy: S.profile.email });
+  batch.set(ref, { name: file.name, mime: file.type || 'application/octet-stream', size: file.size, category: category || 'Other', chunks: n, uploadedAt: serverTimestamp(), uploadedBy: S.profile.email, ...extra });
   await batch.commit();
+  return ref.id;
 }
 // Attach certificates from a picked folder using the prepared list in meta/docImport ({items:[{p,c,t}]}).
 async function folderAttach(files) {
@@ -1802,6 +1809,7 @@ async function afterImport(n) {
 
 /* ================= task manager ================= */
 const T = initTasks({ S, A, F, C, esc, toast, modal, closeModal, guard, fmtDate, isoToDisp, todayISO, dueItems, isAdmin, $, render: () => render(), db, remindBtns: (...a) => remindBtns(...a), payslipSection: t => PS.section(t),
+  payCard: t => PAY.card(t), isPayTask: t => PAY.isPay(t), openPay: (tid, filing) => PAY.challanForm(tid, filing),
   fs: { doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, where } });
 
 initDriveImport({ S, A, C, esc, toast, modal, closeModal, db, LOCAL, regsOf, regMirror, mergeReg, newRegId, stateOf, GSTIN_RE,
@@ -1809,6 +1817,8 @@ initDriveImport({ S, A, C, esc, toast, modal, closeModal, db, LOCAL, regsOf, reg
 initSend({ S, A, C, esc, toast, modal, closeModal, regsOf, stateOf, isoToDisp, fmtDate, db, saveBlob,
   fs: { doc, getDocs, collection, updateDoc, arrayUnion } });
 
+const PAY = initPayments({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, todayISO, db, saveFile, saveBlob, T, WA_ICON, MAIL_ICON,
+  fs: { doc, getDocs, setDoc, collection } });
 const PS = initPayslips({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, db, saveBlob, busy, WA_ICON, MAIL_ICON,
   fs: { doc, getDocs, setDoc, updateDoc, deleteDoc, collection, writeBatch, arrayUnion } });
 

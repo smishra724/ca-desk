@@ -40,6 +40,17 @@ service cloud.firestore {
       }
     }
 
+    // A client may upload a payment challan for itself and mark that payment as paid — nothing else.
+    match /clients/{cid}/docs/{d} {
+      allow create: if isClientOf(cid) && request.resource.data.category == 'Payment challan' && request.resource.data.byRole == 'client';
+    }
+    match /clients/{cid}/docs/{d}/chunks/{k} {
+      allow create: if isClientOf(cid); // file pieces of the challan above (written just before the challan record)
+    }
+    match /clients/{cid}/filings/{f} {
+      allow create, update: if isClientOf(cid) && request.resource.data.status == 'filed' && request.resource.data.paid == true && request.resource.data.byRole == 'client';
+    }
+
     // Task manager masters (workflow, staff, counters)
     match /meta/{d} {
       allow read: if signedIn();
@@ -50,6 +61,10 @@ service cloud.firestore {
     match /tasks/{t} {
       allow read: if isAdmin() || (hasProfile() && me().role == 'client' && resource.data.clientId == me().clientId);
       allow write: if isAdmin();
+      // the client can close its own payment task by uploading the challan
+      allow update: if hasProfile() && me().role == 'client' && resource.data.clientId == me().clientId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pay', 'status', 'ack', 'done', 'log', 'updatedAt'])
+        && request.resource.data.status == 'Completed';
     }
 
     // Dashboard and "Export all" query across clients — CA/staff only.
