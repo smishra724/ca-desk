@@ -545,3 +545,4 @@ main{padding-bottom:72px}
   main{padding-left:20px;padding-right:20px}
 }
 @media (max-width:980px){.shell{grid-template-columns:minmax(0,1fr)}}
+.chips .cat.ex{background:#FBE9E7;color:#A12A20}

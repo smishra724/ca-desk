@@ -175,7 +175,9 @@ function renderNoAccess(u) {
 /* ================= data loading ================= */
 async function loadClients() {
   const snap = await getDocs(collection(db, 'clients'));
-  S.clients = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const all = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  // ex-clients are kept with all their data but left out of the calendar, tasks, dashboard and lists
+  S.clients = all.filter(c => !c.exClient); S.exClients = all.filter(c => c.exClient);
 }
 async function loadGstLoginFlags() {
   try {
@@ -274,8 +276,8 @@ function gqResults() {
   if (go.length) groups.push(['Go to', go.map(([l, act, v]) => `<button data-act="gqDo" data-a="${act}" data-v="${v}"><b>${esc(l)}</b></button>`)]);
   const comps = COMPS.filter(cp => has(cp.name, cp.id, cp.grp)).slice(0, 4);
   if (comps.length) groups.push(['Compliances & work', comps.map(cp => `<button data-act="gqComp" data-id="${esc(cp.id)}"><b>${esc(cp.name)}</b><span>${S.clients.filter(c => compOn(cp, c)).length} client(s) · tick clients, see due dates</span></button>`)]);
-  const cl = S.clients.filter(c => has(c.name, c.tradeName, c.pan, c.code, c.tan, c.cin, c.mobile, c.email, ...(c.gstins || []))).slice(0, 6);
-  if (cl.length) groups.push(['Clients', cl.map(c => `<button data-act="gqOpen" data-id="${c.id}"><b>${esc(c.name)}</b><span>${esc(c.constitution || '')}${c.pan ? ` · <code>${esc(c.pan)}</code>` : ''}${regsOf(c)[0] ? ` · <code>${esc(regsOf(c)[0].gstin)}</code>` : ''}${isItrOnly(c) ? ' · ITR only' : ''}</span></button>`)]);
+  const cl = [...S.clients, ...(S.exClients || [])].filter(c => has(c.name, c.tradeName, c.pan, c.code, c.tan, c.cin, c.mobile, c.email, ...(c.gstins || []))).slice(0, 6);
+  if (cl.length) groups.push(['Clients', cl.map(c => `<button data-act="gqOpen" data-id="${c.id}"><b>${esc(c.name)}</b><span>${esc(c.constitution || '')}${c.pan ? ` · <code>${esc(c.pan)}</code>` : ''}${regsOf(c)[0] ? ` · <code>${esc(regsOf(c)[0].gstin)}</code>` : ''}${c.exClient ? ' · Ex-client' : isItrOnly(c) ? ' · ITR only' : ''}</span></button>`)]);
   const lg = (S.credIdx || []).filter(x => has(x.username, x.label)).slice(0, 4);
   if (lg.length) groups.push(['Portal logins', lg.map(x => { const c = S.clients.find(y => y.id === x.cid); return `<button data-act="gqLogin" data-id="${x.cid}"><b>${esc(x.username)}</b><span>${esc((x.portal || '').toUpperCase())} login · ${esc(c?.name || '')}</span></button>`; })]);
   const tk = (S.tasks || []).filter(t => has('T-' + String(t.no || 0).padStart(4, '0'), t.title, t.clientName, t.period)).sort((a, b) => (a.status === 'Completed') - (b.status === 'Completed') || (a.due || '9').localeCompare(b.due || '9')).slice(0, 5);
@@ -513,6 +515,7 @@ function vClients() {
   const q = S.search.toLowerCase();
   const itr = S.clients.filter(isItrOnly), biz = S.clients.filter(c => !isItrOnly(c));
   const cf = S.consF; // set from the dashboard's client mix: one constitution, across both tabs
+  if (tab === 'ex') return vExClients();
   let base = cf ? S.clients.filter(c => (c.constitution || 'Not set') === cf) : tab === 'itr' ? itr : biz;
   const stF = S.stateF || '', shF = S.showF || '';
   const statesAll = [...new Set(base.flatMap(c => [c.state, ...regsOf(c).map(r => r.state)]).filter(Boolean))].sort();
@@ -552,6 +555,7 @@ function vClients() {
     <div class="tabs inner seg">
       <button class="${tab === 'business' && !cf ? 'on' : ''}" data-act="clientTab" data-t="business">Business clients <span class="cnt">${biz.length}</span></button>
       <button class="${tab === 'itr' && !cf ? 'on' : ''}" data-act="clientTab" data-t="itr">Individual – ITR only <span class="cnt">${itr.length}</span></button>
+      <button data-act="clientTab" data-t="ex">Ex-clients <span class="cnt">${(S.exClients || []).length}</span></button>
     </div>
     <div class="consbar"><label class="small muted">Constitution
       <select data-change="consF"><option value="">All</option>${[...new Set(S.clients.map(c => c.constitution || 'Not set'))].sort().map(k => `<option ${k === cf ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></label>
@@ -564,11 +568,44 @@ function vClients() {
     ${isAdmin() && nSel ? `<div class="selbar"><b>${nSel} selected</b>
       ${cf ? `<button class="sm primary" data-act="moveSel" data-to="itr">Move to Individual – ITR only</button><button class="sm" data-act="moveSel" data-to="business">Move to Business clients</button>`
         : `<button class="sm primary" data-act="moveSel" data-to="${tab === 'itr' ? 'business' : 'itr'}">Move to ${tab === 'itr' ? 'Business clients' : 'Individual – ITR only'}</button>`}
+      <button class="sm danger" data-act="exBulk">Move to ex-clients</button>
       <button class="sm" data-act="selClear">Clear</button></div>` : ''}
     <table class="tbl"><thead>${head}</thead><tbody>
     ${list.map(row).join('') || `<tr><td colspan="7" class="muted empty">${q ? 'No match.' : tab === 'itr' ? 'No ITR-only clients. Move individuals here from Business clients.' : 'No clients yet.'}</td></tr>`}
     </tbody></table>
   </section>`;
+}
+function vExClients() {
+  const q = (S.search || '').toLowerCase();
+  const list = (S.exClients || []).filter(c => !q || [c.name, c.tradeName, c.pan, c.gstin, c.code].some(v => (v || '').toLowerCase().includes(q)))
+    .sort((a, b) => (b.exOn || '').localeCompare(a.exOn || ''));
+  return `<section class="card">
+    <div class="row-between wrap"><h2>Clients <span class="muted">(${S.clients.length} active)</span></h2></div>
+    <div class="tabs inner seg">
+      <button data-act="clientTab" data-t="business">Business clients <span class="cnt">${S.clients.filter(c => !isItrOnly(c)).length}</span></button>
+      <button data-act="clientTab" data-t="itr">Individual – ITR only <span class="cnt">${S.clients.filter(isItrOnly).length}</span></button>
+      <button class="on" data-act="clientTab" data-t="ex">Ex-clients <span class="cnt">${(S.exClients || []).length}</span></button>
+    </div>
+    <p class="muted small">Clients who have left. All their master data, logins, documents and filing history are kept, but they don't appear in due dates, tasks or the dashboard. Restore a client to make them active again.</p>
+    <input id="search" class="search" placeholder="Search ex-clients…" value="${esc(S.search)}">
+    <table class="tbl"><thead><tr><th>Name</th><th>Constitution</th><th>PAN / GSTIN</th><th>Left on</th><th>Reason</th><th></th></tr></thead><tbody>
+    ${list.map(c => `<tr class="click" data-act="open" data-id="${c.id}"><td><b>${esc(c.name)}</b>${c.tradeName ? `<div class="muted small">${esc(c.tradeName)}</div>` : ''}</td>
+      <td>${esc(c.constitution || '')}</td><td class="mono small">${esc(c.pan || '')}${regsOf(c)[0] ? `<div>${esc(regsOf(c)[0].gstin)}</div>` : ''}</td>
+      <td class="nowrap">${isoToDisp(c.exOn) || '—'}</td><td class="small">${esc(c.exReason || '')}${c.exNote ? `<div class="muted">${esc(c.exNote)}</div>` : ''}</td>
+      <td data-stop="1"><button class="sm" data-act="exRestore" data-id="${c.id}">Restore</button></td></tr>`).join('')
+      || `<tr><td colspan="6" class="muted empty">${q ? 'No match.' : 'No ex-clients. Use "Move to ex-clients" on a client instead of deleting it.'}</td></tr>`}
+    </tbody></table></section>`;
+}
+async function exMove(cid, data, cancelTasks, revokeLogins) {
+  const c = S.clients.find(x => x.id === cid) || S.client;
+  await updateDoc(doc(db, 'clients', cid), { exClient: true, exOn: data.exOn, exReason: data.exReason, exNote: data.exNote, updatedAt: serverTimestamp() });
+  if (cancelTasks) await T.cancelForClient(cid, `Cancelled — client moved to ex-clients (${data.exReason})`);
+  if (revokeLogins) {
+    const users = (c.portalUsers || []).map(u => ({ ...u, revoked: true }));
+    for (const u of users) await updateDoc(doc(db, 'users', u.uid), { role: 'revoked' }).catch(() => {});
+    if (users.length) await updateDoc(doc(db, 'clients', cid), { portalUsers: users });
+  }
+  await loadClients();
 }
 async function moveClients(ids, to) {
   let b = writeBatch(db), n = 0;
@@ -583,14 +620,15 @@ function vClient() {
   const c = S.client || {};
   const tabs = [['master', 'Master data'], ['gst', `GST registrations${regsOf(c).length ? ` (${regsOf(c).length})` : ''}`], ['logins', 'Portal logins'], ['docs', 'Documents'], ['compliance', 'Compliance'], ['tasks', 'Tasks'], ...(isAdmin() ? [['access', 'Client access']] : [])];
   return `
-  ${isAdmin() ? `<button class="link back" data-act="go" data-v="clients">← ${isItrOnly(S.client || {}) && S.cid ? 'ITR clients' : 'All clients'}</button>` : ''}
+  ${isAdmin() ? `<button class="link back" data-act="${S.client?.exClient ? 'clientTab" data-t="ex' : 'go" data-v="clients'}">← ${S.client?.exClient ? 'Ex-clients' : isItrOnly(S.client || {}) && S.cid ? 'ITR clients' : 'All clients'}</button>` : ''}
   <section class="card head">
     <div class="row-between wrap">
       <div><h1>${esc(c.name || 'New client')}</h1>
-        <div class="chips">${S.cid ? (isItrOnly(c) ? '<span class="cat itr">Individual – ITR only</span>' : '<span class="cat biz">Business client</span>') : ''}${c.tradeName ? `<span>${esc(c.tradeName)}</span>` : ''}${c.constitution ? `<span>${esc(c.constitution)}</span>` : ''}
+        <div class="chips">${S.cid && c.exClient ? `<span class="cat ex">Ex-client since ${isoToDisp(c.exOn) || '—'}${c.exReason ? ' · ' + esc(c.exReason) : ''}</span>` : S.cid ? (isItrOnly(c) ? '<span class="cat itr">Individual – ITR only</span>' : '<span class="cat biz">Business client</span>') : ''}${c.tradeName ? `<span>${esc(c.tradeName)}</span>` : ''}${c.constitution ? `<span>${esc(c.constitution)}</span>` : ''}
         ${c.pan ? `<span class="mono">PAN ${esc(c.pan)}</span>` : ''}${regsOf(c).length === 1 ? `<span class="mono">GSTIN ${esc(regsOf(c)[0].gstin)}</span>` : regsOf(c).length > 1 ? `<span>${regsOf(c).length} GSTINs · ${esc([...new Set(regsOf(c).map(r => r.state).filter(Boolean))].join(', '))}</span>` : ''}</div></div>
       <div class="btns">
-        ${isAdmin() && S.cid ? `<button data-act="moveOne" data-to="${isItrOnly(c) ? 'business' : 'itr'}">Move to ${isItrOnly(c) ? 'Business clients' : 'ITR only'}</button>` : ''}
+        ${isAdmin() && S.cid && c.exClient ? `<button class="primary" data-act="exRestore" data-id="${S.cid}">Restore as active client</button>` : ''}
+        ${isAdmin() && S.cid && !c.exClient ? `<button data-act="moveOne" data-to="${isItrOnly(c) ? 'business' : 'itr'}">Move to ${isItrOnly(c) ? 'Business clients' : 'ITR only'}</button>` : ''}
         ${isAdmin() && S.cid ? `<button class="primary wa" data-act="sendOpen">Send to client</button>` : ''}
         ${isAdmin() ? `<button class="primary" data-act="fromDoc" data-mode="update">Fill from document</button>` : ''}
         <button data-act="downloadClient">Download my data (Excel)</button>
@@ -624,7 +662,8 @@ function tMaster() {
     <p class="span2 muted small">GSTINs are managed in the <a href="#" data-act="tab" data-t="gst">GST registrations</a> tab — add one per state.</p>
     <div class="span2 bools">${FIELDS.filter(f => f[2] === 'bool').map(f => fieldInput(f, flagOn(c, f[0]))).join('')}</div>
     <div class="span2 btns"><button class="primary">Save master data</button>
-      ${S.client?.createdAt ? `<button type="button" class="danger" data-act="delClient">Delete client</button>` : ''}</div>
+      ${S.cid && !S.client?.exClient ? `<button type="button" class="danger" data-act="exAsk">Move to ex-clients</button>` : ''}
+      ${S.client?.exClient ? `<button type="button" class="danger" data-act="delClient">Delete permanently</button>` : ''}</div>
   </form>`;
 }
 
@@ -1116,7 +1155,7 @@ const A = {
       <div class="span2 btns"><button class="primary">Continue</button><button type="button" data-act="closeModal">Cancel</button></div></form>`);
   },
   fabClient: ({ m }) => { closeModal(); if (m === 'doc') A.fromDoc({ mode: 'new' }); else A.newClient({ cat: m === 'itr' ? 'itr' : '' }); },
-  clientTab: ({ t }) => { S.consF = ''; S.clientTab = t; S.sel = new Set(); render(); },
+  clientTab: ({ t }) => { S.view = 'clients'; S.consF = ''; S.clientTab = t; S.sel = new Set(); render(); },
   selClear: () => { S.sel = new Set(); render(); },
   moveSel: ({ to }) => {
     const ids = [...S.sel]; if (!ids.length) return;
@@ -1124,6 +1163,30 @@ const A = {
   },
   moveOne: ({ to }) => guard(async () => { await moveClients([S.cid], to); render(); }, `Moved to ${to === 'itr' ? 'Individual – ITR only' : 'Business clients'}`),
   newClient: ({ cat } = {}) => { S.client = { id: null, ...(cat === 'itr' ? { category: 'itr', constitution: 'Individual' } : {}) }; S.cid = null; S.creds = []; S.docs = []; S.filings = {}; S.tab = 'master'; S.view = 'client'; render(); },
+  exAsk: () => {
+    const c = S.client, open = S.tasks.filter(t => t.clientId === S.cid && !['Completed', 'Cancelled'].includes(t.status)).length;
+    const logins = (c.portalUsers || []).filter(u => !u.revoked).length;
+    modal(`<h2>Move ${esc(c.name)} to ex-clients</h2>
+      <p class="muted small">Nothing is deleted — master data, portal logins, documents and filing history stay. The client just stops appearing in due dates, tasks and the dashboard. You can restore them any time.</p>
+      <form data-form="exMove" class="grid">
+        <label>Left on<input type="date" name="exOn" value="${todayISO()}" required></label>
+        <label>Reason<select name="exReason"><option>Moved to another CA</option><option>Business closed</option><option>Fees not paid</option><option>Work completed</option><option>Other</option></select></label>
+        <label class="span2">Note (optional)<input name="exNote" placeholder="e.g. NOC given on 05-11-2026; handed over DSC"></label>
+        ${open ? `<label class="chk span2"><input type="checkbox" name="cancel" checked> Cancel the ${open} open task${open === 1 ? '' : 's'} for this client</label>` : ''}
+        ${logins ? `<label class="chk span2"><input type="checkbox" name="revoke" checked> Turn off the client's login to this portal (${logins})</label>` : ''}
+        <div class="span2 btns"><button class="primary">Move to ex-clients</button><button type="button" data-act="closeModal">Cancel</button></div></form>`);
+  },
+  exBulk: () => {
+    const n = S.sel.size;
+    modal(`<h2>Move ${n} client${n === 1 ? '' : 's'} to ex-clients</h2><p class="muted small">Nothing is deleted. Their open tasks are cancelled and their client logins turned off; restore any of them later from the Ex-clients tab.</p>
+      <form data-form="exBulkMove" class="grid narrow"><label>Left on<input type="date" name="exOn" value="${todayISO()}" required></label>
+      <label>Reason<select name="exReason"><option>Moved to another CA</option><option>Business closed</option><option>Fees not paid</option><option>Work completed</option><option>Other</option></select></label>
+      <div class="span2 btns"><button class="primary">Move ${n} to ex-clients</button><button type="button" data-act="closeModal">Cancel</button></div></form>`);
+  },
+  exRestore: ({ id }) => guard(async () => {
+    await updateDoc(doc(db, 'clients', id), { exClient: false, restoredOn: todayISO(), updatedAt: serverTimestamp() });
+    await loadClients(); if (S.view === 'client' && S.cid === id) await openClient(id); render(); autoTasks();
+  }, 'Restored as an active client'),
   delClient: () => {
     if (!confirm(`Delete ${S.client.name} with all logins, documents and filing records? This cannot be undone.`)) return;
     guard(async () => {
@@ -1421,6 +1484,16 @@ const F = {
     const keys = dueRows({ back: 365, ahead: 30 }).filter(r => r.c.id === c.id).map(r => r.key);
     closeModal(); openReminder(c.id, keys, 'wa');
   },
+  exBulkMove: fd => guard(async () => {
+    const ids = [...S.sel], data = { exOn: fd.get('exOn'), exReason: fd.get('exReason'), exNote: '' };
+    for (const id of ids) await exMove(id, data, true, true);
+    S.sel = new Set(); closeModal(); render();
+  }, 'Moved to ex-clients — nothing was deleted'),
+  exMove: fd => guard(async () => {
+    const cid = S.cid;
+    await exMove(cid, { exOn: fd.get('exOn'), exReason: fd.get('exReason'), exNote: (fd.get('exNote') || '').trim() }, !!fd.get('cancel'), !!fd.get('revoke'));
+    closeModal(); await openClient(cid); render();
+  }, 'Moved to ex-clients — nothing was deleted'),
   filed: (fd, form) => guard(async () => {
     const { cid, key } = form.dataset;
     const data = { status: 'filed', filedOn: fd.get('filedOn'), ack: fd.get('ack').trim(), remarks: fd.get('remarks').trim(), by: S.profile.email, at: serverTimestamp() };

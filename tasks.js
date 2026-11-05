@@ -125,6 +125,7 @@ export function initTasks(ctx) {
   T.docsFor = (cid, key) => { const t = T.taskFor(cid, key); if (t) return (t.list?.docs || []).filter((d, i) => !t.done?.docs?.[i]); return findCat(catForKey(key))?.c.docs || []; };
   T.logReminder = async (cid, key, text) => { const t = T.taskFor(cid, key); if (t) await patch(t.id, {}, text); };
   T.create = createTask;
+  T.cancelForClient = async (cid, why) => { for (const t of S.tasks.filter(t => t.clientId === cid && !['Completed', 'Cancelled'].includes(t.status))) await patch(t.id, { status: 'Cancelled' }, why); };
   T.markDone = async (cid, key, ack) => {
     const t = T.taskFor(cid, key); if (!t || ['Completed', 'Cancelled'].includes(t.status)) return;
     await patch(t.id, { status: 'Completed', ack: ack || t.ack || '', done: { ...t.done, acts: (t.list?.acts || []).map(() => true) } }, `Status: ${t.status} → Completed (marked filed)`);
