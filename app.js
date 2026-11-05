@@ -529,13 +529,13 @@ function vClients() {
   const filedCount = itr.filter(c => S.allFilings[`${c.id}|ITR-${fy}`]?.status === 'filed').length;
   const tv = cf ? 'business' : tab;
   const head = tv === 'itr'
-    ? `<tr>${isAdmin() ? '<th class="cbx"><input type="checkbox" data-change="selAll"></th>' : ''}<th>Name</th><th>PAN</th><th>Date of birth</th><th>Mobile / email</th><th>ITR ${fyL}</th><th></th></tr>`
-    : `<tr>${isAdmin() ? '<th class="cbx"><input type="checkbox" data-change="selAll"></th>' : ''}<th>Code</th><th>Name</th><th>Constitution</th><th>PAN</th><th>GSTIN</th><th>Client login</th></tr>`;
-  const row = c => tv === 'itr'
-    ? `<tr class="click" data-act="open" data-id="${c.id}">${cb(c)}<td><b>${esc(c.name || '—')}</b></td><td class="mono">${esc(c.pan) || '<span class="tag amber">No PAN</span>'}</td>
+    ? `<tr>${isAdmin() ? '<th class="cbx"><input type="checkbox" data-change="selAll"></th>' : ''}<th class="srn">Sr.</th><th>Name</th><th>PAN</th><th>Date of birth</th><th>Mobile / email</th><th>ITR ${fyL}</th><th></th></tr>`
+    : `<tr>${isAdmin() ? '<th class="cbx"><input type="checkbox" data-change="selAll"></th>' : ''}<th class="srn">Sr.</th><th>Code</th><th>Name</th><th>Constitution</th><th>PAN</th><th>GSTIN</th><th>Client login</th></tr>`;
+  const row = (c, i) => tv === 'itr'
+    ? `<tr class="click" data-act="open" data-id="${c.id}">${cb(c)}<td class="srn">${i + 1}</td><td><b>${esc(c.name || '—')}</b></td><td class="mono">${esc(c.pan) || '<span class="tag amber">No PAN</span>'}</td>
         <td class="nowrap">${isoToDisp(c.doi)}</td><td class="small">${esc(c.mobile)}${c.email ? `<div class="muted tiny">${esc(c.email)}</div>` : ''}</td><td>${itrStatus(c)}</td>
         <td class="nowrap" data-stop="1">${isAdmin() && S.allFilings[`${c.id}|ITR-${fy}`]?.status !== 'filed' ? `<button class="sm" data-act="markFiled" data-cid="${c.id}" data-key="ITR-${fy}">Mark filed</button>` : ''}</td></tr>`
-    : `<tr class="click" data-act="open" data-id="${c.id}">${cb(c)}<td>${esc(c.code)}</td>
+    : `<tr class="click" data-act="open" data-id="${c.id}">${cb(c)}<td class="srn">${i + 1}</td><td>${esc(c.code)}</td>
         <td><b>${esc(c.name || '—')}</b>${cf && isItrOnly(c) ? ' <span class="tag">ITR only</span>' : ''}${c.tradeName ? `<div class="muted small">${esc(c.tradeName)}</div>` : ''}</td>
         <td>${esc(c.constitution)}</td><td class="mono">${esc(c.pan)}</td><td class="mono">${esc(regsOf(c)[0]?.gstin || '')}${regsOf(c).length > 1 ? ` <span class="tag blue">+${regsOf(c).length - 1} more</span>` : ''}</td>
         <td>${(c.portalUsers || []).filter(p => !p.revoked).length ? '<span class="tag green">Active</span>' : '<span class="tag">—</span>'}</td></tr>`;
@@ -571,7 +571,7 @@ function vClients() {
       <button class="sm danger" data-act="exBulk">Move to ex-clients</button>
       <button class="sm" data-act="selClear">Clear</button></div>` : ''}
     <table class="tbl"><thead>${head}</thead><tbody>
-    ${list.map(row).join('') || `<tr><td colspan="7" class="muted empty">${q ? 'No match.' : tab === 'itr' ? 'No ITR-only clients. Move individuals here from Business clients.' : 'No clients yet.'}</td></tr>`}
+    ${list.map(row).join('') || `<tr><td colspan="8" class="muted empty">${q ? 'No match.' : tab === 'itr' ? 'No ITR-only clients. Move individuals here from Business clients.' : 'No clients yet.'}</td></tr>`}
     </tbody></table>
   </section>`;
 }
@@ -588,12 +588,12 @@ function vExClients() {
     </div>
     <p class="muted small">Clients who have left. All their master data, logins, documents and filing history are kept, but they don't appear in due dates, tasks or the dashboard. Restore a client to make them active again.</p>
     <input id="search" class="search" placeholder="Search ex-clients…" value="${esc(S.search)}">
-    <table class="tbl"><thead><tr><th>Name</th><th>Constitution</th><th>PAN / GSTIN</th><th>Left on</th><th>Reason</th><th></th></tr></thead><tbody>
-    ${list.map(c => `<tr class="click" data-act="open" data-id="${c.id}"><td><b>${esc(c.name)}</b>${c.tradeName ? `<div class="muted small">${esc(c.tradeName)}</div>` : ''}</td>
+    <table class="tbl"><thead><tr><th class="srn">Sr.</th><th>Name</th><th>Constitution</th><th>PAN / GSTIN</th><th>Left on</th><th>Reason</th><th></th></tr></thead><tbody>
+    ${list.map((c, i) => `<tr class="click" data-act="open" data-id="${c.id}"><td class="srn">${i + 1}</td><td><b>${esc(c.name)}</b>${c.tradeName ? `<div class="muted small">${esc(c.tradeName)}</div>` : ''}</td>
       <td>${esc(c.constitution || '')}</td><td class="mono small">${esc(c.pan || '')}${regsOf(c)[0] ? `<div>${esc(regsOf(c)[0].gstin)}</div>` : ''}</td>
       <td class="nowrap">${isoToDisp(c.exOn) || '—'}</td><td class="small">${esc(c.exReason || '')}${c.exNote ? `<div class="muted">${esc(c.exNote)}</div>` : ''}</td>
       <td data-stop="1"><button class="sm" data-act="exRestore" data-id="${c.id}">Restore</button></td></tr>`).join('')
-      || `<tr><td colspan="6" class="muted empty">${q ? 'No match.' : 'No ex-clients. Use "Move to ex-clients" on a client instead of deleting it.'}</td></tr>`}
+      || `<tr><td colspan="7" class="muted empty">${q ? 'No match.' : 'No ex-clients. Use "Move to ex-clients" on a client instead of deleting it.'}</td></tr>`}
     </tbody></table></section>`;
 }
 async function exMove(cid, data, cancelTasks, revokeLogins) {
