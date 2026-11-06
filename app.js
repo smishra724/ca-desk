@@ -7,6 +7,7 @@ import { initSend } from './send.js';
 import { initPayslips } from './payslips.js';
 import { initPayments, isPayKey } from './payments.js';
 import { initTaskFiles } from './taskfiles.js';
+import { initDsc } from './dsc.js';
 import { initDriveImport } from './drive-import.js';
 
 // Local mode (no login, data in this browser) until firebase-config.js has real keys.
@@ -220,13 +221,14 @@ const NAV_ICON = {
   tasks: '<path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>',
   clients: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6M16 4.5a3.5 3.5 0 0 1 0 7M18 14c2.2.6 3.5 2.7 3.5 6"/>',
   comps: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13l2 2 4-4"/>',
+  dsc: '<rect x="7" y="2.5" width="10" height="14" rx="2"/><path d="M10 16.5v3.5a2 2 0 0 0 4 0v-3.5M10 7h4M10 10h4"/>',
   import: '<path d="M12 3v12M7 10l5 5 5-5M4 19h16"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
 };
-const PAGE_TITLE = { dashboard: 'Dashboard', due: 'Due dates', tasks: 'Tasks', task: 'Task', workflow: 'Work categories', clients: 'Clients', client: 'Client', comps: 'Compliances', import: 'Excel import', settings: 'Settings' };
+const PAGE_TITLE = { dashboard: 'Dashboard', due: 'Due dates', tasks: 'Tasks', task: 'Task', workflow: 'Work categories', clients: 'Clients', client: 'Client', comps: 'Compliances', dsc: 'DSC register', import: 'Excel import', settings: 'Settings' };
 function render() {
   if (!S.profile) return;
-  const items = isAdmin() ? [['dashboard', 'Dashboard'], ['due', 'Due dates'], ['tasks', 'Tasks'], ['clients', 'Clients'], ['comps', 'Compliances'], ['import', 'Excel import'], ['settings', 'Settings']] : [];
+  const items = isAdmin() ? [['dashboard', 'Dashboard'], ['due', 'Due dates'], ['tasks', 'Tasks'], ['clients', 'Clients'], ['comps', 'Compliances'], ['dsc', 'DSC register'], ['import', 'Excel import'], ['settings', 'Settings']] : [];
   const active = v => S.view === v || (v === 'tasks' && ['task', 'workflow'].includes(S.view)) || (v === 'clients' && S.view === 'client');
   const nav = items.map(([v, l]) => `<button class="nav ${active(v) ? 'on' : ''}" data-act="go" data-v="${v}"><svg viewBox="0 0 24 24" aria-hidden="true">${NAV_ICON[v]}</svg><span>${l}</span></button>`).join('');
   const who = S.profile.name || S.profile.email || '';
@@ -264,6 +266,7 @@ function render() {
 const GO = [
   ['Dashboard', 'go', 'dashboard', 'home overview'], ['Due dates', 'go', 'due', 'pending returns calendar'], ['Tasks', 'go', 'tasks', 'register board work'],
   ['Clients', 'go', 'clients', 'list business itr'], ['Compliances — tick clients for each compliance or work', 'go', 'comps', 'compliances applicable assign multiple clients select tick applicability work'],
+  ['DSC register — digital signatures', 'go', 'dsc', 'dsc digital signature token expiry class 3'],
   ['Excel import', 'go', 'import', 'upload excel bulk'], ['Settings', 'go', 'settings', 'firm backup drive staff logins'], ['Work categories & staff', 'go', 'workflow', 'departments checklist staff automatic tasks'],
   ['New task', 'newTask', '', 'add create task'], ['New client', 'fabGo', 'client', 'add create client'], ['Add a reminder', 'fabGo', 'reminder', 'add create reminder note follow up'],
   ['Remind a client on WhatsApp / email', 'fabGo', 'remind', 'whatsapp email reminder send message'],
@@ -297,6 +300,7 @@ function body() {
     case 'import': return vImport();
     case 'settings': return vSettings();
     case 'comps': return vComps();
+    case 'dsc': return DSC.view();
     case 'tasks': return T.vTasks();
     case 'task': return T.vTask();
     case 'workflow': return T.vWorkflow();
@@ -388,7 +392,9 @@ function vDashboard() {
   const noPan = S.clients.filter(c => !c.pan).length;
   const noLogin = regs.filter(r => !r.c._hasGstLogin).length;
   const remDue = S.tasks.filter(t => t.kind === 'reminder' && !['Completed', 'Not required', 'Cancelled'].includes(t.status) && t.due && t.due <= todayISO());
+  const dscA = DSC.alerts();
   const attn = [
+    dscA.length && [`${dscA.length} DSC${dscA.length === 1 ? '' : 's'} expired or expiring within 30 days`, 'dscSoon', 'amber'],
     remDue.length && [`${remDue.length} reminder${remDue.length === 1 ? '' : 's'} for today: ${remDue.slice(0, 2).map(t => t.title).join('; ')}${remDue.length > 2 ? '…' : ''}`, 'remToday', 'amber'],
     overdue.length && [`${overdue.length} return(s) overdue since ${isoToDisp(S.trackFrom)}`, 'go" data-v="due', 'red'],
     noPan && [`${noPan} client(s) without PAN`, 'cliShow" data-v="nopan', 'amber'],
@@ -621,7 +627,7 @@ async function moveClients(ids, to) {
 /* ---------- single client ---------- */
 function vClient() {
   const c = S.client || {};
-  const tabs = [['master', 'Master data'], ['gst', `GST registrations${regsOf(c).length ? ` (${regsOf(c).length})` : ''}`], ['logins', 'Portal logins'], ['docs', 'Documents'], ['compliance', 'Compliance'], ['tasks', 'Tasks'], ...(isAdmin() ? [['access', 'Client access']] : [])];
+  const tabs = [['master', 'Master data'], ['gst', `GST registrations${regsOf(c).length ? ` (${regsOf(c).length})` : ''}`], ['logins', 'Portal logins'], ['docs', 'Documents'], ['compliance', 'Compliance'], ['tasks', 'Tasks'], ['dsc', 'DSC'], ...(isAdmin() ? [['access', 'Client access']] : [])];
   return `
   ${isAdmin() ? `<button class="link back" data-act="${S.client?.exClient ? 'clientTab" data-t="ex' : 'go" data-v="clients'}">← ${S.client?.exClient ? 'Ex-clients' : isItrOnly(S.client || {}) && S.cid ? 'ITR clients' : 'All clients'}</button>` : ''}
   <section class="card head">
@@ -641,7 +647,7 @@ function vClient() {
       ${S.creds.map(cr => `<button class="sm pill" data-act="login" data-id="${cr.id}">${esc(portalByKey(cr.portal).short)}${cr.gstin && regsOf(c).length > 1 ? ' ' + esc(stateOf(cr.gstin) || cr.gstin.slice(0, 2)) : ''} ↗</button>`).join('')}</div>` : ''}
   </section>
   <div class="tabs">${tabs.map(([t, l]) => `<button class="${S.tab === t ? 'on' : ''}" data-act="tab" data-t="${t}">${l}</button>`).join('')}</div>
-  <section class="card">${({ master: tMaster, logins: tLogins, docs: tDocs, compliance: tCompliance, access: tAccess, tasks: T.tClientTasks, gst: tGst })[S.tab]?.() || ''}</section>`;
+  <section class="card">${({ master: tMaster, logins: tLogins, docs: tDocs, compliance: tCompliance, access: tAccess, tasks: T.tClientTasks, gst: tGst, dsc: () => DSC.clientTab() })[S.tab]?.() || ''}</section>`;
 }
 
 function fieldInput([k, l, type, opts], v) {
@@ -830,6 +836,7 @@ function vImport() {
 
 // create tasks for due returns that don't have one yet (runs in the background, then refreshes the screen)
 function autoTasks() {
+  setTimeout(() => DSC.loadAll().then(() => { if (S.view === 'dashboard') render(); }).catch(() => {}), 1500);
   setTimeout(() => T.autoSync().then(n => { if (n) { render(); toast(`${n} new task(s) created for returns falling due`); } }).catch(e => console.warn('autoTasks', e)), 300);
 }
 /* ---------- reminders to clients on WhatsApp / email ---------- */
@@ -1130,6 +1137,7 @@ const A = {
   gqDo: ({ a, v }) => { S.gq = ''; if (a === 'go') A.go({ v }); else if (a === 'newTask') { render(); A.newTask({}); } else A.fabGo({ to: v }); },
   dueDay: ({ d }) => { S.dueDay = d; S.dueF ||= { range: '30', form: '', q: '', history: false }; if (new Date(d) < dayStart(new Date())) S.dueF.history = false; S.dueOpen = new Set(['*']); S.view = 'due'; render(); },
   dueDayClear: () => { S.dueDay = ''; S.dueOpen = new Set(); render(); },
+  dscSoon: () => { S.dscF = { q: '', show: 'soon', cust: '' }; S.view = 'dsc'; render(); },
   remToday: () => { Object.assign(S.tf, { q: '', status: 'open', due: '', kind: 'reminder', mode: 'list' }); S.view = 'tasks'; render(); },
   dueOverdue: () => { S.dueF ||= { range: '30', form: '', q: '', history: false }; S.dueF.range = 'overdue'; S.dueDay = ''; S.dueOpen = new Set(['*']); S.view = 'due'; render(); },
   remind: ({ cid, keys, via }) => openReminder(cid, keys.split(','), via),
@@ -1822,6 +1830,8 @@ const PAY = initPayments({ S, A, C, F, esc, toast, modal, closeModal, guard, ren
   fs: { doc, getDocs, setDoc, collection } });
 const TF = initTaskFiles({ S, A, C, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, db, saveFile, saveBlob, T, WA_ICON, MAIL_ICON, busy,
   fs: { doc, getDocs, deleteDoc, collection, query, where } });
+const DSC = initDsc({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, todayISO, db, saveBlob, WA_ICON, MAIL_ICON,
+  fs: { doc, getDocs, setDoc, deleteDoc, collection } });
 const PS = initPayslips({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, db, saveBlob, busy, WA_ICON, MAIL_ICON,
   fs: { doc, getDocs, setDoc, updateDoc, deleteDoc, collection, writeBatch, arrayUnion } });
 
@@ -1843,6 +1853,7 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('input', e => {
   if (e.target.id === 'gq') { S.gq = e.target.value; gqResults(); return; }
+  if (e.target.id === 'dscQ') { S.dscF.q = e.target.value; const p = e.target.selectionStart; render(); const s = $('#dscQ'); s.focus(); s.setSelectionRange(p, p); return; }
   if (e.target.id === 'dueQ') {
     S.dueF.q = e.target.value; const pos = e.target.selectionStart; render();
     const s = $('#dueQ'); s.focus(); s.setSelectionRange(pos, pos); return;
