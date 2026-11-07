@@ -1,7 +1,7 @@
 import { firebaseConfig } from './firebase-config.js';
 import { PORTALS, portalByKey } from './portals.js';
 import { extractFromFile, toISO, STATE_CODES } from './extract.js';
-import { dueItems, fmtDate, regsOf, activeRegs, filingFor, isItrOnly, codeOf, flagOn } from './compliance.js';
+import { dueItems, fmtDate, regsOf, activeRegs, filingFor, isItrOnly, codeOf, flagOn, dispName, subName } from './compliance.js';
 import { initTasks } from './tasks.js';
 import { initSend } from './send.js';
 import { initPayslips } from './payslips.js';
@@ -178,7 +178,7 @@ function renderNoAccess(u) {
 /* ================= data loading ================= */
 async function loadClients() {
   const snap = await getDocs(collection(db, 'clients'));
-  const all = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const all = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => dispName(a).localeCompare(dispName(b)));
   // ex-clients are kept with all their data but left out of the calendar, tasks, dashboard and lists
   S.clients = all.filter(c => !c.exClient); S.exClients = all.filter(c => c.exClient);
 }
@@ -282,7 +282,7 @@ function gqResults() {
   const comps = COMPS.filter(cp => has(cp.name, cp.id, cp.grp)).slice(0, 4);
   if (comps.length) groups.push(['Compliances & work', comps.map(cp => `<button data-act="gqComp" data-id="${esc(cp.id)}"><b>${esc(cp.name)}</b><span>${S.clients.filter(c => compOn(cp, c)).length} client(s) · tick clients, see due dates</span></button>`)]);
   const cl = [...S.clients, ...(S.exClients || [])].filter(c => has(c.name, c.tradeName, c.pan, c.code, c.tan, c.cin, c.mobile, c.email, ...(c.gstins || []))).slice(0, 6);
-  if (cl.length) groups.push(['Clients', cl.map(c => `<button data-act="gqOpen" data-id="${c.id}"><b>${esc(c.name)}</b><span>${esc(c.constitution || '')}${c.pan ? ` · <code>${esc(c.pan)}</code>` : ''}${regsOf(c)[0] ? ` · <code>${esc(regsOf(c)[0].gstin)}</code>` : ''}${c.exClient ? ' · Ex-client' : isItrOnly(c) ? ' · ITR only' : ''}</span></button>`)]);
+  if (cl.length) groups.push(['Clients', cl.map(c => `<button data-act="gqOpen" data-id="${c.id}"><b>${esc(dispName(c))}</b><span>${subName(c) ? esc(subName(c)) + ' · ' : ''}${esc(c.constitution || '')}${c.pan ? ` · <code>${esc(c.pan)}</code>` : ''}${regsOf(c)[0] ? ` · <code>${esc(regsOf(c)[0].gstin)}</code>` : ''}${c.exClient ? ' · Ex-client' : isItrOnly(c) ? ' · ITR only' : ''}</span></button>`)]);
   const lg = (S.credIdx || []).filter(x => has(x.username, x.label)).slice(0, 4);
   if (lg.length) groups.push(['Portal logins', lg.map(x => { const c = S.clients.find(y => y.id === x.cid); return `<button data-act="gqLogin" data-id="${x.cid}"><b>${esc(x.username)}</b><span>${esc((x.portal || '').toUpperCase())} login · ${esc(c?.name || '')}</span></button>`; })]);
   const tk = (S.tasks || []).filter(t => has('T-' + String(t.no || 0).padStart(4, '0'), t.title, t.clientName, t.period)).sort((a, b) => (a.status === 'Completed') - (b.status === 'Completed') || (a.due || '9').localeCompare(b.due || '9')).slice(0, 5);
@@ -484,7 +484,7 @@ function vDue() {
   const days = d => { const n = Math.round((d - today) / 864e5); return n < 0 ? `${-n} day${n === -1 ? '' : 's'} overdue` : n === 0 ? 'due today' : `in ${n} day${n === 1 ? '' : 's'}`; };
   const panel = g => `<div class="cpanel">${isAdmin() ? `<div class="cp-bar"><button class="sm" data-act="remindAll" data-k="${esc(g.name)}">${WA_ICON} Remind all ${g.clients} pending client${g.clients === 1 ? '' : 's'}</button></div>` : ''}<table class="tbl"><thead><tr><th>Client</th><th>Period</th><th>Due</th>${isAdmin() ? '<th>Task status</th>' : ''}<th></th></tr></thead><tbody>
     ${g.rs.map(r => `<tr class="${r.overdue ? 'od' : ''}">
-      <td><a href="#" data-act="open" data-id="${r.c.id}" data-tab="compliance">${esc(r.c.name)}</a>${r.gstin ? `<div class="muted tiny"><span class="mono">${esc(r.gstin)}</span>${r.c.tradeName ? ' · ' + esc(r.c.tradeName) : ''}</div>` : r.c.tradeName ? `<div class="muted tiny">${esc(r.c.tradeName)}</div>` : ''}${r.note ? ` <span class="tag">${esc(r.note)}</span>` : ''}</td>
+      <td><a href="#" data-act="open" data-id="${r.c.id}" data-tab="compliance">${esc(dispName(r.c))}</a>${r.gstin ? `<div class="muted tiny"><span class="mono">${esc(r.gstin)}</span>${subName(r.c) ? ' · ' + esc(subName(r.c)) : ''}</div>` : subName(r.c) ? `<div class="muted tiny">${esc(subName(r.c))}</div>` : ''}${r.note ? ` <span class="tag">${esc(r.note)}</span>` : ''}</td>
       <td>${esc(r.period)}</td><td class="nowrap">${fmtDate(r.due)}<div class="tiny ${r.overdue ? 'red' : 'muted'}">${days(r.due)}</div></td>
       ${isAdmin() ? `<td class="nowrap tstat">${T.statusSelect(r)}</td>` : ''}
       <td class="nowrap">${isAdmin() ? `${remindBtns(r.c.id, r.key)} <button class="sm" data-act="markFiled" data-cid="${r.c.id}" data-key="${r.key}">${isPayKey(r.key) ? 'Mark paid' : 'Mark filed'}</button>` : ''}</td></tr>`).join('')}
@@ -545,7 +545,7 @@ function vClients() {
         <td class="nowrap">${isoToDisp(c.doi)}</td><td class="small">${esc(c.mobile)}${c.email ? `<div class="muted tiny">${esc(c.email)}</div>` : ''}</td><td>${itrStatus(c)}</td>
         <td class="nowrap" data-stop="1">${isAdmin() && S.allFilings[`${c.id}|ITR-${fy}`]?.status !== 'filed' ? `<button class="sm" data-act="markFiled" data-cid="${c.id}" data-key="ITR-${fy}">Mark filed</button>` : ''}</td></tr>`
     : `<tr class="click" data-act="open" data-id="${c.id}">${cb(c)}<td class="srn">${i + 1}</td><td>${esc(c.code)}</td>
-        <td><b>${esc(c.name || '—')}</b>${cf && isItrOnly(c) ? ' <span class="tag">ITR only</span>' : ''}${c.tradeName ? `<div class="muted small">${esc(c.tradeName)}</div>` : ''}</td>
+        <td><b>${esc(dispName(c) || '—')}</b>${cf && isItrOnly(c) ? ' <span class="tag">ITR only</span>' : ''}${subName(c) ? `<div class="muted small">${esc(subName(c))}</div>` : ''}</td>
         <td>${esc(c.constitution)}</td><td class="mono">${esc(c.pan)}</td><td class="mono">${esc(regsOf(c)[0]?.gstin || '')}${regsOf(c).length > 1 ? ` <span class="tag blue">+${regsOf(c).length - 1} more</span>` : ''}</td>
         <td>${(c.portalUsers || []).filter(p => !p.revoked).length ? '<span class="tag green">Active</span>' : '<span class="tag">—</span>'}</td></tr>`;
   const nSel = [...sel].filter(id => base.some(c => c.id === id)).length;
@@ -632,8 +632,8 @@ function vClient() {
   ${isAdmin() ? `<button class="link back" data-act="${S.client?.exClient ? 'clientTab" data-t="ex' : 'go" data-v="clients'}">← ${S.client?.exClient ? 'Ex-clients' : isItrOnly(S.client || {}) && S.cid ? 'ITR clients' : 'All clients'}</button>` : ''}
   <section class="card head">
     <div class="row-between wrap">
-      <div><h1>${esc(c.name || 'New client')}</h1>
-        <div class="chips">${S.cid && c.exClient ? `<span class="cat ex">Ex-client since ${isoToDisp(c.exOn) || '—'}${c.exReason ? ' · ' + esc(c.exReason) : ''}</span>` : S.cid ? (isItrOnly(c) ? '<span class="cat itr">Individual – ITR only</span>' : '<span class="cat biz">Business client</span>') : ''}${c.tradeName ? `<span>${esc(c.tradeName)}</span>` : ''}${c.constitution ? `<span>${esc(c.constitution)}</span>` : ''}
+      <div><h1>${esc(dispName(c) || 'New client')}</h1>
+        <div class="chips">${S.cid && subName(c) && /^Prop\. /.test(subName(c)) ? `<span><b>${esc(subName(c))}</b></span>` : ''}${S.cid && c.exClient ? `<span class="cat ex">Ex-client since ${isoToDisp(c.exOn) || '—'}${c.exReason ? ' · ' + esc(c.exReason) : ''}</span>` : S.cid ? (isItrOnly(c) ? '<span class="cat itr">Individual – ITR only</span>' : '<span class="cat biz">Business client</span>') : ''}${c.tradeName && dispName(c) !== c.tradeName ? `<span>${esc(c.tradeName)}</span>` : ''}${c.constitution ? `<span>${esc(c.constitution)}</span>` : ''}
         ${c.pan ? `<span class="mono">PAN ${esc(c.pan)}</span>` : ''}${regsOf(c).length === 1 ? `<span class="mono">GSTIN ${esc(regsOf(c)[0].gstin)}</span>` : regsOf(c).length > 1 ? `<span>${regsOf(c).length} GSTINs · ${esc([...new Set(regsOf(c).map(r => r.state).filter(Boolean))].join(', '))}</span>` : ''}</div></div>
       <div class="btns">
         ${isAdmin() && S.cid && c.exClient ? `<button class="primary" data-act="exRestore" data-id="${S.cid}">Restore as active client</button>` : ''}
@@ -986,7 +986,7 @@ function compPanel(cp) {
   const elig = S.clients.filter(c => compEligible(cp, c) && !(cp.type === 'flag' && isItrOnly(c)));
   const pick = S.compPick ||= new Set(elig.filter(c => compOn(cp, c)).map(c => c.id));
   const shown = elig.filter(c => (!cf || (c.constitution || 'Not set') === cf) && (!q || [c.name, c.tradeName, c.pan, c.gstin].some(v => (v || '').toLowerCase().includes(q))))
-    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    .sort((a, b) => dispName(a).localeCompare(dispName(b)));
   const notElig = S.clients.length - elig.length;
   const why = cp.type === 'auto' ? `Only clients for whom ${esc(cp.name)} can arise are listed (GSTIN / filing type / constitution)${notElig ? ` — ${notElig} others don't qualify` : ''}.`
     : cp.type === 'flag' ? `Ticking switches on ${esc(cp.name)} in the client's compliance calendar.${cp.id === 'pt' ? ' Due dates follow the state in the client\'s address; states without PT (e.g. UP, Delhi, Haryana, Rajasthan) get no PT dates.' : cp.id === 'lwf' ? ' Monthly, half-yearly or annual depending on the client\'s state.' : ''}${notElig ? ` ITR-only clients (${notElig}) are excluded.` : ''}`

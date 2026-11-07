@@ -35,6 +35,12 @@ export const filingFor = (map, it, prefix = '') => map[prefix + it.key] || (it.a
 
 // "ITR only" clients (individuals filing just the yearly return): explicit category, or an
 // individual with no GST registration when no category has been chosen yet.
+// Proprietorships are known by the firm's (trade) name; the proprietor's own name is shown under it.
+// An individual registered under GST with a trade name is a proprietorship too.
+export const isProp = c => !!c && (c.constitution === 'Proprietorship' || (c.constitution === 'Individual' && !!c.tradeName && activeRegs(c).length > 0));
+export const dispName = c => !c ? '' : isProp(c) && c.tradeName ? c.tradeName : (c.name || '');
+export const subName = c => !c ? '' : isProp(c) && c.tradeName ? `Prop. ${c.name || ''}` : (c.tradeName && c.tradeName !== c.name ? c.tradeName : '');
+
 export function isItrOnly(c) {
   if (c?.category) return c.category === 'itr';
   return (c?.constitution === 'Individual' || (!c?.constitution && (c?.pan || '')[3] === 'P')) && !activeRegs(c).length;

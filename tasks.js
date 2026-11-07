@@ -1,3 +1,4 @@
+import { dispName } from './compliance.js';
 // Task manager — departments → work categories (docs required / weighted activities / outcome docs),
 // tasks with checklist progress, board & list views, reassign log, notes, timesheet, task-wise fees,
 // bulk generation from the compliance calendar, and a read-only view for clients.
@@ -210,7 +211,7 @@ export function initTasks(ctx) {
   const DUE_ORDER = ['Overdue', 'Today', 'Next 7 days', 'Later this month', 'Later', 'Earlier (done)', 'No due date'];
   const COLS = {
     no: { label: 'Task no.', sort: t => t.no || 0 },
-    client: { label: 'Client', val: t => t.clientName || '—', sort: t => (t.clientName || '').toLowerCase() },
+    client: { label: 'Client', val: t => cn(t) || '—', sort: t => cn(t).toLowerCase() },
     work: { label: 'Work', val: t => t.title || t.cat || '—', sort: t => (t.title || '').toLowerCase() },
     dept: { label: 'Department', val: t => t.dept || '—' },
     period: { label: 'Period', val: t => shortPer(t.period) || '—', sort: t => t.period || '' },
@@ -226,7 +227,7 @@ export function initTasks(ctx) {
   function scoped(skipCol) {
     const f = S.tf, q = f.q.toLowerCase();
     return S.tasks.filter(t =>
-      (!q || [tno(t), t.clientName, t.title, t.cat, t.period, t.assignee].some(v => (v || '').toLowerCase().includes(q))) &&
+      (!q || [tno(t), cn(t), t.clientName, t.title, t.cat, t.period, t.assignee].some(v => (v || '').toLowerCase().includes(q))) &&
       (!f.assignee || (f.assignee === '_none' ? !t.assignee : t.assignee === f.assignee)) &&
       (!f.dept || t.deptId === f.dept) &&
       (!f.client || t.clientId === f.client) && (!f.cat || t.catId === f.cat) && (!f.period || t.period === f.period) &&
@@ -274,7 +275,7 @@ export function initTasks(ctx) {
     const p = progress(t);
     return `<div class="tcard ${overdue(t) ? 'od' : ''}" draggable="true" data-tid="${t.id}" data-act="openTask" data-id="${t.id}">
       <div class="tc-h"><span class="mono tiny">${tno(t)}</span>${t.starred ? '<span>★</span>' : ''}${t.priority === 'High' || t.priority === 'Urgent' ? `<span class="tag ${t.priority === 'Urgent' ? 'red' : 'amber'}">${t.priority}</span>` : ''}</div>
-      <b>${esc(t.clientName || '—')}</b>
+      <b>${esc(cn(t) || '—')}</b>
       <div class="small">${esc(t.title)}${t.period ? ` · ${esc(t.period)}` : ''}</div>
       <div class="bar"><i style="width:${p}%"></i></div>
       <div class="tc-f"><span class="${overdue(t) ? 'red' : 'muted'} small">${t.due ? 'Due ' + isoToDisp(t.due) : 'No due date'}</span>
@@ -283,6 +284,8 @@ export function initTasks(ctx) {
   };
   const initials = n => n ? n.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() : '—';
 
+  // client name as shown everywhere (proprietorships by firm name)
+  const cn = t => { const c = S.clients.find(x => x.id === t.clientId) || S.exClients?.find(x => x.id === t.clientId); return c ? dispName(c) : (t.clientName || ''); };
   const STC = { 'Not started': 'ns', 'In progress': 'ip', 'Waiting on client': 'wc', 'Under review': 'ur', 'Completed': 'cp', 'Not required': 'nr', 'Cancelled': 'cx' };
   const daysTo = d => d ? Math.round((new Date(d + 'T00:00') - new Date(todayISO() + 'T00:00')) / 864e5) : null;
   const dueBadge = t => {
@@ -335,7 +338,7 @@ export function initTasks(ctx) {
         ${list.map(t => { const p = progress(t); const c = S.clients.find(x => x.id === t.clientId); return `<tr class="${overdue(t) ? 'late' : ''} ${sel.has(t.id) ? 'sel' : ''}">
           ${adm ? `<td class="cbx"><input type="checkbox" data-change="tsel" value="${t.id}" ${sel.has(t.id) ? 'checked' : ''}></td>` : ''}
           <td class="nowrap"><a href="#" data-act="openTask" data-id="${t.id}" class="tno">${tno(t)}</a>${t.starred ? ' <span class="star">★</span>' : ''}${t.priority === 'Urgent' || t.priority === 'High' ? ` <span class="pri ${t.priority === 'Urgent' ? 'u' : 'h'}">${t.priority}</span>` : ''}</td>
-          <td><a href="#" data-act="openTask" data-id="${t.id}" class="cl">${esc(t.clientName || '—')}</a>${c?.pan || c?.gstin ? `<div class="sub mono">${esc(c.gstin || c.pan)}</div>` : ''}</td>
+          <td><a href="#" data-act="openTask" data-id="${t.id}" class="cl">${esc(cn(t) || '—')}</a>${c?.pan || c?.gstin ? `<div class="sub mono">${esc(c.gstin || c.pan)}</div>` : ''}</td>
           <td>${esc(t.title)}${t.kind === 'reminder' ? `<div class="sub"><span class="dept rem">Reminder${t.remindTime ? ' · ' + esc(t.remindTime) : ''}</span></div>` : t.dept ? `<div class="sub"><span class="dept">${esc(t.dept)}</span></div>` : ''}</td>
           <td class="per" title="${esc(t.period || '')}">${esc((t.period || '—').replace(/\s*\(AY[^)]*\)/, ''))}</td>
           <td class="nowrap">${t.assignee ? `<i class="av">${esc(initials(t.assignee))}</i>${esc(t.assignee)}` : '<span class="muted">Unassigned</span>'}</td>
@@ -384,9 +387,9 @@ export function initTasks(ctx) {
     const tbl = (title, data) => `<div><h3>${title}</h3><table class="tbl"><tbody>${data.map(([k, m]) => `<tr><td>${esc(k)}</td><td class="nowrap">${hrs(m)} h</td></tr>`).join('') || '<tr><td class="muted">No time logged</td></tr>'}</tbody></table></div>`;
     return `<div class="filters"><label>From<input type="date" data-change="tf" data-k="tFrom" value="${from}"></label><label>To<input type="date" data-change="tf" data-k="tTo" value="${to}"></label>
       <span class="muted small">Total: <b>${hrs(rows.reduce((s, r) => s + (+r.mins || 0), 0))} h</b></span></div>
-      <div class="grid3">${tbl('By staff', sum(r => r.by))}${tbl('By client', sum(r => r.t.clientName || '—'))}${tbl('By department', sum(r => r.t.dept || '—'))}</div>
+      <div class="grid3">${tbl('By staff', sum(r => r.by))}${tbl('By client', sum(r => cn(r.t) || '—'))}${tbl('By department', sum(r => r.t.dept || '—'))}</div>
       <h3>Entries</h3><table class="tbl"><thead><tr><th>Date</th><th>Staff</th><th>Task</th><th>Client</th><th>Hours</th><th>Note</th></tr></thead><tbody>
-      ${rows.map(r => `<tr class="click" data-act="openTask" data-id="${r.t.id}"><td class="nowrap">${isoToDisp(r.date)}</td><td>${esc(r.by)}</td><td>${tno(r.t)} ${esc(r.t.title)}</td><td>${esc(r.t.clientName)}</td><td>${hrs(r.mins)}</td><td>${esc(r.note)}</td></tr>`).join('')
+      ${rows.map(r => `<tr class="click" data-act="openTask" data-id="${r.t.id}"><td class="nowrap">${isoToDisp(r.date)}</td><td>${esc(r.by)}</td><td>${tno(r.t)} ${esc(r.t.title)}</td><td>${esc(cn(r.t))}</td><td>${hrs(r.mins)}</td><td>${esc(r.note)}</td></tr>`).join('')
         || '<tr><td colspan="6" class="muted empty">No entries in this period. Log time from inside a task.</td></tr>'}</tbody></table>`;
   }
   function vBilling(list) {
@@ -398,7 +401,7 @@ export function initTasks(ctx) {
       <div class="stat"><b>${inr(tot('received'))}</b><span>Received</span></div>
       <div class="stat red"><b>${inr(tot('fee') - tot('received'))}</b><span>Outstanding</span></div></div>
       <table class="tbl"><thead><tr><th>No.</th><th>Client</th><th>Work</th><th>Status</th><th>Fee</th><th>Billed</th><th>Received</th><th>Balance</th></tr></thead><tbody>
-      ${rows.map(t => `<tr class="click" data-act="openTask" data-id="${t.id}"><td class="mono">${tno(t)}</td><td>${esc(t.clientName)}</td><td>${esc(t.title)} ${esc(t.period)}</td>
+      ${rows.map(t => `<tr class="click" data-act="openTask" data-id="${t.id}"><td class="mono">${tno(t)}</td><td>${esc(cn(t))}</td><td>${esc(t.title)} ${esc(t.period)}</td>
         <td>${statusTag(t.status)}</td><td>${inr(t.fee)}</td><td>${t.billed ? '<span class="tag green">Billed</span>' : '<span class="tag">No</span>'}</td><td>${inr(t.received)}</td><td>${inr(t.fee - t.received)}</td></tr>`).join('')
         || '<tr><td colspan="8" class="muted empty">Add a fee inside a task to track billing.</td></tr>'}</tbody></table>`;
   }
@@ -417,7 +420,7 @@ export function initTasks(ctx) {
       <div class="row-between wrap"><div>
         <div class="muted mono small">${tno(t)} · ${esc(t.dept)}</div>
         <h1>${esc(t.title)}${t.period ? ` <span class="muted">— ${esc(t.period)}</span>` : ''}</h1>
-        <div class="chips"><span>${esc(t.clientName || 'No client')}</span>${statusTag(t.status)}${overdue(t) ? '<span class="tag red">Overdue</span>' : ''}</div></div>
+        <div class="chips"><span>${esc(cn(t) || 'No client')}</span>${statusTag(t.status)}${overdue(t) ? '<span class="tag red">Overdue</span>' : ''}</div></div>
         ${adm ? `<div class="btns"><button data-act="starTask">${t.starred ? '★ Bookmarked' : '☆ Bookmark'}</button>
           <button data-act="fwdTask">Forward / reassign</button>
           ${t.clientId ? `<button data-act="open" data-id="${t.clientId}" data-tab="master">Open client</button>` : ''}</div>` : ''}
