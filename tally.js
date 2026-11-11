@@ -53,10 +53,29 @@ const decode = b => { const u8 = new Uint8Array(b); if (u8[0] === 0xFF && u8[1] 
 export const readTallyFile = async f => decode(await f.arrayBuffer());
 const notReachable = (port, err) => `Tally is not answering on port ${port}${err ? ` (${err})` : ''}. Open TallyPrime with the company loaded, and check F1 Help → Settings → Connectivity → Client/Server configuration: TallyPrime acts as “Both” (or Server), Enable ODBC “Yes”, Port ${port}.`;
 
-function parseXml(text) {
-  const clean = String(text).replace(/&#(\d+);/g, (m, n) => (+n < 32 && ![9, 10, 13].includes(+n)) ? '' : m).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
-  const d = new DOMParser().parseFromString(clean, 'text/xml');
-  if (d.querySelector('parsererror')) throw new Error('Tally sent a reply that could not be read.');
+export const tallyLast = { text: '', step: '' };
+function parseXml(text, step = '') {
+  tallyLast.text = String(text); tallyLast.step = step;
+  const bad = c => (c < 32 && ![9, 10, 13].includes(c)) || (c >= 0xFFFE && c <= 0xFFFF) || (c >= 0xD800 && c <= 0xDFFF);
+  let clean = String(text)
+    .replace(/^\uFEFF/, '').replace(/<\?xml[^>]*\?>/i, '')                       // stray BOM / wrong encoding declaration
+    .replace(/&#(\d+);/g, (m, n) => bad(+n) ? '' : m)                          // control characters Tally writes as &#4; etc.
+    .replace(/&#x([0-9a-f]+);/gi, (m, h) => bad(parseInt(h, 16)) ? '' : m)
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]/g, '')
+    .replace(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/g, '&amp;');     // bare & in names / narrations
+  let d = new DOMParser().parseFromString(clean, 'text/xml');
+  if (d.querySelector('parsererror')) { // last resort: wrap in a root (Tally sometimes sends several top-level blocks)
+    const d2 = new DOMParser().parseFromString(`<CADESKROOT>${clean.replace(/<!DOCTYPE[^>]*>/i, '')}</CADESKROOT>`, 'text/xml');
+    if (!d2.querySelector('parsererror')) d = d2;
+  }
+  if (d.querySelector('parsererror')) {
+    const pe = d.querySelector('parsererror').textContent || '', m = pe.match(/line\s*(\d+)[^0-9]+(\d+)/i);
+    let near = '';
+    if (m) { const ln = clean.split('\n')[+m[1] - 1] || ''; near = ln.slice(Math.max(0, +m[2] - 60), +m[2] + 40).trim(); }
+    const empty = !clean.trim();
+    throw new Error(empty ? `Tally sent an empty reply${step ? ` (${step})` : ''}. Check that the company is open in Tally and try again.`
+      : `Tally sent a reply that could not be read${step ? ` (${step})` : ''}${m ? ` — problem at line ${m[1]}${near ? `, near “${near}”` : ''}` : ''}. Use “Download Tally’s reply” and send it to support, or use the Tally XML file option.`);
+  }
   const err = d.querySelector('LINEERROR')?.textContent;
   if (err) throw new Error(`Tally: ${err.trim()}`);
   return d;
@@ -95,7 +114,9 @@ const hsnIn = el => (deep(el, 'GSTHSNNAME')[0] || deep(el, 'HSNCODE').filter(x =
 async function masters(company, opt) {
   const vars = `<SVCURRENTCOMPANY>${xesc(company)}</SVCURRENTCOMPANY>`;
   const L = {}, I = {};
-  const ld = parseXml(await tallyPost(env('CADeskLed', '<COLLECTION NAME="CADeskLed" ISMODIFY="No"><TYPE>Ledger</TYPE><FETCH>Name,Parent,TaxType,GSTDutyHead,GSTDetails,LedStateName,PartyGSTIN,CountryName,GSTRegistrationType</FETCH></COLLECTION>', vars), opt));
+  let ld;
+  try { ld = parseXml(await tallyPost(env('CADeskLed', '<COLLECTION NAME="CADeskLed" ISMODIFY="No"><TYPE>Ledger</TYPE><FETCH>Name,Parent,TaxType,GSTDutyHead,GSTDetails,LedStateName,PartyGSTIN,CountryName,GSTRegistrationType</FETCH></COLLECTION>', vars), opt), 'ledgers'); }
+  catch (e) { if (!/could not be read/.test(e.message)) throw e; ld = parseXml(await tallyPost(env('CADeskLed', '<COLLECTION NAME="CADeskLed" ISMODIFY="No"><TYPE>Ledger</TYPE><FETCH>Name,Parent,TaxType,GSTDutyHead,LedStateName,PartyGSTIN,CountryName</FETCH></COLLECTION>', vars), opt), 'ledgers'); }
   for (const l of deep(ld, 'LEDGER')) {
     const name = l.getAttribute('NAME') || txt(l, 'NAME');
     L[name] = { parent: txt(l, 'PARENT'), taxType: txt(l, 'TAXTYPE'), duty: txt(l, 'GSTDUTYHEAD'), rate: rateIn(l), hsn: hsnIn(l),
@@ -135,8 +156,8 @@ export async function fetchGstr1({ company, gstin, fp, iff = false, quarterly = 
   const extra = ',CmpGSTIN,GSTRegistrationType,ShippingBillNo,ShippingBillDate,PortCode';
   let d;
   for (const f of [base + extra, base + ',CmpGSTIN,GSTRegistrationType', base]) {
-    try { d = parseXml(await tallyPost(env('CADeskVch', body(f), vars), opt)); break; }
-    catch (e) { if (!/^Tally:/.test(e.message) || f === base) throw e; }
+    try { d = parseXml(await tallyPost(env('CADeskVch', body(f), vars), opt), 'vouchers'); break; }
+    catch (e) { if (!/^Tally:|could not be read/.test(e.message) || f === base) throw e; }
   }
   return build(deep(d, 'VOUCHER'), { gstin, fp, iff, L, I, start, end, b2bFrom });
 }
