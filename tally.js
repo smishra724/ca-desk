@@ -37,10 +37,18 @@ export async function tallyPost(xml, { host = 'localhost', port = 9000 } = {}) {
   }
   let r;
   try { r = await fetch(url, { method: 'POST', body: xml, cache: 'no-store', targetAddressSpace: 'loopback' }); } // plain-text body → no CORS pre-check
-  catch { throw new Error(BLOCKED(port)); }
+  catch {
+    // Find out why: if a blind (no-cors) request gets through, Tally is running but does not let web pages read its reply
+    let alive = false;
+    for (const h of [host, host === 'localhost' ? '127.0.0.1' : 'localhost']) {
+      try { await fetch(`http://${h}:${port}`, { method: 'POST', body: '<ENVELOPE></ENVELOPE>', mode: 'no-cors', targetAddressSpace: 'loopback' }); alive = true; break; } catch { /* not listening / blocked */ }
+    }
+    throw new Error(alive ? CORS(port) : BLOCKED(port));
+  }
   return decode(await r.arrayBuffer());
 }
-export const BLOCKED = port => `Could not reach Tally on port ${port}. Check that Tally is open with the company loaded and its port is on (F1 Help → Settings → Connectivity → Client/Server configuration: TallyPrime acts as “Both”, Enable ODBC “Yes”, Port ${port}). If Chrome asked to allow access to apps on this computer, choose Allow. Or export the Day Book from Tally as XML and use “Tally XML file”.`;
+export const CORS = port => `Tally is running on port ${port}, but it does not allow web pages to read its data, so Chrome blocks the reply. Use “Can’t connect? Use a Tally XML file instead” below (Day Book → Alt+E → XML), or install the CA Desk Helper extension, which is allowed to read from Tally.`;
+export const BLOCKED = port => `Nothing is answering on port ${port} of this computer. Check that Tally is open on this same computer (not on a remote desktop or server) with the company loaded, and its port is on (F1 Help → Settings → Connectivity → Client/Server configuration: TallyPrime acts as “Both”, Enable ODBC “Yes”, Port ${port}). If Chrome asked to allow access to apps on this computer, choose Allow. Or export the Day Book from Tally as XML and use “Tally XML file”.`;
 const decode = b => { const u8 = new Uint8Array(b); if (u8[0] === 0xFF && u8[1] === 0xFE || (u8.length > 1 && u8[1] === 0)) return new TextDecoder('utf-16le').decode(b); return new TextDecoder('utf-8').decode(b); };
 export const readTallyFile = async f => decode(await f.arrayBuffer());
 const notReachable = (port, err) => `Tally is not answering on port ${port}${err ? ` (${err})` : ''}. Open TallyPrime with the company loaded, and check F1 Help → Settings → Connectivity → Client/Server configuration: TallyPrime acts as “Both” (or Server), Enable ODBC “Yes”, Port ${port}.`;
