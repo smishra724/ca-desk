@@ -219,18 +219,20 @@ export function initGstr1(ctx) {
   }
 
   function s2(s, p) {
-    return `<ol class="g1-howto small">
-        <li>Sign in to the GST portal — the button below opens it and fills the client's user ID and password. Type the CAPTCHA yourself.</li>
-        <li><b>Services → Returns → Returns Dashboard</b> → financial year and ${s.iff ? 'month' : 'period'} ${esc(fpLabel(s.fp))} → <b>${ret()}</b> → <b>Prepare offline</b>.</li>
-        <li><b>Upload</b> → <b>Choose file</b> → pick <b>${esc(p.jsonName || 'the JSON')}</b>. Wait until the status shows <i>Processed</i>. If it shows <i>Processed with error</i>, download the error report.</li>
-        <li><b>Prepare online</b> → <b>Generate summary</b> → tick the declaration → <b>File statement</b> with DSC or EVC (OTP goes to the authorised signatory).</li>
-        <li>After filing, <b>View</b> → <b>Download PDF</b> and bring the PDF to step 3.</li></ol>
-      ${ctx.extVer() ? '' : `<div class="mt">${ctx.extCard(true)}<p class="muted tiny">Without the extension, Open GST portal copies the password and you paste it.</p></div>`}
+    const auto = (ctx.extVer() || '') >= '1.2.0';
+    return `<div class="g1-auto">
+        <p class="small"><b>Upload JSON to GST portal</b> runs on autopilot:</p>
+        <ol class="g1-howto small">
+          <li>Opens the GST portal and fills the client's user ID and password — <b>you type the CAPTCHA and click Login</b>.</li>
+          <li>Returns Dashboard → ${esc(fpLabel(s.fp))} → <b>${ret()}</b> → Prepare offline → uploads <b>${esc(p.jsonName || 'the JSON')}</b>.</li>
+          <li>Waits for <i>Processed</i> (stops and tells you if it is <i>Processed with error</i>).</li>
+          <li>Prepare online → <b>Generate summary</b>, then stops. You check the summary and file with DSC or EVC yourself.</li></ol>
+        <p class="muted tiny">A bar at the bottom of the portal shows what the autopilot is doing, with a Stop button. If a step can't be found, it tells you which button to click and continues from the next page.</p></div>
+      ${auto ? '' : `<div class="mt">${ctx.extCard(true)}<p class="muted tiny">The autopilot needs CA Desk Helper version 1.2. Without it, the button only opens the portal and copies the password.</p></div>`}
       <div class="btns mt">
-        <button class="primary" data-act="g1Portal">Open GST portal</button>
+        <button class="primary" data-act="g1Portal" ${p.jsonDoc ? '' : 'disabled title="Save the JSON in step 1 first"'}>Upload JSON to GST portal</button>
         ${p.jsonDoc ? `<button data-act="g1DownloadJson">Download JSON again</button>` : ''}
-        <button data-act="g1Uploaded">${p.uploaded ? 'Uploaded ✓' : 'I have uploaded it on the portal'}</button></div>
-      <p class="muted tiny mt">The GST portal does not let other websites upload returns directly. Automatic upload, filing and ARN download are possible through a GST Suvidha Provider (GSP) account. Once you have one, it can be connected here.</p>`;
+        <button data-act="g1Uploaded">${p.uploaded ? 'Filed on portal ✓' : 'I have filed it on the portal'}</button></div>`;
   }
 
   function s3(s, p) {
@@ -312,13 +314,25 @@ export function initGstr1(ctx) {
     if (S.tfiles?.tid === t.id) S.tfiles = null;
     s.json = null; s.step = 2; draw(); render(); draw();
   }, 'JSON saved');
-  A.g1DownloadJson = () => guard(async () => {
-    const s = g(), p = task()?.g1; if (!p?.jsonDoc) return;
+  async function savedJson() {
+    const s = g(), p = task()?.g1; if (!p?.jsonDoc) throw new Error('Save the JSON in step 1 first.');
     const ch = await getDocs(collection(db, 'clients', s.cid, 'docs', p.jsonDoc, 'chunks'));
     const b64 = ch.docs.sort((a, b) => a.id.localeCompare(b.id)).map(x => x.data().d).join('');
-    saveBlob(new Blob([Uint8Array.from(atob(b64), c => c.charCodeAt(0))], { type: 'application/json' }), p.jsonName);
+    return { name: p.jsonName, text: new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0))) };
+  }
+  A.g1DownloadJson = () => guard(async () => { const j = await savedJson(); saveBlob(new Blob([j.text], { type: 'application/json' }), j.name); });
+  A.g1Portal = () => guard(async () => {
+    const s = g();
+    if ((ctx.extVer() || '') < '1.2.0') return portalLogin(s.cid, s.gstin);
+    const [j, cred] = [await savedJson(), await ctx.gstCred(s.cid, s.gstin)];
+    if (!cred) throw new Error('No GST login is saved for this GSTIN. Add it in the client → Portal logins, then try again.');
+    const y = +s.fp.slice(2), m = +s.fp.slice(0, 2), fy = m >= 4 ? `${y}-${String((y + 1) % 100).padStart(2, '0')}` : `${y - 1}-${String(y % 100).padStart(2, '0')}`;
+    const quarter = m >= 4 ? Math.ceil((m - 3) / 3) : 4;
+    const job = { gstin: s.gstin, ret: s.iff ? 'IFF' : 'GSTR1', fp: s.fp, fy, quarter, month: m, periodLabel: fpLabel(s.fp) + (s.quarterly ? ' (quarter)' : ''), json: j.text, jsonName: j.name };
+    window.postMessage({ type: 'CAPM_G1', url: 'https://services.gst.gov.in/services/login', username: cred.username || '', password: cred.password || '', job }, location.origin);
+    const t = task(); if (t) await T.patch(t.id, {}, `${ret()} autopilot started on the GST portal`);
+    toast('GST portal opened — type the CAPTCHA and log in. The autopilot does the rest up to Generate summary.', 7000);
   });
-  A.g1Portal = () => guard(async () => { const s = g(); await portalLogin(s.cid, s.gstin); });
   A.g1Uploaded = () => guard(async () => {
     const s = g(), t = await T.ensure(s.cid, s.key, s.alt, s.form, s.period, s.due);
     if (!t.g1?.uploaded) await T.patch(t.id, { g1: { ...(t.g1 || {}), uploaded: true, uploadedAt: new Date().toISOString() }, ...(['Not started', 'Waiting on client'].includes(t.status) ? { status: 'In progress' } : {}) }, `${ret()} JSON uploaded on the GST portal`);

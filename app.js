@@ -870,9 +870,12 @@ function loginWith(c) {
   }
 }
 // GST login of a client for one GSTIN (falls back to the only GST login, then to the plain portal page)
-async function gstLogin(cid, gstin) {
+async function gstCred(cid, gstin) {
   const list = (await getDocs(collection(db, 'clients', cid, 'credentials'))).docs.map(d => ({ id: d.id, ...d.data() })).filter(x => x.portal === 'gst');
-  const c = list.find(x => x.gstin === gstin) || (list.length === 1 ? list[0] : list.find(x => !x.gstin));
+  return list.find(x => x.gstin === gstin) || (list.length === 1 ? list[0] : list.find(x => !x.gstin)) || null;
+}
+async function gstLogin(cid, gstin) {
+  const c = await gstCred(cid, gstin);
   if (c) return loginWith(c);
   window.open(portalByKey('gst').url, '_blank', 'noopener');
   toast('No GST login saved for this GSTIN — sign in on the portal yourself.', 6000);
@@ -1057,7 +1060,7 @@ async function compSave(cp) {
 
 /* ---------- settings ---------- */
 // CA Desk Helper Chrome extension: download + install steps, shown in Settings and wherever a feature needs it
-const EXT_VER = '1.1.0';
+const EXT_VER = '1.2.0';
 const extVer = () => document.documentElement.dataset.capmVer || (document.documentElement.dataset.capmTally === '1' ? '1.1.0' : extOn() ? '1.0.0' : '');
 const extCard = (compact = false) => {
   const v = extVer(), ok = v && v >= EXT_VER;
@@ -1070,7 +1073,7 @@ const extCard = (compact = false) => {
   return `<div class="ext-card ${compact ? 'compact' : ''}">
     <div class="row-between wrap"><div><b>CA Desk Helper</b> — Chrome extension ${status}</div>
       ${ok && compact ? '' : `<a class="btn ${ok ? '' : 'primary'}" href="ca-desk-helper.zip" download="ca-desk-helper-${EXT_VER}.zip">Download extension (v${EXT_VER})</a>`}</div>
-    ${compact ? '' : `<p class="muted small">Fills the user ID and password on GST, Income Tax, TRACES, MCA, EPFO and ESIC portals when you click Login (you type the CAPTCHA/OTP), and lets CA Desk read from Tally on this computer. It only runs on CA Desk and those portals, keeps a login in memory for 5 minutes, and only reads from Tally — it never changes Tally data.</p>`}
+    ${compact ? '' : `<p class="muted small">Fills the user ID and password on GST, Income Tax, TRACES, MCA, EPFO and ESIC portals when you click Login (you type the CAPTCHA/OTP), and lets CA Desk read from Tally on this computer, and runs the GSTR-1 upload autopilot on the GST portal up to Generate summary. It only runs on CA Desk and those portals, keeps a login in memory for 5 minutes, and only reads from Tally — it never changes Tally data.</p>`}
     ${ok ? '' : steps}</div>`;
 };
 function vSettings() {
@@ -1876,7 +1879,7 @@ const PAY = initPayments({ S, A, C, F, esc, toast, modal, closeModal, guard, ren
 const TF = initTaskFiles({ S, A, C, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, db, saveFile, saveBlob, T, WA_ICON, MAIL_ICON, busy,
   fs: { doc, getDocs, deleteDoc, collection, query, where } });
 const G1 = initGstr1({ STATE_CODES, extCard, extVer, EXT_VER, S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, todayISO, db, saveFile, saveBlob, T, busy, extractText, dispName, isoLocalD,
-  portalLogin: gstLogin, fs: { doc, setDoc, getDocs, collection, serverTimestamp } });
+  portalLogin: gstLogin, gstCred, fs: { doc, setDoc, getDocs, collection, serverTimestamp } });
 const DSC = initDsc({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, todayISO, db, saveBlob, WA_ICON, MAIL_ICON,
   fs: { doc, getDocs, setDoc, deleteDoc, collection } });
 const PS = initPayslips({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, db, saveBlob, busy, WA_ICON, MAIL_ICON,
