@@ -104,7 +104,7 @@ export async function tallyCompanies(opt) {
 // Rate (IGST-equivalent %) and HSN from any GST details block inside a master or entry
 function rateIn(el) {
   let ig = 0, cg = 0, sg = 0, any = false;
-  for (const rd of deep(el, 'RATEDETAILS.LIST')) {
+  for (const rd of [...deep(el, 'RATEDETAILS.LIST'), ...deep(el, 'GSTRATEDETAILS.LIST')]) {
     const head = txt(rd, 'GSTRATEDUTYHEAD').toLowerCase(), r = num(rd, 'GSTRATE');
     if (!head) continue; any = true;
     if (/igst|integrated/.test(head)) ig = r; else if (/cgst|central/.test(head)) cg = r; else if (/sgst|utgst|state/.test(head)) sg = r;
@@ -117,15 +117,22 @@ async function masters(company, opt) {
   const vars = `<SVCURRENTCOMPANY>${xesc(company)}</SVCURRENTCOMPANY>`;
   const L = {}, I = {};
   let ld;
-  try { ld = parseXml(await tallyPost(env('CADeskLed', '<COLLECTION NAME="CADeskLed" ISMODIFY="No"><TYPE>Ledger</TYPE><FETCH>Name,Parent,TaxType,GSTDutyHead,GSTDetails,LedStateName,PartyGSTIN,CountryName,GSTRegistrationType</FETCH></COLLECTION>', vars), opt), 'ledgers'); }
-  catch (e) { if (!/could not be read/.test(e.message)) throw e; ld = parseXml(await tallyPost(env('CADeskLed', '<COLLECTION NAME="CADeskLed" ISMODIFY="No"><TYPE>Ledger</TYPE><FETCH>Name,Parent,TaxType,GSTDutyHead,LedStateName,PartyGSTIN,CountryName</FETCH></COLLECTION>', vars), opt), 'ledgers'); }
+  const ledF = ['Name,Parent,TaxType,GSTDutyHead,GSTDetails,HSNDetails,GSTRateDetails,LedStateName,PartyGSTIN,CountryName,GSTRegistrationType',
+    'Name,Parent,TaxType,GSTDutyHead,GSTDetails,LedStateName,PartyGSTIN,CountryName,GSTRegistrationType', 'Name,Parent,TaxType,GSTDutyHead,LedStateName,PartyGSTIN,CountryName'];
+  for (const f of ledF) {
+    try { ld = parseXml(await tallyPost(env('CADeskLed', `<COLLECTION NAME="CADeskLed" ISMODIFY="No"><TYPE>Ledger</TYPE><FETCH>${f}</FETCH></COLLECTION>`, vars), opt), 'ledgers'); break; }
+    catch (e) { if (!/^Tally:|could not be read/.test(e.message) || f === ledF[ledF.length - 1]) throw e; }
+  }
   for (const l of deep(ld, 'LEDGER')) {
     const name = l.getAttribute('NAME') || txt(l, 'NAME');
     L[name] = { parent: txt(l, 'PARENT'), taxType: txt(l, 'TAXTYPE'), duty: txt(l, 'GSTDUTYHEAD'), rate: rateIn(l), hsn: hsnIn(l),
       state: txt(l, 'LEDSTATENAME'), gstin: txt(l, 'PARTYGSTIN'), country: txt(l, 'COUNTRYNAME'), regType: txt(l, 'GSTREGISTRATIONTYPE') };
   }
   try {
-    const sd = parseXml(await tallyPost(env('CADeskItm', '<COLLECTION NAME="CADeskItm" ISMODIFY="No"><TYPE>StockItem</TYPE><FETCH>Name,BaseUnits,GSTDetails,Description</FETCH></COLLECTION>', vars), opt));
+    let sd;
+    for (const f of ['Name,BaseUnits,GSTDetails,HSNDetails,GSTRateDetails,Description', 'Name,BaseUnits,GSTDetails,Description']) {
+      try { sd = parseXml(await tallyPost(env('CADeskItm', `<COLLECTION NAME="CADeskItm" ISMODIFY="No"><TYPE>StockItem</TYPE><FETCH>${f}</FETCH></COLLECTION>`, vars), opt), 'stock items'); break; } catch (e) { if (f.includes('Description') && !f.includes('HSN')) throw e; }
+    }
     for (const s of deep(sd, 'STOCKITEM')) I[s.getAttribute('NAME') || txt(s, 'NAME')] = { unit: txt(s, 'BASEUNITS'), rate: rateIn(s), hsn: hsnIn(s), desc: txt(s, 'DESCRIPTION') };
   } catch { /* accounts-only company */ }
   return { L, I };
@@ -214,7 +221,8 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     if (no && (!/^[A-Za-z0-9\/-]{1,16}$/.test(no) || /^[0\/-]+$/.test(no))) iss('err', `Invoice number “${no}” is not accepted by the portal (only letters, digits, / and -, max 16, not all zeros).`, 'Change the voucher number (or the voucher type’s prefix/suffix numbering) so it has no spaces or other symbols.');
     // accounting lines
     // Tally can send the same lines twice (ALL… and plain lists) — use one of them, never both
-    const pickList = (all, plain) => { const a = kids(v, all); return a.length ? a : kids(v, plain); };
+    const real = l => l.filter(e => txt(e, 'STOCKITEMNAME') || txt(e, 'LEDGERNAME') || num(e, 'AMOUNT')); // Tally also sends empty list blocks
+    const pickList = (all, plain) => { const a = real(kids(v, all)); return a.length ? a : real(kids(v, plain)); };
     const inv = pickList('ALLINVENTORYENTRIES.LIST', 'INVENTORYENTRIES.LIST');
     const allocNames = new Set(inv.flatMap(i => deep(i, 'LEDGERNAME').map(x => x.textContent.trim())));
     const led = pickList('ALLLEDGERENTRIES.LIST', 'LEDGERENTRIES.LIST');
@@ -271,9 +279,9 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     const hb = ctin ? hsn.b2b : hsn.b2c;
     for (const l of lines) {
       const r = l.rate != null ? snap(l.rate) : eff, k = `${l.hsn}|${r}|${UQC[norm(l.unit)] || (l.qty ? 'OTH' : 'NA')}`;
-      if (!l.hsn) { noHsn.push(l.desc); if (!partyDone.has('h' + l.desc)) { partyDone.add('h' + l.desc); iss('err', `No HSN/SAC on “${l.desc}”.`, `Alter ${l.qty ? 'stock item' : 'ledger'} “${l.desc}” → GST details → HSN/SAC.`); } }
-      else if (!/^\d{4}$|^\d{6}$|^\d{8}$/.test(l.hsn) && !partyDone.has('hb' + l.desc)) { partyDone.add('hb' + l.desc); iss('err', `HSN/SAC “${l.hsn}” on “${l.desc}” must be 4, 6 or 8 digits.`, `Alter “${l.desc}” → GST details → HSN/SAC.`); }
-      if (l.qty && !UQC[norm(l.unit)] && !partyDone.has('u' + l.unit)) { partyDone.add('u' + l.unit); iss('warn', `Unit “${l.unit}” has no GST UQC — reported as OTH (Others).`, `Alter unit “${l.unit}” → Unit Quantity Code (UQC).`); }
+      if (!l.hsn && !iff) { noHsn.push(l.desc); if (!partyDone.has('h' + l.desc)) { partyDone.add('h' + l.desc); iss('err', `No HSN/SAC on “${l.desc}”.`, `Alter ${l.qty ? 'stock item' : 'ledger'} “${l.desc}” → GST details → HSN/SAC.`); } }
+      else if (l.hsn && !iff && !/^\d{4}$|^\d{6}$|^\d{8}$/.test(l.hsn) && !partyDone.has('hb' + l.desc)) { partyDone.add('hb' + l.desc); iss('err', `HSN/SAC “${l.hsn}” on “${l.desc}” must be 4, 6 or 8 digits.`, `Alter “${l.desc}” → GST details → HSN/SAC.`); }
+      if (!iff && l.qty && !UQC[norm(l.unit)] && !partyDone.has('u' + l.unit)) { partyDone.add('u' + l.unit); iss('warn', `Unit “${l.unit}” has no GST UQC — reported as OTH (Others).`, `Alter unit “${l.unit}” → Unit Quantity Code (UQC).`); }
       const h = hb[k] ||= { hsn_sc: l.hsn, desc: (l.desc || '').slice(0, 30), uqc: UQC[norm(l.unit)] || (l.qty ? 'OTH' : 'NA'), qty: 0, rt: r, txval: 0, iamt: 0, camt: 0, samt: 0, csamt: 0 };
       const tv = Math.abs(l.amt), t = rates.length === 1 ? (txval ? taxTot * tv / txval : 0) : tv * r / 100;
       h.qty += sign * l.qty; h.txval += sign * tv; if (inter) h.iamt += sign * t; else { h.camt += sign * t / 2; h.samt += sign * t / 2; }
