@@ -158,7 +158,7 @@ export function gstr1FromXml(texts, { gstin, fp, iff = false, quarterly = false,
 
 function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
   const own = gstin.slice(0, 2), warns = [], seen = new Set();
-  const names = {}, exp = {}, b2b = {}, b2cl = {}, b2cs = {}, cdnr = {}, cdnur = [], nil = {}, hsn = { b2b: {}, b2c: {} }, docs = { 1: [], 4: [], 5: [] }, cancelled = { 1: [], 4: [], 5: [] };
+  const noHsn = [], names = {}, exp = {}, b2b = {}, b2cl = {}, b2cs = {}, cdnr = {}, cdnur = [], nil = {}, hsn = { b2b: {}, b2c: {} }, docs = { 1: [], 4: [], 5: [] }, cancelled = { 1: [], 4: [], 5: [] };
   let used = 0;
   const dmy = s => `${s.slice(6, 8)}-${s.slice(4, 6)}-${s.slice(0, 4)}`;
   for (const v of vchs) {
@@ -178,15 +178,18 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     const regType = txt(v, 'GSTREGISTRATIONTYPE') || pm.regType || '';
     const sez = /sez/i.test(regType) && !!ctin;
     // accounting lines
-    const inv = kids(v, 'ALLINVENTORYENTRIES.LIST').concat(kids(v, 'INVENTORYENTRIES.LIST'));
+    // Tally can send the same lines twice (ALL… and plain lists) — use one of them, never both
+    const pickList = (all, plain) => { const a = kids(v, all); return a.length ? a : kids(v, plain); };
+    const inv = pickList('ALLINVENTORYENTRIES.LIST', 'INVENTORYENTRIES.LIST');
     const allocNames = new Set(inv.flatMap(i => deep(i, 'LEDGERNAME').map(x => x.textContent.trim())));
-    const led = kids(v, 'ALLLEDGERENTRIES.LIST').concat(kids(v, 'LEDGERENTRIES.LIST'));
-    const tax = { iamt: 0, camt: 0, samt: 0, csamt: 0 }; let val = 0; const lines = [];
+    const led = pickList('ALLLEDGERENTRIES.LIST', 'LEDGERENTRIES.LIST');
+    const tax = { iamt: 0, camt: 0, samt: 0, csamt: 0 }; let val = 0, rnd = 0; const lines = [];
     for (const e of led) {
       const n = txt(e, 'LEDGERNAME'), a = num(e, 'AMOUNT');
       if (n === party) { val += Math.abs(a); continue; }
       const h = dutyOf(n, L); if (h) { tax[h] += a; continue; }
-      if (/round/i.test(n) || allocNames.has(n)) continue;
+      if (/round/i.test(n)) { rnd += a; continue; }
+      if (allocNames.has(n)) continue;
       const lm = L[n] || {};
       if (/sundry|bank|cash/i.test(lm.parent)) continue;
       lines.push({ amt: a, rate: rateIn(e) ?? lm.rate, hsn: hsnIn(e) || lm.hsn, qty: 0, unit: '', desc: n });
@@ -202,6 +205,7 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     const taxTot = tax.iamt + tax.camt + tax.samt;
     if (!txval && !taxTot) continue;
     if (!val) val = txval + taxTot + tax.csamt;
+    else if (Math.abs(val - (txval + taxTot + tax.csamt + Math.abs(rnd))) > 1 && Math.abs(val - (txval + taxTot + tax.csamt - Math.abs(rnd))) > 1) warns.push(`${vt} ${no}: taxable value + tax (₹${r2(txval + taxTot + tax.csamt)}) does not match the invoice total in Tally (₹${r2(val)}). Check this voucher.`);
     used++; if (no) docs[docNum].push(no);
     const exportSale = !ctin && ((country && !/india/i.test(country)) || pos === '96' || /export|lut|overseas|foreign/i.test(lines.map(l => l.desc).join(' ')));
     if (exportSale) pos = '96';
@@ -223,6 +227,7 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     const hb = ctin ? hsn.b2b : hsn.b2c;
     for (const l of lines) {
       const r = l.rate != null ? snap(l.rate) : eff, k = `${l.hsn}|${r}|${UQC[norm(l.unit)] || (l.qty ? 'OTH' : 'NA')}`;
+      if (!l.hsn) noHsn.push(l.desc);
       const h = hb[k] ||= { hsn_sc: l.hsn, desc: (l.desc || '').slice(0, 30), uqc: UQC[norm(l.unit)] || (l.qty ? 'OTH' : 'NA'), qty: 0, rt: r, txval: 0, iamt: 0, camt: 0, samt: 0, csamt: 0 };
       const tv = Math.abs(l.amt), t = rates.length === 1 ? (txval ? taxTot * tv / txval : 0) : tv * r / 100;
       h.qty += sign * l.qty; h.txval += sign * tv; if (inter) h.iamt += sign * t; else { h.camt += sign * t / 2; h.samt += sign * t / 2; }
@@ -270,7 +275,7 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     const nilA = ['INTRB2B', 'INTRAB2B', 'INTRB2C', 'INTRAB2C'].filter(k => nil[k]).map(k => ({ sply_ty: k, nil_amt: r2(nil[k]), expt_amt: 0, ngsup_amt: 0 })); if (nilA.length) j.nil = { inv: nilA };
     const hl = o => Object.values(o).filter(h => Math.abs(h.txval) >= 0.01).map((h, i) => ({ num: i + 1, ...Object.fromEntries(Object.entries(h).map(([k, x]) => [k, typeof x === 'number' ? (k === 'qty' ? Math.round(x * 1000) / 1000 : r2(x)) : x])) }));
     const hb = hl(hsn.b2b), hc = hl(hsn.b2c); if (hb.length || hc.length) j.hsn = { ...(hb.length ? { hsn_b2b: hb } : {}), ...(hc.length ? { hsn_b2c: hc } : {}) };
-    const missing = [...hb, ...hc].filter(h => !h.hsn_sc).length; if (missing) warns.push(`${missing} HSN summary line(s) have no HSN/SAC — set HSN on the stock items or sales ledgers in Tally and fetch again.`);
+    const miss = [...hb, ...hc].filter(h => !h.hsn_sc); if (miss.length) warns.push(`No HSN/SAC in Tally for: ${[...new Set(noHsn)].slice(0, 8).join(', ')}. Set the HSN/SAC on these stock items or sales ledgers (Alter → GST details) and fetch again.`);
     const docDet = [];
     for (const [n, label] of [[1, 'Invoices for outward supply'], [4, 'Debit Note'], [5, 'Credit Note']]) {
       const all = [...docs[n], ...cancelled[n]]; if (!all.length) continue;
