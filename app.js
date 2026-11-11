@@ -1,12 +1,13 @@
 import { firebaseConfig } from './firebase-config.js';
 import { PORTALS, portalByKey } from './portals.js';
-import { extractFromFile, toISO, STATE_CODES } from './extract.js';
+import { extractFromFile, extractText, toISO, STATE_CODES } from './extract.js';
 import { dueItems, fmtDate, regsOf, activeRegs, filingFor, isItrOnly, codeOf, flagOn, dispName, subName } from './compliance.js';
 import { initTasks } from './tasks.js';
 import { initSend } from './send.js';
 import { initPayslips } from './payslips.js';
 import { initPayments, isPayKey } from './payments.js';
 import { initTaskFiles } from './taskfiles.js';
+import { initGstr1 } from './gstr1.js';
 import { initDsc } from './dsc.js';
 import { initDriveImport } from './drive-import.js';
 
@@ -492,7 +493,7 @@ function vDue() {
       <td><a href="#" data-act="open" data-id="${r.c.id}" data-tab="compliance">${esc(dispName(r.c))}</a>${r.gstin ? `<div class="muted tiny"><span class="mono">${esc(r.gstin)}</span>${subName(r.c) ? ' · ' + esc(subName(r.c)) : ''}</div>` : subName(r.c) ? `<div class="muted tiny">${esc(subName(r.c))}</div>` : ''}${r.note ? ` <span class="tag">${esc(r.note)}</span>` : ''}</td>
       <td>${esc(r.period)}</td><td class="nowrap">${fmtDate(r.due)}<div class="tiny ${r.overdue ? 'red' : 'muted'}">${days(r.due)}</div></td>
       ${isAdmin() ? `<td class="nowrap tstat">${T.statusSelect(r)}</td>` : ''}
-      <td class="nowrap">${isAdmin() ? `${remindBtns(r.c.id, r.key)} <button class="sm" data-act="markFiled" data-cid="${r.c.id}" data-key="${r.key}">${isPayKey(r.key) ? 'Mark paid' : 'Mark filed'}</button>` : ''}</td></tr>`).join('')}
+      <td class="nowrap">${isAdmin() ? `${remindBtns(r.c.id, r.key)} ${G1.button(r)}<button class="sm" data-act="markFiled" data-cid="${r.c.id}" data-key="${r.key}">${isPayKey(r.key) ? 'Mark paid' : 'Mark filed'}</button>` : ''}</td></tr>`).join('')}
     </tbody></table></div>`;
   return `
   <section class="card">
@@ -778,7 +779,7 @@ function tCompliance() {
     return `<tr><td class="nowrap">${fmtDate(r.due)}</td><td>${esc(r.form)}${r.note ? ` <span class="tag">${esc(r.note)}</span>` : ''}</td>
       <td>${esc(r.period)}</td><td>${st}</td>
       <td>${isAdmin() ? (filed ? `<button class="sm" data-act="unfile" data-key="${r.key}" data-alt="${r.altKey || ''}">Undo</button>`
-        : `<button class="sm" data-act="markFiled" data-cid="${S.cid}" data-key="${r.key}">${isPayKey(r.key) ? 'Mark paid' : 'Mark filed'}</button>`) : (!filed && isPayKey(r.key) ? `<button class="sm primary" data-act="markFiled" data-cid="${S.cid}" data-key="${r.key}">Upload challan</button>` : '')}</td></tr>`;
+        : `${G1.button({ ...r, c: { ...S.client, id: S.cid } })} <button class="sm" data-act="markFiled" data-cid="${S.cid}" data-key="${r.key}">${isPayKey(r.key) ? 'Mark paid' : 'Mark filed'}</button>`) : (!filed && isPayKey(r.key) ? `<button class="sm primary" data-act="markFiled" data-cid="${S.cid}" data-key="${r.key}">Upload challan</button>` : '')}</td></tr>`;
   }).join('') || '<tr><td colspan="5" class="muted empty">Add GST registrations, constitution and the applicability ticks in master data to see due dates.</td></tr>'}
   </tbody></table>
   <p class="muted small">Statutory due dates; government extensions are not applied automatically.</p>`;
@@ -855,6 +856,27 @@ function autoTasks() {
 const WA_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.2A9.7 9.7 0 0 0 3.6 16.8L2.3 21.7l5-1.3A9.7 9.7 0 1 0 12 2.2Zm0 17.7a8 8 0 0 1-4.1-1.1l-.3-.2-3 .8.8-2.9-.2-.3A8 8 0 1 1 12 19.9Zm4.4-6c-.2-.1-1.4-.7-1.7-.8-.2-.1-.4-.1-.5.1l-.8 1c-.1.2-.3.2-.5.1a6.6 6.6 0 0 1-3.3-2.9c-.2-.4.2-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.5-.4h-.5a.9.9 0 0 0-.7.3 2.8 2.8 0 0 0-.9 2.1 4.9 4.9 0 0 0 1 2.6 11.2 11.2 0 0 0 4.3 3.8c1.6.7 2.2.7 3 .6a2.5 2.5 0 0 0 1.7-1.2 2 2 0 0 0 .1-1.2c0-.1-.2-.2-.4-.3Z"/></svg>';
 const MAIL_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 6.5 8.5 6.5 8.5-6.5"/></svg>';
 const waNum = s => { const d = String(s || '').replace(/\D/g, ''); return d.length === 10 ? '91' + d : d.replace(/^0+/, ''); };
+// Open a portal with a saved login: the extension fills ID + password, otherwise the password is copied.
+function loginWith(c) {
+  const url = c.url || portalByKey(c.portal).url;
+  if (!url) return toast('No login URL saved for this portal. Edit the login and add one.');
+  if (extOn()) {
+    window.postMessage({ type: 'CAPM_LOGIN', url, username: c.username || '', password: c.password || '', extra: { tan: S.client?.tan || '' } }, location.origin);
+    toast('Opening portal — user ID and password will fill. Enter CAPTCHA/OTP to sign in.', 5000);
+  } else {
+    navigator.clipboard.writeText(c.password || '').catch(() => {});
+    window.open(url, '_blank', 'noopener');
+    toast(`Password copied. User ID: ${c.username || '—'}`, 6000);
+  }
+}
+// GST login of a client for one GSTIN (falls back to the only GST login, then to the plain portal page)
+async function gstLogin(cid, gstin) {
+  const list = (await getDocs(collection(db, 'clients', cid, 'credentials'))).docs.map(d => ({ id: d.id, ...d.data() })).filter(x => x.portal === 'gst');
+  const c = list.find(x => x.gstin === gstin) || (list.length === 1 ? list[0] : list.find(x => !x.gstin));
+  if (c) return loginWith(c);
+  window.open(portalByKey('gst').url, '_blank', 'noopener');
+  toast('No GST login saved for this GSTIN — sign in on the portal yourself.', 6000);
+}
 function remindBtns(cid, key) {
   const c = S.clients.find(x => x.id === cid) || {};
   const last = (c.reminders || []).filter(r => (r.keys || []).includes(key)).pop();
@@ -1224,19 +1246,7 @@ const A = {
   },
 
   /* logins */
-  login: ({ id }) => {
-    const c = S.creds.find(x => x.id === id); if (!c) return;
-    const url = c.url || portalByKey(c.portal).url;
-    if (!url) return toast('No login URL saved for this portal. Edit the login and add one.');
-    if (extOn()) {
-      window.postMessage({ type: 'CAPM_LOGIN', url, username: c.username || '', password: c.password || '', extra: { tan: S.client?.tan || '' } }, location.origin);
-      toast('Opening portal — user ID and password will fill. Enter CAPTCHA/OTP to sign in.', 5000);
-    } else {
-      navigator.clipboard.writeText(c.password || '').catch(() => {});
-      window.open(url, '_blank', 'noopener');
-      toast(`Password copied. User ID: ${c.username || '—'}`, 6000);
-    }
-  },
+  login: ({ id }) => { const c = S.creds.find(x => x.id === id); if (c) loginWith(c); },
   copy: ({ id, v }) => {
     const c = S.creds.find(x => x.id === id); if (!c) return;
     navigator.clipboard.writeText(v === 'p' ? c.password || '' : c.username || '').then(() => toast(v === 'p' ? 'Password copied' : 'User ID copied'));
@@ -1844,6 +1854,8 @@ const PAY = initPayments({ S, A, C, F, esc, toast, modal, closeModal, guard, ren
   fs: { doc, getDocs, setDoc, collection } });
 const TF = initTaskFiles({ S, A, C, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, db, saveFile, saveBlob, T, WA_ICON, MAIL_ICON, busy,
   fs: { doc, getDocs, deleteDoc, collection, query, where } });
+const G1 = initGstr1({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, todayISO, db, saveFile, saveBlob, T, busy, extractText, dispName, isoLocalD,
+  portalLogin: gstLogin, fs: { doc, setDoc, getDocs, collection, serverTimestamp } });
 const DSC = initDsc({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, todayISO, db, saveBlob, WA_ICON, MAIL_ICON,
   fs: { doc, getDocs, setDoc, deleteDoc, collection } });
 const PS = initPayslips({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, db, saveBlob, busy, WA_ICON, MAIL_ICON,

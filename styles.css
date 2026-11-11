@@ -578,3 +578,27 @@ main{padding-bottom:72px}
 @media (max-width:820px){.tf-grid{grid-template-columns:1fr}}
 .dscctr{grid-template-columns:repeat(5,minmax(0,1fr))}@media (max-width:820px){.dscctr{grid-template-columns:repeat(2,minmax(0,1fr))}} .pin{letter-spacing:.06em}
 .mpick{width:auto;margin:0}
+
+/* File GSTR-1 / IFF */
+.g1btn{display:inline-flex;align-items:center;gap:5px;color:var(--brand,#0B7A5C);border-color:color-mix(in srgb,var(--brand,#0B7A5C) 40%,transparent)}
+.g1btn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.g1btn:hover{background:color-mix(in srgb,var(--brand,#0B7A5C) 8%,transparent)}
+.g1 h2{margin-bottom:2px}
+.g1-steps{display:flex;gap:6px;margin:14px 0 16px;border-bottom:1px solid var(--line,#E3E7EE);flex-wrap:wrap}
+.g1-step{display:flex;align-items:center;gap:8px;background:none;border:0;border-bottom:3px solid transparent;border-radius:0;padding:8px 10px 10px;color:var(--muted,#5B6577);font-weight:600;cursor:pointer}
+.g1-step span{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#E8ECF2;color:#15233F;font-size:12px}
+.g1-step.on{color:#15233F;border-bottom-color:#15233F}
+.g1-step.on span{background:#15233F;color:#fff}
+.g1-step.done span{background:var(--brand,#0B7A5C);color:#fff}
+.g1-drop{display:flex;flex-direction:column;align-items:center;gap:2px;border:2px dashed #C8D0DC;border-radius:10px;padding:18px;cursor:pointer;text-align:center;margin:10px 0;background:#F8FAFC}
+.g1-drop:hover{border-color:#15233F;background:#F1F4F9}
+.g1-drop input{display:none}
+.g1-msg{border-radius:8px;padding:10px 12px;margin:10px 0;font-size:14px}
+.g1-msg ul{margin:6px 0 0;padding-left:18px}
+.g1-msg.err{background:#FDECEC;color:#8A1C1C}
+.g1-msg.warn{background:#FFF6E3;color:#7A4E00}
+.g1-msg.ok{background:#E7F5EF;color:#0B5A44}
+.g1-sum{font-size:13px}
+.g1-sum .r{text-align:right;font-variant-numeric:tabular-nums}
+.g1-howto{padding-left:20px;line-height:1.6}
+.g1-howto li{margin-bottom:4px}
