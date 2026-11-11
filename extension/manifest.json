@@ -1,14 +1,24 @@
 {
   "manifest_version": 3,
-  "name": "CA Desk Autofill",
-  "version": "1.0.0",
-  "description": "When you click Login in CA Desk, opens the compliance portal and fills the saved user ID and password. You enter the CAPTCHA/OTP.",
-  "permissions": ["storage"],
-  "background": { "service_worker": "background.js" },
+  "name": "CA Desk Helper",
+  "version": "1.1.0",
+  "description": "Portal login autofill for CA Desk (you enter CAPTCHA/OTP) and reading GST data from Tally on this computer (port 9000) for GSTR-1.",
+  "permissions": [
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
-      "matches": ["https://smishra724.github.io/*", "http://localhost/*", "http://127.0.0.1/*"],
-      "js": ["bridge.js"],
+      "matches": [
+        "https://smishra724.github.io/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "bridge.js"
+      ],
       "run_at": "document_start"
     },
     {
@@ -23,9 +33,15 @@
         "https://udyamregistration.gov.in/*",
         "https://*.dgft.gov.in/*"
       ],
-      "js": ["fill.js"],
+      "js": [
+        "fill.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true
     }
+  ],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ]
 }

@@ -602,3 +602,10 @@ main{padding-bottom:72px}
 .g1-sum .r{text-align:right;font-variant-numeric:tabular-nums}
 .g1-howto{padding-left:20px;line-height:1.6}
 .g1-howto li{margin-bottom:4px}
+.g1-src{display:inline-flex;border:1px solid #C8D0DC;border-radius:8px;overflow:hidden;margin-bottom:10px}
+.g1-src button{border:0;border-radius:0;background:#fff;padding:7px 14px;font-weight:600;color:#5B6577}
+.g1-src button.on{background:#15233F;color:#fff}
+.g1-tally{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:8px 0}
+.g1-tally label{display:flex;flex-direction:column;gap:4px;font-size:13px}
+.g1-tally label.grow{flex:1;min-width:220px}
+.g1-tally input{width:90px}

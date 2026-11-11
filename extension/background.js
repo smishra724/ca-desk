@@ -3,6 +3,15 @@ const TTL = 5 * 60 * 1000;
 const key = url => 'pending:' + new URL(url).hostname;
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  if (msg.type === 'CAPM_TALLY') { // Tally on this computer only, export (read) requests only
+    let u; try { u = new URL(msg.url); } catch { return; }
+    if (u.protocol !== 'http:' || !['localhost', '127.0.0.1'].includes(u.hostname)) return;
+    if (!/<TALLYREQUEST>\s*Export\s*<\/TALLYREQUEST>/i.test(msg.xml)) { reply({ ok: false, error: 'only export requests are allowed' }); return; }
+    fetch(u.origin, { method: 'POST', body: msg.xml, headers: { 'Content-Type': 'text/xml' } })
+      .then(r => r.arrayBuffer()).then(b => { const t = new TextDecoder('utf-8').decode(b); reply({ ok: true, text: t.includes('\u0000') ? new TextDecoder('utf-16le').decode(b) : t }); })
+      .catch(e => reply({ ok: false, error: e.message }));
+    return true;
+  }
   if (msg.type === 'CAPM_LOGIN') {
     let host;
     try { host = new URL(msg.url).hostname; } catch { return; }

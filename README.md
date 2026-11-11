@@ -18,6 +18,8 @@ You (and staff) manage everything; each client logs in and sees only their own d
 
 **Auto-fill from documents** — upload a GST certificate (REG-06), PAN card, TAN letter, Aadhaar, Certificate of Incorporation or LLP incorporation/deed as PDF or photo. Digital PDFs are read directly; scans and photos are OCR'd in the browser (nothing is sent to any server). You review every field, tick what to apply, and the document is filed under the client.
 
+**GSTR-1 from Tally** — on Due dates, **File** on a GSTR-1 / IFF row → **Fetch from Tally** reads the month's (or QRMP quarter's) sales, credit and debit notes from Tally over its ODBC/HTTP port (default 9000) through the CA Desk Helper extension, builds the portal JSON (B2B, B2CL, B2CS, CDNR, CDNUR, nil, HSN B2B/B2C, documents issued), checks it, and then guides upload on the portal and reads the ARN from the filed PDF.
+
 **One-click portal login** — with the included Chrome extension, **Login** opens the portal and fills the user ID and password (and TAN on TRACES; on Income Tax it fills the password after you click Continue). You enter CAPTCHA / OTP and sign in. Without the extension, Login opens the portal and copies the password.
 
 ## Import from Google Drive
