@@ -27,6 +27,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     chrome.storage.session.get('g1job').then(r => r.g1job && chrome.storage.session.set({ g1job: { ...r.g1job, ...msg.job } })).then(() => reply(true));
     return true;
   }
+  if ((msg.type === 'CAPM_G1_ARN' || msg.type === 'CAPM_G1_PDF') && sender.url && /\.gst\.gov\.in\//.test(sender.url)) {
+    saveResult(msg).then(() => reply(true)); return true;
+  }
+  if (msg.type === 'CAPM_G1_PENDING') { chrome.storage.local.get('g1results').then(r => reply(Object.values(r.g1results || {}))); return true; }
+  if (msg.type === 'CAPM_G1_ACK') { chrome.storage.local.get('g1results').then(r => { const x = r.g1results || {}; delete x[msg.id]; return chrome.storage.local.set({ g1results: x }); }).then(() => reply(true)); return true; }
   if (msg.type === 'CAPM_JOB_CLEAR') { chrome.storage.session.remove('g1job').then(() => reply(true)); return true; }
   if (msg.type === 'CAPM_LOGIN') {
     let host;
@@ -47,4 +52,29 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg.type === 'CAPM_DONE' && sender.url) {
     chrome.storage.session.remove(key(sender.url));
   }
+});
+
+// ARN / filed PDF from the portal → kept until CA Desk confirms it saved them (survives closing CA Desk)
+async function saveResult(msg) {
+  const { g1job } = await chrome.storage.session.get('g1job'); if (!g1job) return;
+  const id = `${g1job.cid}|${g1job.key}`;
+  const { g1results = {} } = await chrome.storage.local.get('g1results');
+  const r = g1results[id] || { id, cid: g1job.cid, key: g1job.key, alt: g1job.alt, form: g1job.form, period: g1job.period, due: g1job.due, ret: g1job.ret, gstin: g1job.gstin, fp: g1job.fp };
+  if (msg.type === 'CAPM_G1_ARN') Object.assign(r, { arn: msg.arn, filedOn: msg.filedOn });
+  if (msg.type === 'CAPM_G1_PDF') { r.pdf = msg.b64; r.pdfName = msg.name || `${g1job.ret}_${g1job.gstin}_${g1job.fp}_filed.pdf`; }
+  g1results[id] = r;
+  await chrome.storage.local.set({ g1results });
+  if (msg.type === 'CAPM_G1_PDF') await chrome.storage.session.set({ g1job: { ...g1job, pdfDone: true } });
+  for (const t of await chrome.tabs.query({ url: 'https://smishra724.github.io/*' })) chrome.tabs.sendMessage(t.id, { type: 'CAPM_G1_RESULT', result: r }).catch(() => {});
+}
+// PDFs the portal downloads from a link (not built in the page): fetch the same link with the portal session
+chrome.downloads.onCreated.addListener(async d => {
+  try {
+    const { g1job } = await chrome.storage.session.get('g1job');
+    if (!g1job || !['pdf', 'filing'].includes(g1job.stage) || !/^https:\/\/[^/]*\.gst\.gov\.in\//.test(d.url || '')) return;
+    const b = await (await fetch(d.url, { credentials: 'include' })).arrayBuffer();
+    const u8 = new Uint8Array(b); if (String.fromCharCode(...u8.slice(0, 4)) !== '%PDF') return;
+    let s = ''; for (let i = 0; i < u8.length; i += 32768) s += String.fromCharCode(...u8.subarray(i, i + 32768));
+    await saveResult({ type: 'CAPM_G1_PDF', b64: btoa(s), name: (d.filename || '').split(/[\\/]/).pop() });
+  } catch { /* leave the normal download alone */ }
 });

@@ -76,7 +76,7 @@
     if (mSel) { chooseOption(mSel, new RegExp(`^${MONTHS[job.month - 1]}$`, 'i')); await sleep(700); }
     const search = await waitFor(() => byText(/^\s*search\s*$/i), 8000);
     if (search) click(search);
-    const btnRe = job.stage === 'online' ? /prepare\s*online/i : /prepare\s*offline/i;
+    const btnRe = job.stage === 'pdf' ? /download|^\s*view\s*$/i : job.stage === 'online' ? /prepare\s*online/i : /prepare\s*offline/i;
     banner(`Opening ${job.ret} → ${job.stage === 'online' ? 'Prepare online' : 'Prepare offline'}…`);
     const b = await waitFor(() => tileButton(btnRe), 30000);
     if (!b) return fail(`Could not find ${job.ret} → ${job.stage === 'online' ? 'Prepare online' : 'Prepare offline'} on the dashboard. Click it yourself — the autopilot continues on the next page.`);
@@ -152,15 +152,55 @@
     click(g);
     await sleep(3000);
     const ok = byText(/^\s*(ok|yes|proceed)\s*$/i); if (ok) click(ok);
-    await send({ type: 'CAPM_JOB_CLEAR' });
-    banner(`Summary generation requested. In a minute, refresh this page, check the summary against CA Desk, then file with DSC or EVC yourself.`, 'done');
+    await setStage('filing');
+    banner(`Summary generation requested. In a minute, refresh this page, check the summary against CA Desk, then file with DSC or EVC yourself. When the return is filed, the ARN and GSTR-1 PDF are saved to CA Desk automatically.`, 'done');
   }
+
+  /* ---------- after you file: ARN + PDF back to CA Desk ---------- */
+  function filedArn() {
+    const t = textOf(document.body);
+    if (!t.includes(job.gstin)) return null;
+    const m = t.match(/successfully\s+filed[^]*?Acknowledge?ment\s+Reference\s+Number\s+is\s*(AA[0-9A-Z]{13})/i) || t.match(/\bARN\b[^A-Z0-9]{0,30}(AA[0-9A-Z]{13})/);
+    return m ? m[1].toUpperCase() : null;
+  }
+  async function checkFiled() {
+    if (!job || !['filing', 'online'].includes(job.stage) || job.arn) return;
+    const arn = filedArn(); if (!arn) return;
+    const d = new Date(), filedOn = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    await setStage('pdf', { arn, filedOn });
+    await send({ type: 'CAPM_G1_ARN', arn, filedOn });
+    banner(`Filed — ARN ${arn} saved to CA Desk. Downloading the filed ${job.ret} PDF…`);
+    await sleep(1500);
+    const dl = byText(/download.*(pdf|filed)|filed.*download/i);
+    if (dl) { click(dl); return waitPdf(); }
+    location.href = DASH; // dashboard → the return's tile → View / Download
+  }
+  async function waitPdf() {
+    banner(`ARN ${job.arn} saved to CA Desk. Waiting for the PDF download…`);
+    const ok = await waitFor(() => job.pdfDone, 60000, 1000);
+    if (ok) { await send({ type: 'CAPM_JOB_CLEAR' }); banner(`Done — ARN ${job.arn} and the ${job.ret} PDF are saved in CA Desk.`, 'done'); }
+    else banner(`ARN ${job.arn} is saved in CA Desk. The PDF did not download — click “Download (PDF)” on the ${job.ret} page and it will be saved to CA Desk too.`, 'done');
+  }
+  async function onPdfPage() {
+    const dl = await waitFor(() => byText(/download\s*\(?\s*pdf|download\s*filed|^\s*download\s*$/i), 20000);
+    if (!dl) return banner(`ARN ${job.arn} is saved in CA Desk. Click the PDF download on this page and it will be saved to CA Desk too.`, 'done');
+    click(dl); return waitPdf();
+  }
+  // PDFs the portal builds in the page (blob downloads) are passed here by hook.js
+  window.addEventListener('message', async e => {
+    if (e.source !== window || e.data?.type !== 'CAPM_PDF' || !job || !['pdf', 'filing'].includes(job.stage)) return;
+    await send({ type: 'CAPM_G1_PDF', b64: e.data.b64, name: e.data.name || '' });
+    job.pdfDone = true;
+  });
 
   /* ---------- router ---------- */
   async function route() {
     job = await send({ type: 'CAPM_JOB_GET' });
     if (!job || stopped) return;
     const u = location.href;
+    if (['filing', 'online'].includes(job.stage) && filedArn()) return checkFiled();
+    if (job.stage === 'filing') return; // waiting for you to file with DSC/EVC
+    if (job.stage === 'pdf' && !/dashboard/.test(u)) return onPdfPage();
     if (/services\.gst\.gov\.in\/services\/login/.test(u)) { banner('Type the CAPTCHA and click Login. The autopilot takes over after you sign in.'); return; }
     if (/services\.gst\.gov\.in\/services\/auth\//.test(u)) { banner('Signed in. Opening the Returns Dashboard…'); await sleep(1500); location.href = DASH; return; }
     if (/return\.gst\.gov\.in\/returns\/auth\/dashboard/.test(u)) return onDashboard();
@@ -168,6 +208,7 @@
     if (/return\.gst\.gov\.in\/returns\/auth\/(gstr1|iff|gstr-?1)/i.test(u) || byText(/generate\s*summary/i)) return onOnline();
     // single-page app: watch for route changes
   }
+  setInterval(async () => { if (stopped) return; const j = await send({ type: 'CAPM_JOB_GET' }); if (j && ['filing', 'online'].includes(j.stage) && !j.arn) { job = j; checkFiled(); } }, 3000);
   let last = '';
   setInterval(() => { if (location.href !== last && !stopped) { last = location.href; route(); } }, 1200);
 })();

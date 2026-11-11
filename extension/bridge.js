@@ -19,3 +19,9 @@ window.addEventListener('message', e => {
   if (!d || d.type !== 'CAPM_LOGIN' || typeof d.url !== 'string') return;
   chrome.runtime.sendMessage({ type: 'CAPM_LOGIN', url: d.url, username: d.username || '', password: d.password || '', extra: d.extra || {} });
 });
+
+// GSTR-1 filed on the portal → hand ARN + PDF to the CA Desk page (and anything that arrived while CA Desk was closed)
+const pushResult = r => window.postMessage({ type: 'CAPM_G1_RESULT', result: r }, location.origin);
+chrome.runtime.onMessage.addListener(m => { if (m?.type === 'CAPM_G1_RESULT') pushResult(m.result); });
+window.addEventListener('message', e => { if (e.source === window && e.data?.type === 'CAPM_G1_ACK') chrome.runtime.sendMessage({ type: 'CAPM_G1_ACK', id: e.data.id }); });
+setTimeout(() => chrome.runtime.sendMessage({ type: 'CAPM_G1_PENDING' }, list => (list || []).forEach(pushResult)), 4000);

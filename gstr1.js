@@ -328,7 +328,7 @@ export function initGstr1(ctx) {
     if (!cred) throw new Error('No GST login is saved for this GSTIN. Add it in the client → Portal logins, then try again.');
     const y = +s.fp.slice(2), m = +s.fp.slice(0, 2), fy = m >= 4 ? `${y}-${String((y + 1) % 100).padStart(2, '0')}` : `${y - 1}-${String(y % 100).padStart(2, '0')}`;
     const quarter = m >= 4 ? Math.ceil((m - 3) / 3) : 4;
-    const job = { gstin: s.gstin, ret: s.iff ? 'IFF' : 'GSTR1', fp: s.fp, fy, quarter, month: m, periodLabel: fpLabel(s.fp) + (s.quarterly ? ' (quarter)' : ''), json: j.text, jsonName: j.name };
+    const job = { cid: s.cid, key: s.key, alt: s.alt || '', form: s.form, period: s.period, due: s.due, gstin: s.gstin, ret: s.iff ? 'IFF' : 'GSTR1', fp: s.fp, fy, quarter, month: m, periodLabel: fpLabel(s.fp) + (s.quarterly ? ' (quarter)' : ''), json: j.text, jsonName: j.name };
     window.postMessage({ type: 'CAPM_G1', url: 'https://services.gst.gov.in/services/login', username: cred.username || '', password: cred.password || '', job }, location.origin);
     const t = task(); if (t) await T.patch(t.id, {}, `${ret()} autopilot started on the GST portal`);
     toast('GST portal opened — type the CAPTCHA and log in. The autopilot does the rest up to Generate summary.', 7000);
@@ -360,5 +360,36 @@ export function initGstr1(ctx) {
     if (S.tfiles?.tid === t.id) S.tfiles = null;
     S.g1 = null; closeModal(); render();
   }, 'Filed — ARN and PDF saved');
+  // ARN + filed PDF sent back by the CA Desk Helper autopilot after the return is filed on the portal
+  const doneIds = new Set(), queue = [];
+  async function applyResult(r) {
+    if (!r?.cid || !r.key) return;
+    const sig = `${r.id}|${r.arn || ''}|${r.pdf ? r.pdf.length : 0}`; if (doneIds.has(sig)) return; doneIds.add(sig);
+    if (!S.profile || !S.clients?.length) { doneIds.delete(sig); queue.push(r); return; }
+    const name = ctx.dispName(S.clients.find(c => c.id === r.cid) || {}), retName = r.ret === 'IFF' ? 'IFF' : 'GSTR-1';
+    await guard(async () => {
+      const t = await T.ensure(r.cid, r.key, r.alt, r.form, r.period, r.due);
+      const prev = S.allFilings[`${r.cid}|${r.key}`] || {};
+      let pdfDoc = prev.pdfDoc || '';
+      if (r.pdf) {
+        const bytes = Uint8Array.from(atob(r.pdf), c => c.charCodeAt(0));
+        pdfDoc = await saveFile(r.cid, new File([bytes], r.pdfName || `${retName}_${r.gstin}_${r.fp}.pdf`, { type: 'application/pdf' }), 'Output', { taskId: t.id, filingKey: r.key, kind: 'output', byRole: 'ca' });
+      }
+      const arn = r.arn || prev.ack || '', filedOn = r.filedOn || prev.filedOn || todayISO();
+      if (arn) {
+        const data = { ...prev, status: 'filed', filedOn, ack: arn, remarks: `${retName} filed on the GST portal (autopilot)`, pdfDoc, by: S.profile.email, at: fs.serverTimestamp() };
+        await setDoc(doc(db, 'clients', r.cid, 'filings', r.key), data);
+        S.allFilings[`${r.cid}|${r.key}`] = data; if (r.cid === S.cid) S.filings[r.key] = data;
+        await T.patch(t.id, { g1: { ...(t.g1 || {}), arn, filedOn, pdfDoc, uploaded: true } }, r.pdf ? `${retName} PDF saved from the GST portal` : `${retName} filed — ARN ${arn} dated ${isoToDisp(filedOn)} (from the GST portal)`);
+        await T.markDone(r.cid, r.key, arn);
+      }
+      if (S.tfiles?.tid === t.id) S.tfiles = null;
+      window.postMessage({ type: 'CAPM_G1_ACK', id: r.id }, location.origin);
+      if (S.g1?.key === r.key && S.g1?.cid === r.cid) { S.g1 = null; closeModal(); }
+      render();
+    }, r.arn ? `${retName} of ${name} filed — ARN ${r.arn}${r.pdf ? ' and PDF' : ''} saved` : `${retName} PDF of ${name} saved`);
+  }
+  window.addEventListener('message', e => { if (e.source === window && e.data?.type === 'CAPM_G1_RESULT') applyResult(e.data.result); });
+  setInterval(() => { if (queue.length && S.profile && S.clients?.length) applyResult(queue.shift()); }, 3000);
   return G;
 }

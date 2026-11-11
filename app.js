@@ -1060,7 +1060,7 @@ async function compSave(cp) {
 
 /* ---------- settings ---------- */
 // CA Desk Helper Chrome extension: download + install steps, shown in Settings and wherever a feature needs it
-const EXT_VER = '1.2.1';
+const EXT_VER = '1.3.0';
 const extVer = () => document.documentElement.dataset.capmVer || (document.documentElement.dataset.capmTally === '1' ? '1.1.0' : extOn() ? '1.0.0' : '');
 const extCard = (compact = false) => {
   const v = extVer(), ok = v && v >= EXT_VER;
@@ -1073,7 +1073,7 @@ const extCard = (compact = false) => {
   return `<div class="ext-card ${compact ? 'compact' : ''}">
     <div class="row-between wrap"><div><b>CA Desk Helper</b> — Chrome extension ${status}</div>
       ${ok && compact ? '' : `<a class="btn ${ok ? '' : 'primary'}" href="ca-desk-helper.zip" download="ca-desk-helper-${EXT_VER}.zip">Download extension (v${EXT_VER})</a>`}</div>
-    ${compact ? '' : `<p class="muted small">Fills the user ID and password on GST, Income Tax, TRACES, MCA, EPFO and ESIC portals when you click Login (you type the CAPTCHA/OTP), and lets CA Desk read from Tally on this computer, and runs the GSTR-1 upload autopilot on the GST portal up to Generate summary. It only runs on CA Desk and those portals, keeps a login in memory for 5 minutes, and only reads from Tally — it never changes Tally data.</p>`}
+    ${compact ? '' : `<p class="muted small">Fills the user ID and password on GST, Income Tax, TRACES, MCA, EPFO and ESIC portals when you click Login (you type the CAPTCHA/OTP), and lets CA Desk read from Tally on this computer, and runs the GSTR-1 autopilot: uploads the JSON and generates the summary, and after you file, saves the ARN and the filed PDF here. It only runs on CA Desk and those portals, keeps a login in memory for 5 minutes, and only reads from Tally — it never changes Tally data.</p>`}
     ${ok ? '' : steps}</div>`;
 };
 function vSettings() {

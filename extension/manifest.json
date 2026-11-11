@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "CA Desk Helper",
-  "version": "1.2.1",
-  "description": "CA Desk helper: fills portal logins (you type CAPTCHA/OTP), reads GST data from Tally on this computer, and runs the GSTR-1 upload autopilot up to Generate summary.",
+  "version": "1.3.0",
+  "description": "CA Desk helper: portal login autofill (you type CAPTCHA/OTP), Tally data on this computer, and the GSTR-1 autopilot: upload JSON, generate summary, and after you file, save the ARN and PDF to CA Desk.",
   "permissions": [
+    "downloads",
     "storage"
   ],
   "background": {
@@ -47,10 +48,22 @@
         "gstauto.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://return.gst.gov.in/*"
+      ],
+      "js": [
+        "hook.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ],
   "host_permissions": [
+    "http://127.0.0.1/*",
     "http://localhost/*",
-    "http://127.0.0.1/*"
+    "https://*.gst.gov.in/*",
+    "https://smishra724.github.io/*"
   ]
 }
