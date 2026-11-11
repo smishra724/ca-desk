@@ -150,6 +150,7 @@ export function initGstr1(ctx) {
           ${tl.companies ? `<button class="primary" data-act="g1TallyFetch">Fetch ${esc(fpLabel(s.fp))}${s.quarterly ? ' quarter' : ''}</button>` : ''}</div>
         ${s.b2bFrom ? `<p class="muted tiny">B2B invoices and notes dated before ${isoToDisp(s.b2bFrom.slice(0, 4) + '-' + s.b2bFrom.slice(4, 6) + '-' + s.b2bFrom.slice(6))} are left out — they were filed in IFF. The HSN summary and documents issued cover the whole quarter.</p>` : ''}
         <p class="muted tiny">First time: in Tally, F1 Help → Settings → Connectivity → Client/Server configuration → TallyPrime acts as “Both”, Enable ODBC “Yes”, Port 9000. If Chrome asks to let this site access apps on your computer, choose Allow.</p>
+        ${tl.failed && !ctx.extVer() ? ctx.extCard(true) : ''}
         <details class="g1-alt"${tl.failed ? ' open' : ''}><summary>Can’t connect? Use a Tally XML file instead</summary>
           <p class="small">In Tally: <b>Day Book</b> → F2 period ${esc(fpLabel(s.fp))}${s.quarterly ? ' quarter' : ''} → <b>Export</b> (Alt+E) → Format <b>XML (Data Interchange)</b> → Export. For better HSN and tax detection, also export <b>Masters</b> (Alt+E from Gateway → Masters, XML) and pick both files together.</p>
           <label class="g1-drop"><b>Browse Tally XML</b><span class="muted tiny">Day Book XML, optionally with the masters XML</span><input type="file" multiple accept=".xml,text/xml" data-change="g1TallyXml"></label></details>
@@ -168,6 +169,7 @@ export function initGstr1(ctx) {
         <li><b>Upload</b> → <b>Choose file</b> → pick <b>${esc(p.jsonName || 'the JSON')}</b>. Wait until the status shows <i>Processed</i>. If it shows <i>Processed with error</i>, download the error report.</li>
         <li><b>Prepare online</b> → <b>Generate summary</b> → tick the declaration → <b>File statement</b> with DSC or EVC (OTP goes to the authorised signatory).</li>
         <li>After filing, <b>View</b> → <b>Download PDF</b> and bring the PDF to step 3.</li></ol>
+      ${ctx.extVer() ? '' : `<div class="mt">${ctx.extCard(true)}<p class="muted tiny">Without the extension, Open GST portal copies the password and you paste it.</p></div>`}
       <div class="btns mt">
         <button class="primary" data-act="g1Portal">Open GST portal</button>
         ${p.jsonDoc ? `<button data-act="g1DownloadJson">Download JSON again</button>` : ''}

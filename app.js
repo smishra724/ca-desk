@@ -741,7 +741,7 @@ function tLogins() {
   return `
   <div class="row-between wrap"><h2>Portal logins</h2>${isAdmin() ? `<button class="primary" data-act="editCred">+ Add login</button>` : ''}</div>
   ${extOn() ? '<p class="ok small">Autofill extension active — Login fills the user ID and password; you enter CAPTCHA/OTP.</p>'
-    : '<p class="muted small">Login opens the portal and copies the password. Install the CA Desk Autofill extension to fill both fields automatically.</p>'}
+    : `<p class="muted small">Login opens the portal and copies the password. Install the extension to fill both fields automatically.</p>${extCard(true)}`}
   <div class="creds">${rows || '<p class="muted empty">No logins saved.</p>'}</div>`;
 }
 
@@ -1056,12 +1056,33 @@ async function compSave(cp) {
 }
 
 /* ---------- settings ---------- */
+// CA Desk Helper Chrome extension: download + install steps, shown in Settings and wherever a feature needs it
+const EXT_VER = '1.1.0';
+const extVer = () => document.documentElement.dataset.capmVer || (document.documentElement.dataset.capmTally === '1' ? '1.1.0' : extOn() ? '1.0.0' : '');
+const extCard = (compact = false) => {
+  const v = extVer(), ok = v && v >= EXT_VER;
+  const status = ok ? `<span class="tag green">Installed · v${esc(v)}</span>` : v ? `<span class="tag amber">Update available · you have v${esc(v)}</span>` : '<span class="tag">Not installed</span>';
+  const steps = `<ol class="ext-steps small">
+      <li>Download the file and unzip it into a folder you will keep, e.g. <b>Documents\\CA Desk Helper</b>${v ? ' (replace the old files)' : ''}.</li>
+      <li>In Chrome open <b>chrome://extensions</b> and turn on <b>Developer mode</b> (top right).</li>
+      <li>${v ? 'Click <b>Reload</b> (↻) on CA Desk Helper.' : 'Click <b>Load unpacked</b> and choose that folder.'}</li>
+      <li>Reload this page (Ctrl + F5). The status here changes to <b>Installed</b>.</li></ol>`;
+  return `<div class="ext-card ${compact ? 'compact' : ''}">
+    <div class="row-between wrap"><div><b>CA Desk Helper</b> — Chrome extension ${status}</div>
+      ${ok && compact ? '' : `<a class="btn ${ok ? '' : 'primary'}" href="ca-desk-helper.zip" download="ca-desk-helper-${EXT_VER}.zip">Download extension (v${EXT_VER})</a>`}</div>
+    ${compact ? '' : `<p class="muted small">Fills the user ID and password on GST, Income Tax, TRACES, MCA, EPFO and ESIC portals when you click Login (you type the CAPTCHA/OTP), and lets CA Desk read from Tally on this computer. It only runs on CA Desk and those portals, keeps a login in memory for 5 minutes, and only reads from Tally — it never changes Tally data.</p>`}
+    ${ok ? '' : steps}</div>`;
+};
 function vSettings() {
   return `
   <section class="card">
     <h2>Firm</h2>
     <form data-form="firm" class="grid narrow"><label>Firm name<input name="firm" value="${esc(S.firm)}" required></label>
       <div class="span2"><button class="primary">Save</button></div></form>
+  </section>
+  <section class="card" id="ext">
+    <h2>Browser extension</h2>
+    ${extCard()}
   </section>
   <section class="card">
     <h2>Attach documents from your computer</h2>
@@ -1854,7 +1875,7 @@ const PAY = initPayments({ S, A, C, F, esc, toast, modal, closeModal, guard, ren
   fs: { doc, getDocs, setDoc, collection } });
 const TF = initTaskFiles({ S, A, C, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, db, saveFile, saveBlob, T, WA_ICON, MAIL_ICON, busy,
   fs: { doc, getDocs, deleteDoc, collection, query, where } });
-const G1 = initGstr1({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, todayISO, db, saveFile, saveBlob, T, busy, extractText, dispName, isoLocalD,
+const G1 = initGstr1({ extCard, extVer, EXT_VER, S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, todayISO, db, saveFile, saveBlob, T, busy, extractText, dispName, isoLocalD,
   portalLogin: gstLogin, fs: { doc, setDoc, getDocs, collection, serverTimestamp } });
 const DSC = initDsc({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, todayISO, db, saveBlob, WA_ICON, MAIL_ICON,
   fs: { doc, getDocs, setDoc, deleteDoc, collection } });

@@ -1,6 +1,7 @@
 // Runs on the CA Desk page. Tells the page the extension is installed and relays Login clicks.
 document.documentElement.dataset.capmExt = '1';
 document.documentElement.dataset.capmTally = '1';
+document.documentElement.dataset.capmVer = chrome.runtime.getManifest().version;
 window.addEventListener('message', e => {
   if (e.source !== window || e.origin !== location.origin) return;
   const d = e.data;

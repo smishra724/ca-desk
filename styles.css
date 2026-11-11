@@ -611,3 +611,9 @@ main{padding-bottom:72px}
 .g1-tally input{width:90px}
 .g1-alt{margin:8px 0;border:1px solid #E3E7EE;border-radius:8px;padding:8px 12px}
 .g1-alt summary{cursor:pointer;font-weight:600;font-size:14px}
+.ext-card{border:1px solid #E3E7EE;border-radius:10px;padding:14px 16px;background:#F8FAFC}
+.ext-card.compact{padding:10px 12px;margin:8px 0}
+.ext-card .tag{margin-left:8px}
+.ext-steps{margin:10px 0 0;padding-left:20px;line-height:1.7}
+a.btn{display:inline-flex;align-items:center;padding:7px 14px;border-radius:8px;border:1px solid #C8D0DC;font-weight:600;text-decoration:none;color:#15233F;background:#fff}
+a.btn.primary{background:#0B7A5C;border-color:#0B7A5C;color:#fff}
