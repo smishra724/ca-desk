@@ -466,8 +466,13 @@ function vDue() {
   const f = S.dueF ||= { range: '30', form: '', q: '', history: false };
   const open = S.dueOpen ||= new Set();
   if (f.form) { open.add(f.form); f.form = ''; } // links from the dashboard open that compliance
-  const ahead = f.range === 'overdue' ? 0 : +f.range;
-  let rows = dueRows({ back: 365, ahead: S.dueDay ? 62 : ahead, history: f.history });
+  // calendar month ("m:2026-11"): everything falling due inside that month
+  const mm = String(f.range).startsWith('m:') ? f.range.slice(2) : '';
+  const mS = mm ? new Date(+mm.slice(0, 4), +mm.slice(5, 7) - 1, 1) : null, mE = mm ? new Date(+mm.slice(0, 4), +mm.slice(5, 7), 0) : null;
+  const t0 = dayStart(new Date()), dd = (a, b) => Math.ceil((a - b) / 864e5);
+  const ahead = mm ? Math.max(0, dd(mE, t0)) : f.range === 'overdue' ? 0 : +f.range;
+  let rows = dueRows({ back: mm ? Math.max(0, dd(t0, mS)) : 365, ahead: S.dueDay ? 62 : ahead, history: f.history });
+  if (mm) rows = rows.filter(r => r.due >= mS && r.due <= mE);
   if (S.dueDay) rows = rows.filter(r => isoLocalD(r.due) === S.dueDay);
   else if (f.range === 'overdue') rows = rows.filter(r => r.overdue);
   const allOpen = open.has('*');
@@ -494,7 +499,14 @@ function vDue() {
     <div class="row-between wrap"><h2>Due dates <span class="muted">(${rows.length} pending · ${list.length} compliance${list.length === 1 ? '' : 's'})</span></h2>
       <div class="btns">${list.length ? `<button class="sm" data-act="dueAll" data-v="${open.size ? '' : '1'}">${open.size ? 'Collapse all' : 'Expand all'}</button>` : ''}${isAdmin() ? '<button class="sm" data-act="bulkFiled">Mark past returns as filed…</button>' : ''}</div></div>
     <div class="filters">
-      <select data-change="dueF" data-k="range">${[['overdue', 'Overdue only'], ['7', 'Next 7 days'], ['30', 'Next 30 days'], ['90', 'Next 90 days']].map(([v, l]) => `<option value="${v}" ${v === f.range ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <select data-change="dueRange">${(() => {
+        const mo = k => { const d = new Date(t0.getFullYear(), t0.getMonth() + k, 1); return [`m:${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, `${MONS[d.getMonth()]} ${d.getFullYear()}`]; };
+        const months = [[...mo(0)], [...mo(1)], [...mo(-1)]]; months[0][1] = `This month — ${months[0][1]}`; months[1][1] = `Next month — ${months[1][1]}`; months[2][1] = `Last month — ${months[2][1]}`;
+        if (mm && !months.some(x => x[0] === f.range)) months.push([f.range, `${MONS[mS.getMonth()]} ${mS.getFullYear()}`]);
+        const o = ([v, l]) => `<option value="${v}" ${v === f.range ? 'selected' : ''}>${l}</option>`;
+        return `<optgroup label="From today">${[['overdue', 'Overdue only'], ['7', 'Next 7 days'], ['30', 'Next 30 days'], ['90', 'Next 90 days']].map(o).join('')}</optgroup>
+          <optgroup label="Calendar month">${months.map(o).join('')}<option value="pick">Choose a month…</option></optgroup>`; })()}</select>
+      ${mm || f.pick ? `<input type="month" class="mpick" data-change="dueMonth" value="${mm || isoLocalD(t0).slice(0, 7)}" aria-label="Month">` : ''}
       <input id="dueQ" placeholder="Search client or GSTIN…" value="${esc(f.q)}">
       <select data-change="dueF" data-k="ctype"><option value="">All clients</option><option value="business" ${f.ctype === 'business' ? 'selected' : ''}>Business clients</option><option value="itr" ${f.ctype === 'itr' ? 'selected' : ''}>Individual – ITR only</option></select>
       <select data-change="dueF" data-k="cons"><option value="">All constitutions</option>${consList.map(k => `<option ${k === f.cons ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>
@@ -1602,6 +1614,8 @@ const C = {
   compPick: el => { el.checked ? S.compPick.add(el.value) : S.compPick.delete(el.value); el.closest('.cpick')?.classList.toggle('on', el.checked);
     const h = document.querySelector('#compPanel h2 .muted'); if (h) h.textContent = h.textContent.replace(/^\(\d+/, '(' + S.compPick.size); },
   compCons: el => { S.compCons = el.value; render(); },
+  dueRange: el => { if (el.value === 'pick') { S.dueF.pick = true; render(); document.querySelector('.mpick')?.showPicker?.(); return; } S.dueF.pick = false; S.dueF.range = el.value; S.dueDay = ''; render(); },
+  dueMonth: el => { if (el.value) { S.dueF.range = 'm:' + el.value; S.dueDay = ''; render(); } },
   dueF: el => { S.dueF[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; render(); },
   portalPick: el => { const u = el.form.elements.url; u.value = portalByKey(el.value).url; },
   uploadDocs: el => guard(async () => {
