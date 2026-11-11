@@ -609,3 +609,5 @@ main{padding-bottom:72px}
 .g1-tally label{display:flex;flex-direction:column;gap:4px;font-size:13px}
 .g1-tally label.grow{flex:1;min-width:220px}
 .g1-tally input{width:90px}
+.g1-alt{margin:8px 0;border:1px solid #E3E7EE;border-radius:8px;padding:8px 12px}
+.g1-alt summary{cursor:pointer;font-weight:600;font-size:14px}

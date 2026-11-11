@@ -1,7 +1,8 @@
 // Fetch GSTR-1 data from TallyPrime / Tally.ERP 9 over its ODBC / HTTP port (default 9000) and build the
 // GST portal JSON (b2b, b2cl, b2cs, cdnr, cdnur, nil, hsn_b2b/hsn_b2c, doc_issue).
-// The browser cannot call Tally directly from a website (CORS / local-network rules), so requests go through
-// the CA Desk Chrome extension (v1.1+). If the page itself is allowed to reach Tally, a direct call is tried too.
+// The page calls Tally directly (Chrome asks once to allow access to apps on this computer). If the CA Desk Helper
+// extension happens to be installed it is used instead. When neither works, a Day Book XML exported from Tally
+// can be browsed and is converted the same way.
 import { STATE_CODES } from './extract.js';
 
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z]/g, '');
@@ -34,13 +35,14 @@ export async function tallyPost(xml, { host = 'localhost', port = 9000 } = {}) {
       window.postMessage({ type: 'CAPM_TALLY', id, url, xml }, location.origin);
     });
   }
-  try {
-    const r = await fetch(url, { method: 'POST', body: xml, headers: { 'Content-Type': 'text/xml' } });
-    return await r.text();
-  } catch (e) {
-    throw new Error(`The browser blocked the call to Tally on port ${port}. Install or update the CA Desk Chrome extension (version 1.1), reload this page and try again.`);
-  }
+  let r;
+  try { r = await fetch(url, { method: 'POST', body: xml, cache: 'no-store', targetAddressSpace: 'loopback' }); } // plain-text body → no CORS pre-check
+  catch { throw new Error(BLOCKED(port)); }
+  return decode(await r.arrayBuffer());
 }
+export const BLOCKED = port => `Could not reach Tally on port ${port}. Check that Tally is open with the company loaded and its port is on (F1 Help → Settings → Connectivity → Client/Server configuration: TallyPrime acts as “Both”, Enable ODBC “Yes”, Port ${port}). If Chrome asked to allow access to apps on this computer, choose Allow. Or export the Day Book from Tally as XML and use “Tally XML file”.`;
+const decode = b => { const u8 = new Uint8Array(b); if (u8[0] === 0xFF && u8[1] === 0xFE || (u8.length > 1 && u8[1] === 0)) return new TextDecoder('utf-16le').decode(b); return new TextDecoder('utf-8').decode(b); };
+export const readTallyFile = async f => decode(await f.arrayBuffer());
 const notReachable = (port, err) => `Tally is not answering on port ${port}${err ? ` (${err})` : ''}. Open TallyPrime with the company loaded, and check F1 Help → Settings → Connectivity → Client/Server configuration: TallyPrime acts as “Both” (or Server), Enable ODBC “Yes”, Port ${port}.`;
 
 function parseXml(text) {
@@ -96,8 +98,8 @@ async function masters(company, opt) {
 }
 
 const dutyOf = (name, L) => {
-  const m = L[name] || {};
-  const h = `${m.duty} ${/duties|tax/i.test(m.parent) || /gst/i.test(m.taxType) ? name : ''}`.toLowerCase();
+  const m = L[name];
+  const h = (m ? `${m.duty} ${/duties|tax/i.test(m.parent) || /gst/i.test(m.taxType) ? name : ''}` : /gst|cess/i.test(name) ? name : '').toLowerCase();
   if (/cess/.test(h)) return 'csamt';
   if (/igst|integrated/.test(h)) return 'iamt';
   if (/cgst|central/.test(h)) return 'camt';
@@ -123,6 +125,21 @@ export async function fetchGstr1({ company, gstin, fp, iff = false, quarterly = 
   try { d = parseXml(await tallyPost(env('CADeskVch', body(base + ',CmpGSTIN,GSTRegistrationType'), vars), opt)); }
   catch (e) { if (/^Tally:/.test(e.message)) d = parseXml(await tallyPost(env('CADeskVch', body(base), vars), opt)); else throw e; }
   return build(deep(d, 'VOUCHER'), { gstin, fp, iff, L, I, start, end, b2bFrom });
+}
+
+// From XML exported out of Tally (Day Book / vouchers, optionally masters) — no connection needed
+export function gstr1FromXml(texts, { gstin, fp, iff = false, quarterly = false, b2bFrom = '' }) {
+  const y = +fp.slice(2), m = +fp.slice(0, 2);
+  const start = new Date(y, quarterly ? m - 3 : m - 1, 1), end = new Date(y, m, 0);
+  const L = {}, I = {}, vch = [];
+  for (const t of texts) {
+    const d = parseXml(t);
+    for (const l of deep(d, 'LEDGER')) { const name = l.getAttribute('NAME') || txt(l, 'NAME'); if (name) L[name] = { parent: txt(l, 'PARENT'), taxType: txt(l, 'TAXTYPE'), duty: txt(l, 'GSTDUTYHEAD'), rate: rateIn(l), hsn: hsnIn(l), state: txt(l, 'LEDSTATENAME'), gstin: txt(l, 'PARTYGSTIN'), country: txt(l, 'COUNTRYNAME') }; }
+    for (const it of deep(d, 'STOCKITEM')) { const name = it.getAttribute('NAME') || txt(it, 'NAME'); if (name) I[name] = { unit: txt(it, 'BASEUNITS'), rate: rateIn(it), hsn: hsnIn(it), desc: txt(it, 'DESCRIPTION') }; }
+    for (const v of deep(d, 'VOUCHER')) { const vt = txt(v, 'VOUCHERTYPENAME') || v.getAttribute('VCHTYPE') || ''; if (/sales|credit|debit/i.test(vt) || /sales|credit|debit/i.test(v.getAttribute('OBJVIEW') || '')) vch.push(v); }
+  }
+  if (!vch.length) throw new Error('No sales, credit note or debit note vouchers found in this file. In Tally open Day Book for the period → Export (Alt+E) → Format: XML (Data Interchange).');
+  return build(vch, { gstin, fp, iff, L, I, start, end, b2bFrom });
 }
 
 function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
