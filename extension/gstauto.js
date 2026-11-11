@@ -101,20 +101,45 @@
     return watchStatus();
   }
 
+  // Latest row of "Upload History": read the Status column (not the "Error Report" header)
+  function latestUpload() {
+    for (const tbl of [...document.querySelectorAll('table')].filter(visible)) {
+      const rows = [...tbl.querySelectorAll('tr')];
+      const head = rows.find(r => r.querySelector('th')) || rows[0]; if (!head) continue;
+      const hc = [...head.children].map(textOf);
+      const si = hc.findIndex(h => /^status$/i.test(h)); if (si < 0) continue;
+      const di = hc.findIndex(h => /^date$/i.test(h)), ti = hc.findIndex(h => /^time$/i.test(h)), ei = hc.findIndex(h => /error/i.test(h));
+      const data = rows.filter(r => r !== head && r.querySelectorAll('td').length > si);
+      if (!data.length) return { status: '' };
+      const c = [...data[0].querySelectorAll('td')].map(textOf);
+      const [dd, mm, yy] = (c[di] || '').split('/').map(Number), [h, mi, se] = (c[ti] || '').split(':').map(Number);
+      const when = yy ? new Date(yy, mm - 1, dd, h || 0, mi || 0, se || 0).getTime() : 0;
+      return { status: c[si] || '', when, err: ei >= 0 ? c[ei] : '' };
+    }
+    return null;
+  }
+
   async function watchStatus() {
     const deadline = (job.uploadedAt || Date.now()) + 20 * 60000;
     while (!stopped && Date.now() < deadline) {
-      const rows = [...document.querySelectorAll('tr')].filter(visible).map(textOf).filter(t => /processed|in progress|progress|error/i.test(t));
-      const top = rows[0] || '';
-      if (/processed with error|error/i.test(top)) return fail('The portal processed the file WITH ERRORS. Click “Generate error report”, then “Download error report”, fix the invoices in Tally and fetch again.');
-      if (/processed/i.test(top)) {
+      const u = await waitFor(() => latestUpload(), 10000);
+      const fresh = u && (!u.when || !job.uploadedAt || u.when >= job.uploadedAt - 15 * 60000); // allow for the PC clock being off
+      const st = fresh ? u.status : '';
+      if (/error/i.test(st)) return fail('The portal processed the file WITH ERRORS. Click “Generate error report”, then “Download error report”, fix the invoices in Tally and fetch again.');
+      if (/^processed$/i.test(st) || (/processed/i.test(st) && !/error/i.test(st))) {
         await setStage('online');
-        banner('Processed. Opening Prepare online to generate the summary…');
-        await sleep(1200); location.href = DASH; return;
+        banner('Processed — no errors. Opening Prepare online → Generate summary…');
+        await sleep(1200);
+        const back = byText(/back\s*to\s*file\s*returns/i);
+        if (back) click(back); else location.href = DASH;
+        return;
       }
-      banner(`Waiting for the portal to process the JSON… status: ${top ? top.replace(/.*(in progress|processed[^|]*)/i, '$1').slice(0, 40) : 'checking'}`);
-      await sleep(20000);
-      if (!stopped) { location.reload(); return; }
+      banner(`Waiting for the portal to process the JSON… status: ${st || 'not shown yet'}`);
+      await sleep(15000);
+      if (stopped) return;
+      const refresh = [...document.querySelectorAll('[class*=refresh], .fa-refresh, [title*=efresh]')].find(visible);
+      if (refresh) { click(refresh); await sleep(3000); continue; }
+      location.reload(); return;
     }
     if (!stopped) fail('The portal is taking longer than 20 minutes to process the file. Check “Upload history” later, then use Prepare online → Generate summary.');
   }

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CA Desk Helper",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "CA Desk helper: fills portal logins (you type CAPTCHA/OTP), reads GST data from Tally on this computer, and runs the GSTR-1 upload autopilot up to Generate summary.",
   "permissions": [
     "storage"

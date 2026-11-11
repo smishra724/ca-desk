@@ -1060,7 +1060,7 @@ async function compSave(cp) {
 
 /* ---------- settings ---------- */
 // CA Desk Helper Chrome extension: download + install steps, shown in Settings and wherever a feature needs it
-const EXT_VER = '1.2.0';
+const EXT_VER = '1.2.1';
 const extVer = () => document.documentElement.dataset.capmVer || (document.documentElement.dataset.capmTally === '1' ? '1.1.0' : extOn() ? '1.0.0' : '');
 const extCard = (compact = false) => {
   const v = extVer(), ok = v && v >= EXT_VER;
