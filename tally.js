@@ -8,7 +8,7 @@ import { STATE_CODES } from './extract.js';
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z]/g, '');
 const STATE_BY_NAME = Object.fromEntries(Object.entries(STATE_CODES).map(([c, n]) => [norm(n), c]));
 Object.assign(STATE_BY_NAME, { delhi: '07', newdelhi: '07', nctofdelhi: '07', orissa: '21', pondicherry: '34', uttaranchal: '05', jammuandkashmir: '01', jammukashmir: '01',
-  dadraandnagarhaveli: '26', damananddiu: '26', andamanandnicobar: '35', otherterritory: '97', other: '96' });
+  dadraandnagarhaveli: '26', damananddiu: '26', andamanandnicobar: '35', otherterritory: '97', other: '96', othercountries: '96', othercountry: '96', outsideindia: '96', foreigncountry: '96', foreign: '96' });
 const stateCode = name => STATE_BY_NAME[norm(name)] || '';
 const RATES = [0, 0.1, 0.25, 1, 1.5, 3, 5, 6, 7.5, 12, 18, 28, 40];
 const snap = r => RATES.reduce((a, b) => Math.abs(b - r) < Math.abs(a - r) ? b : a, 0);
@@ -66,7 +66,10 @@ const xesc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace
 const kids = (el, tag) => [...(el?.children || [])].filter(c => c.tagName === tag);
 const kid = (el, tag) => kids(el, tag)[0];
 const txt = (el, tag) => (kid(el, tag)?.textContent || '').trim();
-const num = (el, tag) => parseFloat(txt(el, tag).replace(/[^0-9.\-]/g, '')) || 0;
+// Amounts: "-450332.27", "-1,23,456.00", or forex like "-$5000.00 @ ₹ 90.07/$ = -₹ 450332.27" (take the rupee part)
+const amt = s => { s = String(s || ''); if (s.includes('=')) s = s.slice(s.lastIndexOf('=') + 1); const neg = /-/.test(s); const v = parseFloat(s.replace(/[^0-9.]/g, '')) || 0; return neg ? -v : v; };
+const num = (el, tag) => amt(txt(el, tag));
+const deepTxt = (el, tags) => { for (const t of tags) { const x = el.getElementsByTagName(t)[0]?.textContent.trim(); if (x) return x; } return ''; };
 const deep = (el, tag) => [...(el?.getElementsByTagName(tag) || [])];
 const GSTIN_RE = /\b\d{2}[A-Z]{5}\d{4}[A-Z][0-9A-Z]Z[0-9A-Z]\b/;
 
@@ -129,9 +132,12 @@ export async function fetchGstr1({ company, gstin, fp, iff = false, quarterly = 
     <SYSTEM TYPE="Formulae" NAME="CADeskGST">$$IsSales:$VoucherTypeName OR $$IsCreditNote:$VoucherTypeName OR $$IsDebitNote:$VoucherTypeName</SYSTEM>
     <SYSTEM TYPE="Formulae" NAME="CADeskDt">$Date &gt;= $$Date:"${start.getDate()}-${start.toLocaleString('en', { month: 'short' })}-${start.getFullYear()}" AND $Date &lt;= $$Date:"${end.getDate()}-${end.toLocaleString('en', { month: 'short' })}-${end.getFullYear()}"</SYSTEM>`;
   const base = 'Date,VoucherNumber,VoucherTypeName,PartyLedgerName,PartyGSTIN,PlaceOfSupply,StateName,CountryOfResidence,IsCancelled,IsOptional,IsDeleted,Reference,AllLedgerEntries,AllInventoryEntries';
+  const extra = ',CmpGSTIN,GSTRegistrationType,ShippingBillNo,ShippingBillDate,PortCode';
   let d;
-  try { d = parseXml(await tallyPost(env('CADeskVch', body(base + ',CmpGSTIN,GSTRegistrationType'), vars), opt)); }
-  catch (e) { if (/^Tally:/.test(e.message)) d = parseXml(await tallyPost(env('CADeskVch', body(base), vars), opt)); else throw e; }
+  for (const f of [base + extra, base + ',CmpGSTIN,GSTRegistrationType', base]) {
+    try { d = parseXml(await tallyPost(env('CADeskVch', body(f), vars), opt)); break; }
+    catch (e) { if (!/^Tally:/.test(e.message) || f === base) throw e; }
+  }
   return build(deep(d, 'VOUCHER'), { gstin, fp, iff, L, I, start, end, b2bFrom });
 }
 
@@ -142,7 +148,7 @@ export function gstr1FromXml(texts, { gstin, fp, iff = false, quarterly = false,
   const L = {}, I = {}, vch = [];
   for (const t of texts) {
     const d = parseXml(t);
-    for (const l of deep(d, 'LEDGER')) { const name = l.getAttribute('NAME') || txt(l, 'NAME'); if (name) L[name] = { parent: txt(l, 'PARENT'), taxType: txt(l, 'TAXTYPE'), duty: txt(l, 'GSTDUTYHEAD'), rate: rateIn(l), hsn: hsnIn(l), state: txt(l, 'LEDSTATENAME'), gstin: txt(l, 'PARTYGSTIN'), country: txt(l, 'COUNTRYNAME') }; }
+    for (const l of deep(d, 'LEDGER')) { const name = l.getAttribute('NAME') || txt(l, 'NAME'); if (name) L[name] = { parent: txt(l, 'PARENT'), taxType: txt(l, 'TAXTYPE'), duty: txt(l, 'GSTDUTYHEAD'), rate: rateIn(l), hsn: hsnIn(l), state: txt(l, 'LEDSTATENAME'), gstin: txt(l, 'PARTYGSTIN'), country: txt(l, 'COUNTRYNAME'), regType: txt(l, 'GSTREGISTRATIONTYPE') }; }
     for (const it of deep(d, 'STOCKITEM')) { const name = it.getAttribute('NAME') || txt(it, 'NAME'); if (name) I[name] = { unit: txt(it, 'BASEUNITS'), rate: rateIn(it), hsn: hsnIn(it), desc: txt(it, 'DESCRIPTION') }; }
     for (const v of deep(d, 'VOUCHER')) { const vt = txt(v, 'VOUCHERTYPENAME') || v.getAttribute('VCHTYPE') || ''; if (/sales|credit|debit/i.test(vt) || /sales|credit|debit/i.test(v.getAttribute('OBJVIEW') || '')) vch.push(v); }
   }
@@ -152,7 +158,7 @@ export function gstr1FromXml(texts, { gstin, fp, iff = false, quarterly = false,
 
 function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
   const own = gstin.slice(0, 2), warns = [], seen = new Set();
-  const names = {}, b2b = {}, b2cl = {}, b2cs = {}, cdnr = {}, cdnur = [], nil = {}, hsn = { b2b: {}, b2c: {} }, docs = { 1: [], 4: [], 5: [] }, cancelled = { 1: [], 4: [], 5: [] };
+  const names = {}, exp = {}, b2b = {}, b2cl = {}, b2cs = {}, cdnr = {}, cdnur = [], nil = {}, hsn = { b2b: {}, b2c: {} }, docs = { 1: [], 4: [], 5: [] }, cancelled = { 1: [], 4: [], 5: [] };
   let used = 0;
   const dmy = s => `${s.slice(6, 8)}-${s.slice(4, 6)}-${s.slice(0, 4)}`;
   for (const v of vchs) {
@@ -169,7 +175,8 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     const ctin = (txt(v, 'PARTYGSTIN') || pm.gstin || '').toUpperCase();
     let pos = stateCode(txt(v, 'PLACEOFSUPPLY')) || (ctin ? ctin.slice(0, 2) : '') || stateCode(txt(v, 'STATENAME')) || stateCode(pm.state) || own;
     const country = txt(v, 'COUNTRYOFRESIDENCE') || pm.country;
-    if (country && !/india/i.test(country)) { warns.push(`${vt} ${no}: party is outside India — exports are not built from Tally. Add Table 6A in the offline tool.`); continue; }
+    const regType = txt(v, 'GSTREGISTRATIONTYPE') || pm.regType || '';
+    const sez = /sez/i.test(regType) && !!ctin;
     // accounting lines
     const inv = kids(v, 'ALLINVENTORYENTRIES.LIST').concat(kids(v, 'INVENTORYENTRIES.LIST'));
     const allocNames = new Set(inv.flatMap(i => deep(i, 'LEDGERNAME').map(x => x.textContent.trim())));
@@ -196,6 +203,8 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     if (!txval && !taxTot) continue;
     if (!val) val = txval + taxTot + tax.csamt;
     used++; if (no) docs[docNum].push(no);
+    const exportSale = !ctin && ((country && !/india/i.test(country)) || pos === '96' || /export|lut|overseas|foreign/i.test(lines.map(l => l.desc).join(' ')));
+    if (exportSale) pos = '96';
     const inter = tax.iamt > 0 || (!(tax.camt + tax.samt) && pos !== own);
     // split taxable by rate: item rates from Tally where known, otherwise the invoice's effective rate
     const eff = txval ? snap(taxTot / txval * 100) : 0;
@@ -215,24 +224,35 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     for (const l of lines) {
       const r = l.rate != null ? snap(l.rate) : eff, k = `${l.hsn}|${r}|${UQC[norm(l.unit)] || (l.qty ? 'OTH' : 'NA')}`;
       const h = hb[k] ||= { hsn_sc: l.hsn, desc: (l.desc || '').slice(0, 30), uqc: UQC[norm(l.unit)] || (l.qty ? 'OTH' : 'NA'), qty: 0, rt: r, txval: 0, iamt: 0, camt: 0, samt: 0, csamt: 0 };
-      const tv = Math.abs(l.amt), t = tv * r / 100;
+      const tv = Math.abs(l.amt), t = rates.length === 1 ? (txval ? taxTot * tv / txval : 0) : tv * r / 100;
       h.qty += sign * l.qty; h.txval += sign * tv; if (inter) h.iamt += sign * t; else { h.camt += sign * t / 2; h.samt += sign * t / 2; }
       h.csamt += sign * (txval ? tax.csamt * tv / txval : 0);
     }
     const itms = items.map((x, i) => ({ num: i + 1, itm_det: Object.fromEntries(Object.entries(x).filter(([k, vv]) => k === 'rt' || k === 'txval' || vv)) }));
+    if (exportSale) { // Table 6A (exports) / 9B unregistered notes against exports
+      const typ = tax.iamt > 0 ? 'WPAY' : 'WOPAY';
+      const sb = { sbpcode: deepTxt(v, ['PORTCODE', 'SHIPPINGPORTCODE']), sbnum: deepTxt(v, ['SHIPPINGBILLNO', 'SHIPPINGBILLNUMBER', 'BILLOFENTRYNO']), sbdt: deepTxt(v, ['SHIPPINGBILLDATE', 'BILLOFENTRYDATE']) };
+      if (sb.sbdt && /^\d{8}$/.test(sb.sbdt)) sb.sbdt = dmy(sb.sbdt);
+      for (const k of Object.keys(sb)) if (!sb[k]) delete sb[k];
+      const eit = items.map(x => ({ txval: x.txval, rt: x.rt, iamt: typ === 'WPAY' ? x.iamt : 0, csamt: x.csamt || 0 }));
+      if (kind === 'S') (exp[typ] ||= []).push({ inum: no, idt: dmy(dt), val: r2(val), ...sb, itms: eit });
+      else cdnur.push({ ntty: kind, nt_num: no, nt_dt: dmy(dt), val: r2(val), typ: typ === 'WPAY' ? 'EXPWP' : 'EXPWOP', itms: eit.map(x => ({ itm_det: x })) });
+      continue;
+    }
+    const invTyp = sez ? (taxTot > 0 ? 'SEWP' : 'SEWOP') : 'R';
     const zeroRated = items.every(x => !x.rt);
-    if (kind === 'S' && zeroRated) { // nil / exempt
+    if (kind === 'S' && zeroRated && !sez) { // nil / exempt
       const t = (ctin ? 'B2B' : 'B2C'), k = `${inter ? 'INTR' : 'INTRA'}${t}`; nil[k] = (nil[k] || 0) + txval; continue;
     }
     if (ctin && party) names[ctin] = party;
     const inIff = ctin && b2bFrom && dt < b2bFrom; // already reported in IFF
     if (kind === 'S') {
       if (inIff) continue;
-      if (ctin) (b2b[ctin] ||= []).push({ inum: no, idt: dmy(dt), val: r2(val), pos, rchrg: 'N', inv_typ: 'R', itms });
+      if (ctin) (b2b[ctin] ||= []).push({ inum: no, idt: dmy(dt), val: r2(val), pos, rchrg: 'N', inv_typ: invTyp, itms });
       else if (inter && val > 100000) (b2cl[pos] ||= []).push({ inum: no, idt: dmy(dt), val: r2(val), itms });
       else for (const x of items) { const k = `${pos}|${x.rt}`; const b = b2cs[k] ||= { sply_ty: inter ? 'INTER' : 'INTRA', pos, typ: 'OE', rt: x.rt, txval: 0, iamt: 0, camt: 0, samt: 0, csamt: 0 }; for (const f of ['txval', 'iamt', 'camt', 'samt', 'csamt']) b[f] += x[f]; }
     } else {
-      const nt = { ntty: kind, nt_num: no, nt_dt: dmy(dt), val: r2(val), pos, rchrg: 'N', inv_typ: 'R', itms };
+      const nt = { ntty: kind, nt_num: no, nt_dt: dmy(dt), val: r2(val), pos, rchrg: 'N', inv_typ: invTyp, itms };
       if (inIff) continue;
       if (ctin) (cdnr[ctin] ||= []).push(nt);
       else if (inter && val > 100000) cdnur.push({ ntty: kind, nt_num: no, nt_dt: dmy(dt), val: r2(val), typ: 'B2CL', pos, itms });
@@ -243,6 +263,7 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
   const b2bA = Object.entries(b2b).map(([ctin, inv]) => ({ ctin, inv })); if (b2bA.length) j.b2b = b2bA;
   const cdnrA = Object.entries(cdnr).map(([ctin, nt]) => ({ ctin, nt })); if (cdnrA.length) j.cdnr = cdnrA;
   if (!iff) {
+    const expA = Object.entries(exp).map(([exp_typ, inv]) => ({ exp_typ, inv })); if (expA.length) j.exp = expA;
     const b2clA = Object.entries(b2cl).map(([pos, inv]) => ({ pos, inv })); if (b2clA.length) j.b2cl = b2clA;
     const b2csA = Object.values(b2cs).filter(b => Math.abs(b.txval) >= 0.01).map(b => Object.fromEntries(Object.entries(b).map(([k, x]) => [k, typeof x === 'number' ? r2(x) : x]))); if (b2csA.length) j.b2cs = b2csA;
     if (cdnur.length) j.cdnur = cdnur;
