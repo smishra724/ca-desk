@@ -62,7 +62,9 @@ function parseXml(text, step = '') {
     .replace(/&#(\d+);/g, (m, n) => bad(+n) ? '' : m)                          // control characters Tally writes as &#4; etc.
     .replace(/&#x([0-9a-f]+);/gi, (m, h) => bad(parseInt(h, 16)) ? '' : m)
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]/g, '')
-    .replace(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/g, '&amp;');     // bare & in names / narrations
+    .replace(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/g, '&amp;')      // bare & in names / narrations
+    .replace(/<(\/?)([A-Za-z_][\w.-]*):(?=[A-Za-z_])/g, '<$1$2_')                // Tally's UDF:… tags (undeclared prefix) → UDF_…
+    .replace(/\s([A-Za-z_][\w.-]*):([A-Za-z_][\w.-]*)=/g, ' $1_$2=');
   let d = new DOMParser().parseFromString(clean, 'text/xml');
   if (d.querySelector('parsererror')) { // last resort: wrap in a root (Tally sometimes sends several top-level blocks)
     const d2 = new DOMParser().parseFromString(`<CADESKROOT>${clean.replace(/<!DOCTYPE[^>]*>/i, '')}</CADESKROOT>`, 'text/xml');
