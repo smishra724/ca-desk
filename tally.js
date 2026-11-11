@@ -215,13 +215,13 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
       if (allocNames.has(n)) continue;
       const lm = L[n] || {};
       if (/sundry|bank|cash/i.test(lm.parent)) continue;
-      lines.push({ amt: a, rate: rateIn(e) ?? lm.rate, hsn: hsnIn(e) || lm.hsn, qty: 0, unit: '', desc: n });
+      lines.push({ amt: a, rate: rateIn(e) ?? lm.rate, hsn: hsnIn(e) || lm.hsn, qty: 0, unit: '', desc: n, led: n });
     }
     for (const it of inv) {
       const n = txt(it, 'STOCKITEMNAME'), im = I[n] || {}, a = num(it, 'AMOUNT');
       const q = txt(it, 'BILLEDQTY') || txt(it, 'ACTUALQTY'), qn = Math.abs(parseFloat(q.replace(/[^0-9.\-]/g, '')) || 0), u = (q.replace(/[0-9.,\-\s]+/, '').trim().split(/\s|=/)[0]) || im.unit;
       const allocLed = deep(it, 'LEDGERNAME')[0]?.textContent.trim(), am = L[allocLed] || {};
-      lines.push({ amt: a, rate: rateIn(it) ?? im.rate ?? am.rate, hsn: hsnIn(it) || im.hsn || am.hsn, qty: qn, unit: u, desc: im.desc || n });
+      lines.push({ amt: a, rate: rateIn(it) ?? im.rate ?? am.rate, hsn: hsnIn(it) || im.hsn || am.hsn, qty: qn, unit: u, desc: im.desc || n, led: allocLed || '' });
     }
     let txval = Math.abs(lines.reduce((s, l) => s + l.amt, 0));
     for (const k in tax) tax[k] = Math.abs(tax[k]);
@@ -230,7 +230,7 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     if (!val) val = txval + taxTot + tax.csamt;
     else if (Math.abs(val - (txval + taxTot + tax.csamt + Math.abs(rnd))) > 1 && Math.abs(val - (txval + taxTot + tax.csamt - Math.abs(rnd))) > 1) warns.push(`${vt} ${no}: taxable value + tax (₹${r2(txval + taxTot + tax.csamt)}) does not match the invoice total in Tally (₹${r2(val)}). Check this voucher.`);
     used++; if (no) docs[docNum].push(no);
-    const exportSale = !ctin && ((country && !/india/i.test(country)) || pos === '96' || /export|lut|overseas|foreign/i.test(lines.map(l => l.desc).join(' ')));
+    const exportSale = !ctin && ((country && !/india/i.test(country)) || pos === '96' || lines.some(l => /\bexports?\b|\blut\b|\boverseas\b|\bforeign\b|zero[\s-]?rated/i.test(l.led || ''))); // sales ledger names only — not item names like CLUTCH
     if (exportSale) pos = '96';
     const inter = tax.iamt > 0 || (!(tax.camt + tax.samt) && pos !== own);
     // split taxable by rate: item rates from Tally where known, otherwise the invoice's effective rate
