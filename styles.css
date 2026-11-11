@@ -637,3 +637,19 @@ a.btn.primary{background:#0B7A5C;border-color:#0B7A5C;color:#fff}
 .g1-iss tr.err td:nth-child(5){color:#8A1C1C}
 .g1-iss .dot{display:inline-block;width:9px;height:9px;border-radius:50%}
 .g1-iss .dot.err{background:#C62828}.g1-iss .dot.warn{background:#E3A13B}
+/* Due dates: header filter/sort, drag to Monthly / QRMP */
+.hbtn{background:none;border:0;padding:0;font:inherit;font-weight:600;color:inherit;cursor:pointer;white-space:nowrap}
+.hbtn:hover,.hbtn.on{color:#0B7A5C}
+.hmenu{position:fixed;z-index:60;width:260px;background:#fff;border:1px solid #D8DEE7;border-radius:10px;box-shadow:0 10px 30px rgba(21,35,63,.18);padding:8px}
+.hmenu>button{display:block;width:100%;text-align:left;background:none;border:0;padding:7px 8px;border-radius:6px;cursor:pointer}
+.hmenu>button:hover{background:#F1F4F9}
+.hmenu hr{border:0;border-top:1px solid #E3E7EE;margin:6px 0}
+.hm-list{max-height:240px;overflow:auto;display:flex;flex-direction:column;gap:2px;margin-bottom:8px}
+.hm-list label{display:flex;gap:8px;align-items:center;padding:4px 6px;font-size:13px;cursor:pointer}
+.grip{cursor:grab;color:#9AA4B2;margin-right:6px;user-select:none}
+tr[draggable=true]:active{cursor:grabbing}
+.cp-bar{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.dropbar{display:none;gap:12px;margin:8px 0;position:sticky;top:8px;z-index:20}
+body.dragging-gst .dropbar{display:flex}
+.dz{flex:1;border:2px dashed #9AA4B2;border-radius:10px;padding:14px;text-align:center;background:#F8FAFC;color:#15233F}
+.dz.over{border-color:#0B7A5C;background:#E7F5EF}

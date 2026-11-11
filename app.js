@@ -488,17 +488,36 @@ function vDue() {
     .sort((x, y) => x.first - y.first || x.name.localeCompare(y.name));
   const today = dayStart(new Date());
   const days = d => { const n = Math.round((d - today) / 864e5); return n < 0 ? `${-n} day${n === -1 ? '' : 's'} overdue` : n === 0 ? 'due today' : `in ${n} day${n === 1 ? '' : 's'}`; };
-  const panel = g => `<div class="cpanel">${isAdmin() ? `<div class="cp-bar"><button class="sm" data-act="remindAll" data-k="${esc(g.name)}">${WA_ICON} Remind all ${g.clients} pending client${g.clients === 1 ? '' : 's'}</button></div>` : ''}<table class="tbl"><thead><tr><th>Client</th><th>Period</th><th>Due</th>${isAdmin() ? '<th>Task status</th>' : ''}<th></th></tr></thead><tbody>
-    ${g.rs.map(r => `<tr class="${r.overdue ? 'od' : ''}">
-      <td><a href="#" data-act="open" data-id="${r.c.id}" data-tab="compliance">${esc(dispName(r.c))}</a>${r.gstin ? `<div class="muted tiny"><span class="mono">${esc(r.gstin)}</span>${subName(r.c) ? ' · ' + esc(subName(r.c)) : ''}</div>` : subName(r.c) ? `<div class="muted tiny">${esc(subName(r.c))}</div>` : ''}${r.note ? ` <span class="tag">${esc(r.note)}</span>` : ''}</td>
+  // Excel-style header filter + sort (shared by every compliance panel)
+  const dc = S.dueCol ||= { sort: null, f: {} };
+  const val = (r, k) => k === 'client' ? dispName(r.c) : k === 'period' ? r.period : k === 'due' ? (r.overdue ? 'Overdue' : isoLocalD(r.due) === isoLocalD(today) ? 'Due today' : 'Upcoming') : (T.taskFor(r.c.id, r.key, r.altKey)?.status || 'Not started');
+  const colRows = rs => {
+    let out = rs.filter(r => Object.entries(dc.f).every(([k, set]) => !set || set.has(val(r, k))));
+    if (dc.sort) { const { k, dir } = dc.sort, m = dir === 'desc' ? -1 : 1; out = out.slice().sort((a, b) => m * (k === 'due' ? a.due - b.due : k === 'period' ? (a.due - b.due) || val(a, k).localeCompare(val(b, k)) : val(a, k).localeCompare(val(b, k)))); }
+    return out;
+  };
+  const hcell = (k, label) => { const on = dc.f[k] || dc.sort?.k === k; return `<th><button class="hbtn ${on ? 'on' : ''}" data-act="dueHead" data-k="${k}">${label}${dc.sort?.k === k ? (dc.sort.dir === 'desc' ? ' ↓' : ' ↑') : ''}${dc.f[k] ? ' ⏷' : ' ▾'}</button></th>`; };
+  const dragOk = g => isAdmin() && /^(GSTR-1|IFF)$/.test(g.name);
+  const panel = g => { const rs = colRows(g.rs); return `<div class="cpanel">${isAdmin() ? `<div class="cp-bar">${dragOk(g) ? `<span class="muted tiny">Drag a client by ⠿ to switch between Monthly and QRMP (IFF).</span>` : ''}<button class="sm" data-act="remindAll" data-k="${esc(g.name)}">${WA_ICON} Remind all ${g.clients} pending client${g.clients === 1 ? '' : 's'}</button></div>` : ''}
+    ${rs.length < g.rs.length ? `<div class="fchip">Showing ${rs.length} of ${g.rs.length} — filtered by column <a href="#" data-act="dueColClear">✕ clear filters</a></div>` : ''}
+    <table class="tbl"><thead><tr>${hcell('client', 'Client')}${hcell('period', 'Period')}${hcell('due', 'Due')}${isAdmin() ? hcell('status', 'Task status') : ''}<th></th></tr></thead><tbody>
+    ${rs.map(r => `<tr class="${r.overdue ? 'od' : ''}" ${dragOk(g) && r.gstin ? `draggable="true" data-drag-cid="${r.c.id}" data-drag-gstin="${esc(r.gstin)}" data-drag-from="${esc(g.name)}"` : ''}>
+      <td>${dragOk(g) && r.gstin ? '<span class="grip" title="Drag to IFF / Monthly">⠿</span>' : ''}<a href="#" data-act="open" data-id="${r.c.id}" data-tab="compliance">${esc(dispName(r.c))}</a>${r.gstin ? `<div class="muted tiny"><span class="mono">${esc(r.gstin)}</span>${subName(r.c) ? ' · ' + esc(subName(r.c)) : ''}</div>` : subName(r.c) ? `<div class="muted tiny">${esc(subName(r.c))}</div>` : ''}${r.note ? ` <span class="tag">${esc(r.note)}</span>` : ''}</td>
       <td>${esc(r.period)}</td><td class="nowrap">${fmtDate(r.due)}<div class="tiny ${r.overdue ? 'red' : 'muted'}">${days(r.due)}</div></td>
       ${isAdmin() ? `<td class="nowrap tstat">${T.statusSelect(r)}</td>` : ''}
       <td class="nowrap">${isAdmin() ? `${remindBtns(r.c.id, r.key)} ${G1.button(r)}<button class="sm" data-act="markFiled" data-cid="${r.c.id}" data-key="${r.key}">${isPayKey(r.key) ? 'Mark paid' : 'Mark filed'}</button>` : ''}</td></tr>`).join('')}
-    </tbody></table></div>`;
-  return `
+    </tbody></table></div>`; };
+  const menu = S.dueMenu ? (() => {
+    const k = S.dueMenu.k, vals = [...new Set(rows.map(r => val(r, k)))].sort((a, b) => a.localeCompare(b)), set = dc.f[k];
+    const lbl = { client: ['A → Z', 'Z → A'], period: ['Oldest first', 'Newest first'], due: ['Earliest first', 'Latest first'], status: ['A → Z', 'Z → A'] }[k];
+    return `<div class="hmenu" style="left:${S.dueMenu.x}px;top:${S.dueMenu.y}px">
+      <button data-act="dueSort" data-k="${k}" data-dir="asc">↑ Sort ${lbl[0]}</button><button data-act="dueSort" data-k="${k}" data-dir="desc">↓ Sort ${lbl[1]}</button>
+      <hr><div class="hm-list">${vals.map(v => `<label><input type="checkbox" data-change="dueColF" data-k="${k}" value="${esc(v)}" ${!set || set.has(v) ? 'checked' : ''}> ${esc(v)}</label>`).join('')}</div>
+      <div class="btns"><button class="sm" data-act="dueColAll" data-k="${k}">Select all</button><button class="sm" data-act="dueMenuClose">Done</button></div></div>`; })() : '';
+  return `${menu}
   <section class="card">
     <div class="row-between wrap"><h2>Due dates <span class="muted">(${rows.length} pending · ${list.length} compliance${list.length === 1 ? '' : 's'})</span></h2>
-      <div class="btns">${list.length ? `<button class="sm" data-act="dueAll" data-v="${open.size ? '' : '1'}">${open.size ? 'Collapse all' : 'Expand all'}</button>` : ''}${isAdmin() ? '<button class="sm" data-act="bulkFiled">Mark past returns as filed…</button>' : ''}</div></div>
+      <div class="btns"><button class="sm" data-act="dueRefresh" title="Reload clients, filings and tasks">⟳ Refresh</button>${list.length ? `<button class="sm" data-act="dueAll" data-v="${open.size ? '' : '1'}">${open.size ? 'Collapse all' : 'Expand all'}</button>` : ''}${isAdmin() ? '<button class="sm" data-act="bulkFiled">Mark past returns as filed…</button>' : ''}</div></div>
     <div class="filters">
       <select data-change="dueRange">${(() => {
         const mo = k => { const d = new Date(t0.getFullYear(), t0.getMonth() + k, 1); return [`m:${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, `${MONS[d.getMonth()]} ${d.getFullYear()}`]; };
@@ -514,6 +533,7 @@ function vDue() {
       <label class="chk"><input type="checkbox" data-change="dueF" data-k="history" ${f.history ? 'checked' : ''}> Include returns due before ${isoToDisp(S.trackFrom)}</label>
     </div>
     <p class="muted small">Tracking compliance from <b>${isoToDisp(S.trackFrom)}</b>. Returns due earlier are treated as filed before CA Desk. ${isAdmin() ? '<a href="#" data-act="setTrackFrom">Change</a>' : ''}</p>
+    <div class="dropbar" id="dropbar"><div class="dz" data-drop="QRMP"><b>QRMP</b> — IFF in months 1–2, quarterly GSTR-1</div><div class="dz" data-drop="Monthly"><b>Monthly</b> — GSTR-1 every month</div></div>
     <div class="clist">
     ${S.dueDay ? `<div class="fchip">Showing returns due on <b>${isoToDisp(S.dueDay)}</b> <a href="#" data-act="dueDayClear">✕ show all</a></div>` : ''}
     ${list.map(g => `<div class="citem ${open.has(g.name) || allOpen ? 'open' : ''} ${g.od ? 'has-od' : ''}">
@@ -1169,6 +1189,12 @@ const A = {
   go: ({ v }) => { S.fab = false; if (v === 'due') { S.dueDay = ''; if (S.dueOpen?.has('*')) S.dueOpen = new Set(); } S.view = v; window.scrollTo(0, 0); S.importRows = v === 'import' ? S.importRows : null; render(); if (v === 'settings') loadStaff(); },
   open: ({ id, tab }) => guard(async () => { await openClient(id, tab || 'master'); render(); }),
   tab: ({ t }) => { S.tab = t; render(); },
+  dueRefresh: () => guard(async () => { busy(true, 'Refreshing…'); await loadClients(); await loadAllFilings(); await T.load(); autoTasks(); render(); }, 'Refreshed'),
+  dueHead: ({ k }, el) => { const r = el.getBoundingClientRect(); S.dueMenu = S.dueMenu?.k === k ? null : { k, x: Math.min(r.left, innerWidth - 270), y: r.bottom + 4 }; render(); },
+  dueMenuClose: () => { S.dueMenu = null; render(); },
+  dueSort: ({ k, dir }) => { S.dueCol.sort = S.dueCol.sort?.k === k && S.dueCol.sort.dir === dir ? null : { k, dir }; S.dueMenu = null; render(); },
+  dueColAll: ({ k }) => { delete S.dueCol.f[k]; render(); },
+  dueColClear: () => { S.dueCol = { sort: S.dueCol?.sort || null, f: {} }; render(); },
   dueToggle: ({ k }) => { const o = S.dueOpen ||= new Set(); if (o.has('*')) { o.delete('*'); for (const b of document.querySelectorAll('[data-act=dueToggle]')) o.add(b.dataset.k); } o.has(k) ? o.delete(k) : o.add(k); render(); },
   dueAll: ({ v }) => { S.dueOpen = new Set(); if (v) for (const b of document.querySelectorAll('[data-act=dueToggle]')) S.dueOpen.add(b.dataset.k); render(); },
   mixOpen: ({ k }) => { S.consF = k; S.search = ''; S.sel = new Set(); S.view = 'clients'; render(); },
@@ -1650,6 +1676,12 @@ const C = {
   compCons: el => { S.compCons = el.value; render(); },
   dueRange: el => { if (el.value === 'pick') { S.dueF.pick = true; render(); document.querySelector('.mpick')?.showPicker?.(); return; } S.dueF.pick = false; S.dueF.range = el.value; S.dueDay = ''; render(); },
   dueMonth: el => { if (el.value) { S.dueF.range = 'm:' + el.value; S.dueDay = ''; render(); } },
+  dueColF: el => {
+    const k = el.dataset.k, boxes = [...el.closest('.hmenu').querySelectorAll('input[type=checkbox]')];
+    const on = boxes.filter(b => b.checked).map(b => b.value);
+    if (on.length === boxes.length) delete S.dueCol.f[k]; else S.dueCol.f[k] = new Set(on);
+    render();
+  },
   dueF: el => { S.dueF[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; render(); },
   portalPick: el => { const u = el.form.elements.url; u.value = portalByKey(el.value).url; },
   uploadDocs: el => guard(async () => {
@@ -1930,3 +1962,32 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); if (S.fab) { S.fab = false; render(); } } });
 document.addEventListener('click', e => { if (S.fab && !e.target.closest('.fab')) { S.fab = false; render(); } });
+document.addEventListener('click', e => { if (S.dueMenu && !e.target.closest('.hmenu') && !e.target.closest('[data-act=dueHead]')) { S.dueMenu = null; render(); } });
+// Due dates: drag a GSTR-1 / IFF row onto Monthly or QRMP to change that GSTIN's GST filing
+let dragRow = null;
+document.addEventListener('dragstart', e => {
+  const tr = e.target.closest?.('[data-drag-cid]'); if (!tr) return;
+  dragRow = { cid: tr.dataset.dragCid, gstin: tr.dataset.dragGstin, from: tr.dataset.dragFrom };
+  e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragRow.gstin);
+  document.body.classList.add('dragging-gst');
+});
+document.addEventListener('dragend', () => { document.body.classList.remove('dragging-gst'); document.querySelectorAll('.dz.over').forEach(x => x.classList.remove('over')); });
+document.addEventListener('dragover', e => { const z = e.target.closest?.('[data-drop]'); if (!z || !dragRow) return; e.preventDefault(); document.querySelectorAll('.dz.over').forEach(x => x !== z && x.classList.remove('over')); z.classList.add('over'); });
+document.addEventListener('drop', e => {
+  const z = e.target.closest?.('[data-drop]'); if (!z || !dragRow) return; e.preventDefault();
+  const { cid, gstin } = dragRow, freq = z.dataset.drop; dragRow = null; document.body.classList.remove('dragging-gst');
+  setGstFreq(cid, gstin, freq);
+});
+function setGstFreq(cid, gstin, freq) {
+  const c = S.clients.find(x => x.id === cid); if (!c) return;
+  const regs = regsOf(c).map(x => ({ ...x })), r = regs.find(x => x.gstin === gstin);
+  if (!r) return toast('GSTIN not found on this client.');
+  if ((r.gstFreq || 'Monthly') === freq) return toast(`${dispName(c)} (${gstin}) is already ${freq}.`);
+  if (!confirm(`Change GST filing of ${dispName(c)} — ${gstin}\nfrom ${r.gstFreq || 'Monthly'} to ${freq}?\n\n${freq === 'QRMP' ? 'IFF (optional) in the first two months of each quarter, GSTR-1 and GSTR-3B quarterly, PMT-06 monthly.' : 'GSTR-1 and GSTR-3B every month.'}`)) return;
+  r.gstFreq = freq;
+  guard(async () => {
+    await tagLegacyCreds(cid, c);
+    await updateDoc(doc(db, 'clients', cid), { ...regMirror(regs), updatedAt: serverTimestamp() });
+    await loadClients(); autoTasks(); render();
+  }, `${dispName(c)} moved to ${freq}`);
+}
