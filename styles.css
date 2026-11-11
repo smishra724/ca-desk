@@ -630,3 +630,10 @@ a.btn.primary{background:#0B7A5C;border-color:#0B7A5C;color:#fff}
 .g1-brk .r{text-align:right;font-variant-numeric:tabular-nums}
 .g1-brk tfoot td{position:sticky;bottom:0;background:#F3F5F9;border-top:1px solid #D8DEE7}
 .modal-box:has(.g1){max-width:1080px}
+.g1-iss{margin:10px 0}
+.g1-iss .tag.red{background:#FDECEC;color:#8A1C1C}
+.g1-iss .tag.amber{background:#FFF6E3;color:#7A4E00}
+.g1-iss td.wrap{white-space:normal;min-width:220px}
+.g1-iss tr.err td:nth-child(5){color:#8A1C1C}
+.g1-iss .dot{display:inline-block;width:9px;height:9px;border-radius:50%}
+.g1-iss .dot.err{background:#C62828}.g1-iss .dot.warn{background:#E3A13B}

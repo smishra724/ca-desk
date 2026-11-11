@@ -206,7 +206,7 @@ import { tallyCompanies, fetchGstr1, gstr1FromXml, readTallyFile, tallyLast } fr
 
 export function initGstr1(ctx) {
   const { S, A, C, esc, toast, modal, closeModal, guard, render, todayISO, isoToDisp, db, saveFile, saveBlob, T, busy, extractText, portalLogin, fs } = ctx;
-  const { doc, setDoc, getDocs, collection } = fs;
+  const { doc, setDoc, getDocs, collection, query, where } = fs;
   const G = {};
   G.applies = key => /^(GSTR1|IFF)-/.test(key);
   G.button = r => G.applies(r.key) ? `<button class="sm g1btn" data-act="g1Open" data-cid="${r.c.id}" data-key="${esc(r.key)}" data-alt="${esc(r.altKey || '')}" data-form="${esc(r.form)}" data-period="${esc(r.period)}" data-due="${ctx.isoLocalD(r.due)}" title="File ${/^IFF/.test(r.key) ? 'IFF' : 'GSTR-1'}: upload JSON, file on the portal, save the ARN and PDF">${ICON} File</button>` : '';
@@ -297,6 +297,80 @@ export function initGstr1(ctx) {
     }
     XLSX.writeFile(wb, `${ret().replace('-', '')}_${s.gstin}_${s.fp}_breakup.xlsx`);
   };
+  // Hints for problems found in the JSON itself
+  const HINTS = [
+    [/check digit|not a valid GSTIN/i, 'Correct the party’s GSTIN in its ledger (GST registration details).'],
+    [/own GSTIN/i, 'The party ledger has the client’s own GSTIN — correct it.'],
+    [/number can only|cannot be only zeros|longer than 16/i, 'Change the voucher number / numbering prefix so it has only letters, digits, / and -.'],
+    [/appears twice|already reported/i, 'Each invoice number can be reported only once — renumber the voucher or remove it if it was reported earlier.'],
+    [/DD-MM-YYYY|not a valid date|in the future|after the end/i, 'Correct the voucher date.'],
+    [/place of supply/i, 'Set the party’s State or the voucher’s Place of Supply.'],
+    [/must have IGST|must have CGST/i, 'Use IGST for other-state buyers and CGST + SGST for same-state buyers.'],
+    [/CGST .* and SGST .* must be equal/i, 'Correct the CGST/SGST amounts.'],
+    [/rate .* not a valid rate|not valid\.$/i, 'Correct the GST rate on the item or ledger.'],
+    [/HSN/i, 'Set a 4/6/8-digit HSN/SAC on the item or sales ledger (GST details).'],
+    [/UQC|unit/i, 'Set the Unit Quantity Code (UQC) on the unit of measure.'],
+    [/without payment of tax|LUT/i, 'Exports under LUT must not have IGST.'],
+    [/B2C large/i, 'Check the invoice value / place of supply.'],
+    [/Documents issued/i, 'Check the voucher numbering series and cancelled vouchers.'],
+    [/differs from/i, 'Tax amount does not match rate × taxable value — check the voucher.'],
+    [/HSN summary taxable value/i, 'Some sales lines have no item/ledger with HSN, or an amount is outside the GST classification.'],
+  ];
+  function toIssues(sum, vmap = {}) {
+    const one = (sev, m) => { const no = (m.match(/(?:invoice|note|Document)\s+([A-Za-z0-9\/-]+)\b/i) || [])[1] || ''; const v = vmap[no] || {}; return { sev, vch: no && vmap[no] ? no : '', vt: v.vt || '', date: v.date || '', party: v.party || '', msg: m, fix: (HINTS.find(([re]) => re.test(m)) || [, ''])[1] }; };
+    return [...sum.errs.map(m => one('err', m)), ...sum.warns.map(m => one('warn', m))];
+  }
+  // Invoice numbers already reported in earlier GSTR-1 / IFF JSONs saved in CA Desk for the same GSTIN and financial year
+  async function earlierInvoices(s) {
+    const y = +s.fp.slice(2), m = +s.fp.slice(0, 2), fyStart = m >= 4 ? y : y - 1, out = new Map();
+    const snap = await getDocs(query(collection(db, 'clients', s.cid, 'docs'), where('kind', '==', 'working')));
+    const docs = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => /\.json$/i.test(d.name || '') && /^(GSTR1|IFF)-\d{4}-\d{2}@/.test(d.filingKey || '') && d.filingKey.split('@')[1] === s.gstin && d.filingKey !== s.key)
+      .filter(d => { const [yy, mm] = d.filingKey.split('@')[0].split('-').slice(1).map(Number); const fy = mm >= 4 ? yy : yy - 1; return fy === fyStart && (yy * 12 + mm) < (y * 12 + m); }).slice(0, 15);
+    for (const d of docs) {
+      try {
+        const ch = await getDocs(collection(db, 'clients', s.cid, 'docs', d.id, 'chunks'));
+        const j = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(ch.docs.sort((a, b) => a.id.localeCompare(b.id)).map(x => x.data().d).join('')), c => c.charCodeAt(0))));
+        const per = d.filingKey.split('@')[0].replace(/^(GSTR1|IFF)-(\d{4})-(\d{2})$/, (_, r, yy, mm) => `${r === 'IFF' ? 'IFF' : 'GSTR-1'} ${MONTHS[+mm - 1].slice(0, 3)} ${yy}`);
+        for (const p of [...(j.b2b || []), ...(j.b2cl || []), ...(j.exp || [])]) for (const x of p.inv || []) out.set(String(x.inum).toUpperCase(), per);
+        for (const p of j.cdnr || []) for (const x of p.nt || []) out.set(String(x.nt_num).toUpperCase(), per);
+      } catch { /* unreadable old file */ }
+    }
+    return out;
+  }
+  async function finishCheck(s, r, sum) {
+    const issues = [...(r.issues || [])];
+    try {
+      const prev = await earlierInvoices(s), j = r.json;
+      const nos = [...[...(j.b2b || []), ...(j.b2cl || []), ...(j.exp || [])].flatMap(p => (p.inv || []).map(x => x.inum)), ...(j.cdnr || []).flatMap(p => (p.nt || []).map(x => x.nt_num))];
+      for (const no of nos) if (prev.has(String(no).toUpperCase())) sum.errs.push(`Invoice ${no} was already reported in ${prev.get(String(no).toUpperCase())} — the portal rejects a repeated invoice number.`);
+    } catch { /* checking earlier months is best-effort */ }
+    const seenMsg = new Set(issues.map(i => i.vch + '|' + i.msg));
+    const tallyText = issues.map(i => `${i.vch} ${i.msg}`).join(' | ');
+    for (const i of toIssues(sum, r.vmap)) {
+      if (seenMsg.has(i.vch + '|' + i.msg)) continue;
+      const g15 = (i.msg.match(/\b\d{2}[A-Z0-9]{10}[0-9A-Z]Z[0-9A-Z]\b/) || [])[0];
+      if (g15 && tallyText.includes(g15)) continue;                                       // same GSTIN problem already listed from Tally
+      if (/number can only|cannot be only zeros/.test(i.msg) && /Invoice number/.test(tallyText)) continue;
+      if (/must have IGST|must have CGST|must be equal/.test(i.msg) && i.vch && issues.some(t => t.vch === i.vch && /IGST|CGST/.test(t.msg))) continue;
+      if (/^HSN .* must be 4, 6 or 8/.test(i.msg) && /HSN\/SAC/.test(tallyText)) continue;
+      issues.push(i);
+    }
+    // anything Tally-side marked as error blocks saving, like JSON errors
+    for (const i of r.issues || []) (i.sev === 'err' ? sum.errs : sum.warns).push(`${i.vch ? `${i.vt || 'Voucher'} ${i.vch}: ` : ''}${i.msg}`);
+    sum.errs = [...new Set(sum.errs)]; sum.warns = [...new Set(sum.warns)];
+    issues.sort((a, b) => (a.sev === b.sev ? 0 : a.sev === 'err' ? -1 : 1));
+    return issues;
+  }
+  function issueTable(list) {
+    const e = list.filter(i => i.sev === 'err').length, w = list.length - e;
+    if (!list.length) return '<div class="g1-msg ok"><b>No problems found.</b> GSTIN, period and every invoice passed the portal checks.</div>';
+    return `<div class="g1-iss">
+      <div class="row-between wrap"><div>${e ? `<span class="tag red">${e} error${e === 1 ? '' : 's'} — the portal will reject the file</span>` : ''} ${w ? `<span class="tag amber">${w} to check</span>` : ''}</div>
+        <button class="sm" data-act="g1IssXl">Download problems (Excel)</button></div>
+      <div class="g1-brk mt"><table><thead><tr><th></th><th>Voucher</th><th>Date</th><th>Party</th><th>Problem</th><th>How to fix in Tally</th></tr></thead><tbody>
+        ${list.map(i => `<tr class="${i.sev}"><td><span class="dot ${i.sev}" title="${i.sev === 'err' ? 'Error' : 'Check'}"></span></td><td class="mono">${esc(i.vch)}</td><td>${esc(i.date)}</td><td>${esc(i.party)}</td><td class="wrap">${esc(i.msg)}</td><td class="wrap muted">${esc(i.fix)}</td></tr>`).join('')}</tbody></table></div></div>`;
+  }
+  A.g1IssXl = () => { const s = g(), l = s.json?.issues || []; const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Severity', 'Voucher type', 'Voucher', 'Date', 'Party', 'Problem', 'How to fix'], ...l.map(i => [i.sev === 'err' ? 'Error' : 'Check', i.vt, i.vch, i.date, i.party, i.msg, i.fix])]), 'Problems'); XLSX.writeFile(wb, `${ret().replace('-', '')}_${s.gstin}_${s.fp}_problems.xlsx`); };
   const msgs = (errs, warns) => `${errs.length ? `<div class="g1-msg err"><b>${errs.length} error${errs.length === 1 ? '' : 's'} — the portal will reject this file</b><ul>${errs.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>` : ''}
     ${warns.length ? `<div class="g1-msg warn"><b>Check before uploading</b><ul>${warns.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>` : ''}`;
 
@@ -320,7 +394,7 @@ export function initGstr1(ctx) {
         ${j?.tally ? `<p class="small mt"><b>${j.tally.count}</b> voucher${j.tally.count === 1 ? '' : 's'} read from <b>${esc(j.tally.company)}</b>.</p>` : ''}`
       : `<p class="small">Choose the ${ret()} JSON generated by the GST Offline Tool or your accounting software. It is checked against this GSTIN and period before you upload it on the portal.</p>
       <label class="g1-drop">${j ? `<b>${esc(j.file.name)}</b><span class="muted tiny">Choose another file</span>` : `<b>Browse JSON file</b><span class="muted tiny">.json — up to 10 MB</span>`}<input type="file" accept=".json,application/json" data-change="g1Json"></label>`}
-      ${j && (src === 'file') === !j.tally ? `${j.sum.errs.length || j.sum.warns.length ? msgs(j.sum.errs, j.sum.warns) : '<div class="g1-msg ok"><b>No errors found.</b> GSTIN and period match.</div>'}${sumTable(j.sum, j)}
+      ${j && (src === 'file') === !j.tally ? `${j.issues ? issueTable(j.issues) : j.sum.errs.length || j.sum.warns.length ? msgs(j.sum.errs, j.sum.warns) : '<div class="g1-msg ok"><b>No errors found.</b> GSTIN and period match.</div>'}${sumTable(j.sum, j)}
         <div class="btns mt"><button class="primary" data-act="g1SaveJson" ${j.sum.errs.length ? 'disabled' : ''}>Save JSON and continue</button><button data-act="g1JsonDl">Download JSON</button>${j.sum.errs.length ? `<span class="muted small">${j.tally ? 'Correct these in Tally and fetch again.' : 'Fix the errors in the source file and browse it again.'}</span>` : ''}</div>`
       : p.jsonDoc ? `<div class="g1-msg ok">Saved: <b>${esc(p.jsonName)}</b>${p.savedAt ? ` on ${isoToDisp(p.savedAt.slice(0, 10))}` : ''}. <a href="#" data-act="g1Step" data-i="2">Go to step 2</a></div>${p.sum ? sumTable({ rows: p.sum }) : ''}` : ''}`;
   }
@@ -389,7 +463,9 @@ export function initGstr1(ctx) {
     const file = new File([JSON.stringify(r.json)], `${ret().replace('-', '')}_${s.gstin}_${s.fp}_Tally.json`, { type: 'application/json' });
     const sum = checkJson(r.json, { gstin: s.gstin, fp: s.fp, iff: s.iff, noHsnCheck: !!s.b2bFrom });
     sum.warns = [...r.warns, ...sum.warns];
-    s.json = { file, data: r.json, names: r.names, sum, tally: { count: r.count, company } }; draw();
+    busy(true, 'Checking every invoice against the portal rules…');
+    const issues = await finishCheck(s, r, sum);
+    s.json = { file, data: r.json, names: r.names, sum, issues, tally: { count: r.count, company } }; draw();
   });
   C.g1TallyXml = el => {
     const files = [...el.files]; el.value = ''; if (!files.length) return;
@@ -400,7 +476,8 @@ export function initGstr1(ctx) {
       const file = new File([JSON.stringify(r.json)], `${ret().replace('-', '')}_${s.gstin}_${s.fp}_Tally.json`, { type: 'application/json' });
       const sum = checkJson(r.json, { gstin: s.gstin, fp: s.fp, iff: s.iff, noHsnCheck: !!s.b2bFrom });
       sum.warns = [...r.warns, ...sum.warns];
-      s.json = { file, data: r.json, names: r.names, sum, tally: { count: r.count, company: files.map(f => f.name).join(', ') } }; draw();
+      const issues = await finishCheck(s, r, sum);
+      s.json = { file, data: r.json, names: r.names, sum, issues, tally: { count: r.count, company: files.map(f => f.name).join(', ') } }; draw();
     });
   };
   A.g1TallyReply = () => saveBlob(new Blob([tallyLast.text], { type: 'text/xml' }), `tally-reply-${tallyLast.step || 'data'}.xml`);
@@ -411,7 +488,7 @@ export function initGstr1(ctx) {
     guard(async () => {
       if (f.size > 10 * 1024 * 1024) throw new Error('The JSON is over 10 MB. Split it or upload it directly on the portal.');
       let j; try { j = JSON.parse(await f.text()); } catch { j = null; }
-      const s = g(); s.json = { file: f, data: j, names: {}, sum: checkJson(j, { gstin: s.gstin, fp: s.fp, iff: s.iff }) }; draw();
+      const s = g(), sum = checkJson(j, { gstin: s.gstin, fp: s.fp, iff: s.iff }); const issues = j ? await finishCheck(s, { json: j, issues: [], vmap: {} }, sum) : null; s.json = { file: f, data: j, names: {}, sum, issues }; draw();
     });
   };
   A.g1SaveJson = () => guard(async () => {

@@ -179,8 +179,15 @@ export function gstr1FromXml(texts, { gstin, fp, iff = false, quarterly = false,
   return build(vch, { gstin, fp, iff, L, I, start, end, b2bFrom });
 }
 
+const GCH = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const gstinValid = g => { if (!/^[0-9]{2}[A-Z0-9]{10}[0-9A-Z]Z[0-9A-Z]$/.test(g || '')) return false; let sum = 0; for (let i = 0; i < 14; i++) { const v = GCH.indexOf(g[i]) * (i % 2 ? 2 : 1); sum += Math.floor(v / 36) + (v % 36); } return GCH[(36 - (sum % 36)) % 36] === g[14]; };
+const STD = [0, 0.1, 0.25, 1, 1.5, 3, 5, 6, 7.5, 12, 18, 28, 40];
+
 function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
-  const own = gstin.slice(0, 2), warns = [], seen = new Set();
+  const own = gstin.slice(0, 2), warns = [], seen = new Set(), issues = [], vmap = {}, partyDone = new Set();
+  let cur = {};
+  // a problem the GST portal is likely to reject (err) or that needs a look (warn), tied to the Tally voucher
+  const iss = (sev, msg, fix = '', ctx = cur) => issues.push({ sev, vch: ctx.no || '', vt: ctx.vt || '', date: ctx.date || '', party: ctx.party || '', msg, fix });
   const noHsn = [], names = {}, exp = {}, b2b = {}, b2cl = {}, b2cs = {}, cdnr = {}, cdnur = [], nil = {}, hsn = { b2b: {}, b2c: {} }, docs = { 1: [], 4: [], 5: [] }, cancelled = { 1: [], 4: [], 5: [] };
   let used = 0;
   const dmy = s => `${s.slice(6, 8)}-${s.slice(4, 6)}-${s.slice(0, 4)}`;
@@ -195,11 +202,16 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     if (txt(v, 'ISCANCELLED') === 'Yes') { if (no) cancelled[docNum].push(no); continue; }
     const key = `${vt}|${no}`; if (seen.has(key)) continue; seen.add(key);
     const party = txt(v, 'PARTYLEDGERNAME'), pm = L[party] || {};
+    cur = { no, vt, date: dmy(dt), party }; vmap[no] = cur;
     const ctin = (txt(v, 'PARTYGSTIN') || pm.gstin || '').toUpperCase();
     let pos = stateCode(txt(v, 'PLACEOFSUPPLY')) || (ctin ? ctin.slice(0, 2) : '') || stateCode(txt(v, 'STATENAME')) || stateCode(pm.state) || own;
     const country = txt(v, 'COUNTRYOFRESIDENCE') || pm.country;
     const regType = txt(v, 'GSTREGISTRATIONTYPE') || pm.regType || '';
     const sez = /sez/i.test(regType) && !!ctin;
+    if (ctin && !gstinValid(ctin) && !partyDone.has(party + 'g')) { partyDone.add(party + 'g'); iss('err', `Party GSTIN ${ctin} is not a valid GSTIN (check digit fails).`, `Alter ledger “${party}” → GST registration details → correct the GSTIN.`); }
+    if (ctin && ctin === gstin) iss('err', 'Party GSTIN is the client’s own GSTIN.', `Alter ledger “${party}” → GSTIN.`);
+    if (!ctin && /regular|composition|sez/i.test(regType) && !partyDone.has(party + 'r')) { partyDone.add(party + 'r'); iss('warn', `Party is marked “${regType}” in Tally but has no GSTIN — it is reported as B2C.`, `Alter ledger “${party}” → add the GSTIN, or set registration type to Unregistered.`); }
+    if (no && (!/^[A-Za-z0-9\/-]{1,16}$/.test(no) || /^[0\/-]+$/.test(no))) iss('err', `Invoice number “${no}” is not accepted by the portal (only letters, digits, / and -, max 16, not all zeros).`, 'Change the voucher number (or the voucher type’s prefix/suffix numbering) so it has no spaces or other symbols.');
     // accounting lines
     // Tally can send the same lines twice (ALL… and plain lists) — use one of them, never both
     const pickList = (all, plain) => { const a = kids(v, all); return a.length ? a : kids(v, plain); };
@@ -228,10 +240,19 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     const taxTot = tax.iamt + tax.camt + tax.samt;
     if (!txval && !taxTot) continue;
     if (!val) val = txval + taxTot + tax.csamt;
-    else if (Math.abs(val - (txval + taxTot + tax.csamt + Math.abs(rnd))) > 1 && Math.abs(val - (txval + taxTot + tax.csamt - Math.abs(rnd))) > 1) warns.push(`${vt} ${no}: taxable value + tax (₹${r2(txval + taxTot + tax.csamt)}) does not match the invoice total in Tally (₹${r2(val)}). Check this voucher.`);
+    else if (Math.abs(val - (txval + taxTot + tax.csamt + Math.abs(rnd))) > 1 && Math.abs(val - (txval + taxTot + tax.csamt - Math.abs(rnd))) > 1) iss('warn', `Taxable value + tax (₹${r2(txval + taxTot + tax.csamt)}) does not add up to the invoice total (₹${r2(val)}).`, 'Open the voucher — a ledger may be missing its GST classification, or an expense/discount line is not marked as part of taxable value.');
+    if (Math.abs(rnd) > 1) iss('warn', `Round-off of ₹${r2(Math.abs(rnd))} is more than ₹1.`, 'Check the round-off line in the voucher.');
+    if (tax.camt + tax.samt > 0 && tax.iamt > 0) iss('err', 'Both IGST and CGST/SGST are charged on the same invoice.', 'Keep either IGST (other state) or CGST + SGST (same state).');
+    else if (pos !== own && pos !== '96' && tax.camt + tax.samt > 0) iss('err', `Place of supply is ${pos} (another state) but CGST + SGST is charged — the portal needs IGST.`, `Check the State / Place of Supply of “${party}”; if the sale is inter-state, use the IGST ledger.`);
+    else if (pos === own && tax.iamt > 0 && !sez) iss('err', `Place of supply is the client’s own state but IGST is charged — the portal needs CGST + SGST.`, `Check the State / Place of Supply of “${party}”; if it is an intra-state sale, use CGST + SGST ledgers.`);
+    if (Math.abs(tax.camt - tax.samt) > 0.5) iss('err', `CGST (₹${r2(tax.camt)}) and SGST (₹${r2(tax.samt)}) are not equal.`, 'Correct the CGST/SGST amounts in the voucher.');
+    if (txval && taxTot) { const er = taxTot / txval * 100; if (!STD.some(r => Math.abs(r - er) < 0.06) && !lines.some(l => l.rate != null && l.rate !== snap(er))) iss('err', `Tax charged is ${r2(er)}% of taxable value — not a GST rate.`, 'Check the tax amounts or the taxable value in this voucher (a ledger may be missing GST, or tax is overwritten).'); }
+    if (!taxTot && lines.some(l => (l.rate || 0) > 0) && kind === 'S' && !sez && !lines.some(l => /\bexports?\b|\blut\b/i.test(l.led || ''))) iss('err', `No GST charged although the item/ledger GST rate is ${lines.find(l => l.rate > 0).rate}%.`, 'Add the GST ledgers to the voucher, or correct the GST rate on the item/ledger if it is really exempt.');
+    if (!val && !txval) iss('warn', 'Invoice value is 0.', 'Delete or cancel the voucher if it is not a real sale.');
     used++; if (no) docs[docNum].push(no);
     const exportSale = !ctin && ((country && !/india/i.test(country)) || pos === '96' || lines.some(l => /\bexports?\b|\blut\b|\boverseas\b|\bforeign\b|zero[\s-]?rated/i.test(l.led || ''))); // sales ledger names only — not item names like CLUTCH
     if (exportSale) pos = '96';
+    if (!txt(v, 'PLACEOFSUPPLY') && !ctin && !txt(v, 'STATENAME') && !pm.state && kind === 'S' && !exportSale) iss('warn', `No place of supply or party state — taken as the client’s own state (${own}).`, `Set the State in ledger “${party}” or Place of Supply in the voucher (party details).`);
     const inter = tax.iamt > 0 || (!(tax.camt + tax.samt) && pos !== own);
     // split taxable by rate: item rates from Tally where known, otherwise the invoice's effective rate
     const eff = txval ? snap(taxTot / txval * 100) : 0;
@@ -250,7 +271,9 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     const hb = ctin ? hsn.b2b : hsn.b2c;
     for (const l of lines) {
       const r = l.rate != null ? snap(l.rate) : eff, k = `${l.hsn}|${r}|${UQC[norm(l.unit)] || (l.qty ? 'OTH' : 'NA')}`;
-      if (!l.hsn) noHsn.push(l.desc);
+      if (!l.hsn) { noHsn.push(l.desc); if (!partyDone.has('h' + l.desc)) { partyDone.add('h' + l.desc); iss('err', `No HSN/SAC on “${l.desc}”.`, `Alter ${l.qty ? 'stock item' : 'ledger'} “${l.desc}” → GST details → HSN/SAC.`); } }
+      else if (!/^\d{4}$|^\d{6}$|^\d{8}$/.test(l.hsn) && !partyDone.has('hb' + l.desc)) { partyDone.add('hb' + l.desc); iss('err', `HSN/SAC “${l.hsn}” on “${l.desc}” must be 4, 6 or 8 digits.`, `Alter “${l.desc}” → GST details → HSN/SAC.`); }
+      if (l.qty && !UQC[norm(l.unit)] && !partyDone.has('u' + l.unit)) { partyDone.add('u' + l.unit); iss('warn', `Unit “${l.unit}” has no GST UQC — reported as OTH (Others).`, `Alter unit “${l.unit}” → Unit Quantity Code (UQC).`); }
       const h = hb[k] ||= { hsn_sc: l.hsn, desc: (l.desc || '').slice(0, 30), uqc: UQC[norm(l.unit)] || (l.qty ? 'OTH' : 'NA'), qty: 0, rt: r, txval: 0, iamt: 0, camt: 0, samt: 0, csamt: 0 };
       const tv = Math.abs(l.amt), t = rates.length === 1 ? (txval ? taxTot * tv / txval : 0) : tv * r / 100;
       h.qty += sign * l.qty; h.txval += sign * tv; if (inter) h.iamt += sign * t; else { h.camt += sign * t / 2; h.samt += sign * t / 2; }
@@ -298,7 +321,7 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     const nilA = ['INTRB2B', 'INTRAB2B', 'INTRB2C', 'INTRAB2C'].filter(k => nil[k]).map(k => ({ sply_ty: k, nil_amt: r2(nil[k]), expt_amt: 0, ngsup_amt: 0 })); if (nilA.length) j.nil = { inv: nilA };
     const hl = o => Object.values(o).filter(h => Math.abs(h.txval) >= 0.01).map((h, i) => ({ num: i + 1, ...Object.fromEntries(Object.entries(h).map(([k, x]) => [k, typeof x === 'number' ? (k === 'qty' ? Math.round(x * 1000) / 1000 : r2(x)) : x])) }));
     const hb = hl(hsn.b2b), hc = hl(hsn.b2c); if (hb.length || hc.length) j.hsn = { ...(hb.length ? { hsn_b2b: hb } : {}), ...(hc.length ? { hsn_b2c: hc } : {}) };
-    const miss = [...hb, ...hc].filter(h => !h.hsn_sc); if (miss.length) warns.push(`No HSN/SAC in Tally for: ${[...new Set(noHsn)].slice(0, 8).join(', ')}. Set the HSN/SAC on these stock items or sales ledgers (Alter → GST details) and fetch again.`);
+
     const docDet = [];
     for (const [n, label] of [[1, 'Invoices for outward supply'], [4, 'Debit Note'], [5, 'Credit Note']]) {
       const all = [...docs[n], ...cancelled[n]]; if (!all.length) continue;
@@ -308,5 +331,5 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     if (docDet.length) j.doc_issue = { doc_det: docDet };
   }
   if (!used) warns.push('No GST sales, credit notes or debit notes were found in Tally for this period.');
-  return { json: j, names, count: used, warns: [...new Set(warns)].slice(0, 30) };
+  return { json: j, names, issues, vmap, count: used, warns: [...new Set(warns)].slice(0, 30) };
 }
