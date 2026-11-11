@@ -79,7 +79,113 @@ export function checkJson(j, { gstin, fp, iff, noHsnCheck }) {
   if (!rows.some(r => r.recs)) warns.push('The file has no invoices. For a nil return, use “File Nil GSTR-1” on the portal instead of uploading a JSON.');
   if (!iff && !noHsnCheck && hsnTx !== null && Math.abs(hsnTx - invTx) > 1) warns.push(`HSN summary taxable value (₹${inr(hsnTx)}) does not match invoices and notes (₹${inr(invTx)}). Difference ₹${inr(hsnTx - invTx)}.`);
   if (!iff && invTx > 0 && hsnTx === null) warns.push('There is no HSN summary (Table 12). It is mandatory in GSTR-1.');
-  return { errs: [...new Set(errs)].slice(0, 25), warns: [...new Set(warns)].slice(0, 25), rows };
+  deepChecks(j, { gstin, fp, iff }, errs, warns);
+  return { errs: [...new Set(errs)].slice(0, 40), warns: [...new Set(warns)].slice(0, 40), rows };
+}
+
+// GSTIN check digit (the 15th character), as the portal validates it
+const GCH = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+export function gstinOk(g) {
+  if (!/^[0-9]{2}[A-Z0-9]{10}[0-9A-Z]Z[0-9A-Z]$/.test(g || '')) return false;
+  if (/^\d{4}[A-Z]{3}\d{5}[A-Z]{3}$/.test(g.slice(0, 15))) return true; // UIN / NRTP formats: skip check digit
+  let sum = 0;
+  for (let i = 0; i < 14; i++) { const v = GCH.indexOf(g[i]) * (i % 2 ? 2 : 1); sum += Math.floor(v / 36) + (v % 36); }
+  return GCH[(36 - (sum % 36)) % 36] === g[14];
+}
+const OK_RATES = new Set([0, 0.1, 0.25, 1, 1.5, 3, 5, 6, 7.5, 12, 18, 28, 40]);
+const UQCS = new Set('BAG BAL BDL BKL BOU BOX BTL BUN CAN CBM CCM CMS CTN DOZ DRM GGK GMS GRS GYD KGS KLR KME LTR MLT MTR MTS NOS OTH PAC PCS PRS QTL ROL SET SQF SQM SQY TBS TGM THD TON TUB UGS UNT YDS NA'.split(' '));
+// Line-by-line checks the GST portal applies when it processes an uploaded file
+function deepChecks(j, { gstin, fp, iff }, errs, warns) {
+  if (!j || typeof j !== 'object') return;
+  const own = (gstin || '').slice(0, 2), pEnd = new Date(+fp.slice(2), +fp.slice(0, 2), 0), today = new Date();
+  const validPos = p => /^(0[1-9]|[12][0-9]|3[0-8]|96|97)$/.test(String(p || ''));
+  const docNo = (no, where) => {
+    if (!no) { errs.push(`${where}: document number is blank.`); return; }
+    if (!/^[A-Za-z0-9\/-]{1,16}$/.test(no)) errs.push(`${where} ${no}: number can only have letters, digits, / and - (max 16 characters).`);
+    else if (/^[0\/-]+$/.test(no)) errs.push(`${where} ${no}: number cannot be only zeros, / or -.`);
+  };
+  const docDate = (dt, no, where) => {
+    if (!/^\d{2}-\d{2}-\d{4}$/.test(dt || '')) { errs.push(`${where} ${no}: date “${dt || ''}” is not in DD-MM-YYYY format.`); return; }
+    const d = new Date(+dt.slice(6), +dt.slice(3, 5) - 1, +dt.slice(0, 2));
+    if (isNaN(d) || d.getDate() !== +dt.slice(0, 2)) errs.push(`${where} ${no}: ${dt} is not a valid date.`);
+    else if (d > today) errs.push(`${where} ${no}: date ${dt} is in the future.`);
+  };
+  const taxCheck = (it, no, where, { inter, sez, wopay } = {}) => {
+    const rt = n(it.rt), tv = n(it.txval), ia = n(it.iamt), ca = n(it.camt), sa = n(it.samt);
+    if (!OK_RATES.has(rt)) errs.push(`${where} ${no}: GST rate ${it.rt}% is not a valid rate.`);
+    if (tv < 0) errs.push(`${where} ${no}: taxable value is negative.`);
+    if (wopay) { if (ia || ca || sa) errs.push(`${where} ${no}: supply without payment of tax (LUT) must have tax 0.`); return; }
+    if (inter && (ca || sa)) errs.push(`${where} ${no}: inter-state supply (place of supply ≠ your state) must have IGST, not CGST/SGST.`);
+    if (inter === false && !sez && ia) errs.push(`${where} ${no}: intra-state supply (place of supply = your state) must have CGST + SGST, not IGST.`);
+    if (Math.abs(ca - sa) > 0.01) errs.push(`${where} ${no}: CGST (${inr(ca)}) and SGST (${inr(sa)}) must be equal.`);
+    const exp = tv * rt / 100, got = ia + ca + sa;
+    if (tv && Math.abs(got - exp) > Math.max(1, exp * 0.01)) warns.push(`${where} ${no}: tax ₹${inr(got)} differs from ${rt}% of ₹${inr(tv)} (₹${inr(exp)}).`);
+  };
+  const itl = x => (x.itms || []).map(i => i.itm_det || i);
+  // B2B / CDNR
+  for (const k of ['b2b', 'cdnr']) for (const p of j[k] || []) {
+    if (p.ctin && !gstinOk(p.ctin)) errs.push(`Buyer GSTIN ${p.ctin} is invalid (check digit does not match) — check the party's GSTIN in Tally.`);
+    for (const x of p.inv || p.nt || []) {
+      const no = x.inum || x.nt_num, where = k === 'b2b' ? 'B2B invoice' : 'Credit/debit note';
+      docNo(no, where); docDate(x.idt || x.nt_dt, no, where);
+      if (k === 'cdnr' && !['C', 'D'].includes(x.ntty)) errs.push(`${where} ${no}: note type must be C or D.`);
+      if (!validPos(x.pos)) errs.push(`${where} ${no}: place of supply “${x.pos || ''}” is missing or invalid.`);
+      if (!(n(x.val) > 0)) errs.push(`${where} ${no}: invoice value must be more than 0.`);
+      const sez = /^SEW/.test(x.inv_typ || ''), inter = sez ? true : x.pos ? x.pos !== own : undefined;
+      if (x.inv_typ && !['R', 'SEWP', 'SEWOP', 'DE', 'CBW'].includes(x.inv_typ)) errs.push(`${where} ${no}: invoice type ${x.inv_typ} is not valid.`);
+      for (const it of itl(x)) taxCheck(it, no, where, { inter, sez, wopay: x.inv_typ === 'SEWOP' });
+      const tot = itl(x).reduce((s2, it) => s2 + n(it.txval), 0);
+      if (tot - n(x.val) > 1) errs.push(`${where} ${no}: taxable value (₹${inr(tot)}) is more than the invoice value (₹${inr(x.val)}).`);
+    }
+  }
+  // B2CL
+  for (const p of j.b2cl || []) for (const x of p.inv || []) {
+    docNo(x.inum, 'B2C large invoice'); docDate(x.idt, x.inum, 'B2C large invoice');
+    if (p.pos === own) errs.push(`B2C large invoice ${x.inum}: place of supply is your own state — B2C large is only for inter-state invoices. It belongs in B2C (others).`);
+    if (n(x.val) <= 100000) errs.push(`B2C large invoice ${x.inum}: value ₹${inr(x.val)} is not above ₹1,00,000 — it belongs in B2C (others).`);
+    for (const it of itl(x)) taxCheck(it, x.inum, 'B2C large invoice', { inter: true });
+  }
+  // Exports
+  for (const p of j.exp || []) {
+    if (!['WPAY', 'WOPAY'].includes(p.exp_typ)) errs.push(`Exports: type must be WPAY or WOPAY (found ${p.exp_typ}).`);
+    for (const x of p.inv || []) {
+      docNo(x.inum, 'Export invoice'); docDate(x.idt, x.inum, 'Export invoice');
+      if (x.sbpcode && !/^[A-Za-z0-9]{6}$/.test(x.sbpcode)) errs.push(`Export invoice ${x.inum}: port code ${x.sbpcode} must be 6 characters.`);
+      if (x.sbnum && !/^\d{3,7}$/.test(String(x.sbnum))) errs.push(`Export invoice ${x.inum}: shipping bill number must be 3–7 digits.`);
+      for (const it of itl(x)) taxCheck(it, x.inum, 'Export invoice', { inter: true, wopay: p.exp_typ === 'WOPAY' });
+    }
+  }
+  // B2CS
+  for (const x of j.b2cs || []) {
+    const where = `B2C (others) ${x.pos}-${x.rt}%`;
+    if (!validPos(x.pos)) errs.push(`${where}: place of supply is missing or invalid.`);
+    if (x.sply_ty === 'INTRA' && x.pos !== own) errs.push(`${where}: marked intra-state but place of supply is not your state.`);
+    if (x.sply_ty === 'INTER' && x.pos === own) errs.push(`${where}: marked inter-state but place of supply is your own state.`);
+    taxCheck(x, '', where, { inter: x.sply_ty === 'INTER' });
+  }
+  // CDNUR
+  for (const x of j.cdnur || []) {
+    docNo(x.nt_num, 'Unregistered credit/debit note'); docDate(x.nt_dt, x.nt_num, 'Unregistered credit/debit note');
+    if (!['B2CL', 'EXPWP', 'EXPWOP'].includes(x.typ)) errs.push(`Unregistered note ${x.nt_num}: type must be B2CL, EXPWP or EXPWOP.`);
+    for (const it of itl(x)) taxCheck(it, x.nt_num, 'Unregistered note', { inter: true, wopay: x.typ === 'EXPWOP' });
+  }
+  // HSN
+  const hsn = j.hsn ? [...(j.hsn.data || []), ...(j.hsn.hsn_b2b || []), ...(j.hsn.hsn_b2c || [])] : [];
+  for (const h of hsn) {
+    const c = String(h.hsn_sc || '');
+    if (c && !/^\d{4}$|^\d{6}$|^\d{8}$/.test(c)) errs.push(`HSN ${c}: must be 4, 6 or 8 digits.`);
+    if (h.uqc && !UQCS.has(h.uqc)) errs.push(`HSN ${c}: unit “${h.uqc}” is not a valid UQC.`);
+    if (/^99/.test(c) && h.uqc && h.uqc !== 'NA') warns.push(`SAC ${c}: services should have unit NA and quantity 0.`);
+    if (h.rt !== undefined && !OK_RATES.has(n(h.rt))) errs.push(`HSN ${c}: rate ${h.rt}% is not valid.`);
+  }
+  if (hsn.length && hsn.some(h => /^\d{4}$/.test(String(h.hsn_sc)))) warns.push('Some HSN codes have 4 digits. If the client’s turnover was above ₹5 crore last year, 6 digits are mandatory.');
+  // Documents issued
+  for (const d of j.doc_issue?.doc_det || []) for (const x of d.docs || []) {
+    if (n(x.totnum) !== n(x.cancel) + n(x.net_issue)) errs.push(`Documents issued (${d.doc_typ || d.doc_num}): total ${x.totnum} ≠ cancelled ${x.cancel} + net issued ${x.net_issue}.`);
+    if (!x.from || !x.to) errs.push(`Documents issued (${d.doc_typ || d.doc_num}): “from” and “to” serial numbers are required.`);
+  }
+  // Nil
+  for (const x of j.nil?.inv || []) if (!['INTRB2B', 'INTRAB2B', 'INTRB2C', 'INTRAB2C'].includes(x.sply_ty)) errs.push(`Nil rated: supply type ${x.sply_ty} is not valid.`);
 }
 export const fpLabel = fp => { const s = String(fp); return /^\d{6}$/.test(s) ? `${MONTHS[+s.slice(0, 2) - 1] || s.slice(0, 2)} ${s.slice(2)}` : s; };
 const inr = v => (Math.round(v * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -228,6 +334,7 @@ export function initGstr1(ctx) {
           <li>Waits for <i>Processed</i> (stops and tells you if it is <i>Processed with error</i>).</li>
           <li>Prepare online → <b>Generate summary</b>, then stops. You check the summary and file with DSC or EVC yourself.</li></ol>
         <p class="muted tiny">A bar at the bottom of the portal shows what the autopilot is doing, with a Stop button. If a step can't be found, it tells you which button to click and continues from the next page.</p></div>
+      ${s.preErr ? `${msgs(s.preErr.errs, s.preErr.warns)}<p class="small">Fix these in Tally (or the source file), then go back to <a href="#" data-act="g1Step" data-i="1">step 1</a>, fetch again and save the JSON.</p>` : ''}
       ${auto ? '' : `<div class="mt">${ctx.extCard(true)}<p class="muted tiny">The autopilot needs CA Desk Helper version 1.2. Without it, the button only opens the portal and copies the password.</p></div>`}
       <div class="btns mt">
         <button class="primary" data-act="g1Portal" ${p.jsonDoc ? '' : 'disabled title="Save the JSON in step 1 first"'}>Upload JSON to GST portal</button>
@@ -325,6 +432,11 @@ export function initGstr1(ctx) {
     const s = g();
     if ((ctx.extVer() || '') < '1.2.0') return portalLogin(s.cid, s.gstin);
     const [j, cred] = [await savedJson(), await ctx.gstCred(s.cid, s.gstin)];
+    let parsed; try { parsed = JSON.parse(j.text); } catch { throw new Error('The saved JSON cannot be read. Go to step 1 and fetch or browse it again.'); }
+    const chk = checkJson(parsed, { gstin: s.gstin, fp: s.fp, iff: s.iff, noHsnCheck: !!s.b2bFrom });
+    if (chk.errs.length) { s.preErr = chk; draw(); throw new Error(`${chk.errs.length} error${chk.errs.length === 1 ? '' : 's'} in the JSON — not uploaded. Fix them and save the JSON again.`); }
+    if (chk.warns.length && !confirm(`Before uploading, please check:\n\n• ${chk.warns.slice(0, 8).join('\n• ')}\n\nUpload to the GST portal anyway?`)) return;
+    s.preErr = null;
     if (!cred) throw new Error('No GST login is saved for this GSTIN. Add it in the client → Portal logins, then try again.');
     const y = +s.fp.slice(2), m = +s.fp.slice(0, 2), fy = m >= 4 ? `${y}-${String((y + 1) % 100).padStart(2, '0')}` : `${y - 1}-${String(y % 100).padStart(2, '0')}`;
     const quarter = m >= 4 ? Math.ceil((m - 3) / 3) : 4;
