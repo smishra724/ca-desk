@@ -152,7 +152,7 @@ export function gstr1FromXml(texts, { gstin, fp, iff = false, quarterly = false,
 
 function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
   const own = gstin.slice(0, 2), warns = [], seen = new Set();
-  const b2b = {}, b2cl = {}, b2cs = {}, cdnr = {}, cdnur = [], nil = {}, hsn = { b2b: {}, b2c: {} }, docs = { 1: [], 4: [], 5: [] }, cancelled = { 1: [], 4: [], 5: [] };
+  const names = {}, b2b = {}, b2cl = {}, b2cs = {}, cdnr = {}, cdnur = [], nil = {}, hsn = { b2b: {}, b2c: {} }, docs = { 1: [], 4: [], 5: [] }, cancelled = { 1: [], 4: [], 5: [] };
   let used = 0;
   const dmy = s => `${s.slice(6, 8)}-${s.slice(4, 6)}-${s.slice(0, 4)}`;
   for (const v of vchs) {
@@ -224,6 +224,7 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     if (kind === 'S' && zeroRated) { // nil / exempt
       const t = (ctin ? 'B2B' : 'B2C'), k = `${inter ? 'INTR' : 'INTRA'}${t}`; nil[k] = (nil[k] || 0) + txval; continue;
     }
+    if (ctin && party) names[ctin] = party;
     const inIff = ctin && b2bFrom && dt < b2bFrom; // already reported in IFF
     if (kind === 'S') {
       if (inIff) continue;
@@ -258,5 +259,5 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
     if (docDet.length) j.doc_issue = { doc_det: docDet };
   }
   if (!used) warns.push('No GST sales, credit notes or debit notes were found in Tally for this period.');
-  return { json: j, count: used, warns: [...new Set(warns)].slice(0, 30) };
+  return { json: j, names, count: used, warns: [...new Set(warns)].slice(0, 30) };
 }

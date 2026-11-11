@@ -1875,7 +1875,7 @@ const PAY = initPayments({ S, A, C, F, esc, toast, modal, closeModal, guard, ren
   fs: { doc, getDocs, setDoc, collection } });
 const TF = initTaskFiles({ S, A, C, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, db, saveFile, saveBlob, T, WA_ICON, MAIL_ICON, busy,
   fs: { doc, getDocs, deleteDoc, collection, query, where } });
-const G1 = initGstr1({ extCard, extVer, EXT_VER, S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, todayISO, db, saveFile, saveBlob, T, busy, extractText, dispName, isoLocalD,
+const G1 = initGstr1({ STATE_CODES, extCard, extVer, EXT_VER, S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, todayISO, db, saveFile, saveBlob, T, busy, extractText, dispName, isoLocalD,
   portalLogin: gstLogin, fs: { doc, setDoc, getDocs, collection, serverTimestamp } });
 const DSC = initDsc({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, todayISO, db, saveBlob, WA_ICON, MAIL_ICON,
   fs: { doc, getDocs, setDoc, deleteDoc, collection } });

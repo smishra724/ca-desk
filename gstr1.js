@@ -129,12 +129,68 @@ export function initGstr1(ctx) {
       <div class="g1-body">${[s1, s2, s3][s.step - 1](s, p)}</div></div>`);
   }
 
-  function sumTable(sum) {
+  // Line-level breakup of each GSTR-1 table, from the JSON
+  const NTTY = { C: 'Credit note', D: 'Debit note' };
+  const SPLY = { INTRB2B: 'Inter-state to registered', INTRAB2B: 'Intra-state to registered', INTRB2C: 'Inter-state to unregistered', INTRAB2C: 'Intra-state to unregistered' };
+  const stN = c => c ? `${c}-${ctx.STATE_CODES?.[c] || ''}`.replace(/-$/, '') : '';
+  const TAX = ['Taxable', 'IGST', 'CGST', 'SGST', 'Cess'];
+  const tx = d => [d.txval, d.iamt, d.camt, d.samt, d.csamt].map(v => +v || 0);
+  function breakup(k, j, names = {}) {
+    const v = j?.[k]; if (!v) return null;
+    const pn = c => names[c] || '';
+    const items = x => (x.itms || []).map(i => i.itm_det || i);
+    if (['b2b', 'b2ba'].includes(k)) return { cols: ['Buyer GSTIN', 'Party', 'Invoice no.', 'Date', 'Invoice value', 'POS', 'Rate %', ...TAX],
+      rows: v.flatMap(p => (p.inv || []).flatMap(x => items(x).map(d => [p.ctin, pn(p.ctin), x.inum, x.idt, +x.val, stN(x.pos), d.rt, ...tx(d)]))) };
+    if (['cdnr', 'cdnra'].includes(k)) return { cols: ['Buyer GSTIN', 'Party', 'Type', 'Note no.', 'Date', 'Note value', 'POS', 'Rate %', ...TAX],
+      rows: v.flatMap(p => (p.nt || []).flatMap(x => items(x).map(d => [p.ctin, pn(p.ctin), NTTY[x.ntty] || x.ntty, x.nt_num, x.nt_dt, +x.val, stN(x.pos), d.rt, ...tx(d)]))) };
+    if (['b2cl', 'b2cla'].includes(k)) return { cols: ['POS', 'Invoice no.', 'Date', 'Invoice value', 'Rate %', ...TAX],
+      rows: v.flatMap(p => (p.inv || []).flatMap(x => items(x).map(d => [stN(p.pos), x.inum, x.idt, +x.val, d.rt, ...tx(d)]))) };
+    if (['exp', 'expa'].includes(k)) return { cols: ['Type', 'Invoice no.', 'Date', 'Invoice value', 'Port', 'Shipping bill', 'Rate %', ...TAX],
+      rows: v.flatMap(p => (p.inv || []).flatMap(x => items(x).map(d => [p.exp_typ, x.inum, x.idt, +x.val, x.sbpcode || '', x.sbnum || '', d.rt, ...tx(d)]))) };
+    if (['cdnur', 'cdnura'].includes(k)) return { cols: ['Type', 'Note no.', 'Date', 'Note value', 'Against', 'POS', 'Rate %', ...TAX],
+      rows: v.flatMap(x => items(x).map(d => [NTTY[x.ntty] || x.ntty, x.nt_num, x.nt_dt, +x.val, x.typ, stN(x.pos), d.rt, ...tx(d)])) };
+    if (['b2cs', 'b2csa'].includes(k)) return { cols: ['Supply', 'POS', 'Rate %', ...TAX],
+      rows: v.flatMap(x => (x.itms ? items(x) : [x]).map(d => [x.sply_ty === 'INTER' ? 'Inter-state' : 'Intra-state', stN(x.pos), d.rt ?? x.rt, ...tx(d)])) };
+    if (['at', 'ata', 'txpd', 'txpda'].includes(k)) return { cols: ['POS', 'Supply', 'Rate %', 'Advance', 'IGST', 'CGST', 'SGST', 'Cess'],
+      rows: v.flatMap(x => items(x).map(d => [stN(x.pos), x.sply_ty === 'INTER' ? 'Inter-state' : 'Intra-state', d.rt, +(d.ad_amt ?? d.adamt) || 0, ...tx(d).slice(1)])) };
+    if (k === 'nil') return { cols: ['Supply', 'Nil rated', 'Exempted', 'Non-GST'], rows: (v.inv || []).map(x => [SPLY[x.sply_ty] || x.sply_ty, +x.nil_amt || 0, +x.expt_amt || 0, +x.ngsup_amt || 0]) };
+    if (k === 'hsn') return { cols: ['Section', 'HSN/SAC', 'Description', 'UQC', 'Qty', 'Rate %', ...TAX],
+      rows: [['', v.data], ['B2B', v.hsn_b2b], ['B2C', v.hsn_b2c]].flatMap(([sec, l]) => (l || []).map(x => [sec, x.hsn_sc, x.desc || '', x.uqc || '', +x.qty || 0, x.rt ?? '', ...tx(x)])) };
+    if (k === 'doc_issue') return { cols: ['Document', 'From', 'To', 'Total', 'Cancelled', 'Net issued'],
+      rows: (v.doc_det || []).flatMap(dd => (dd.docs || []).map(x => [dd.doc_typ || `Type ${dd.doc_num}`, x.from, x.to, +x.totnum || 0, +x.cancel || 0, +x.net_issue || 0])) };
+    return null;
+  }
+  const NUMCOL = c => /value|Taxable|IGST|CGST|SGST|Cess|Advance|Nil|Exempt|Non-GST|Qty|Rate|Total|Cancelled|Net/.test(c);
+  function brkTable(b) {
+    const tot = b.cols.map((c, i) => NUMCOL(c) && !/Rate|value/.test(c) ? b.rows.reduce((s, r) => s + (+r[i] || 0), 0) : null);
+    return `<div class="g1-brk"><table><thead><tr>${b.cols.map(c => `<th class="${NUMCOL(c) ? 'r' : ''}">${c}</th>`).join('')}</tr></thead><tbody>
+      ${b.rows.map(r => `<tr>${r.map((x, i) => `<td class="${NUMCOL(b.cols[i]) ? 'r' : ''} ${/GSTIN/.test(b.cols[i]) ? 'mono' : ''}">${typeof x === 'number' ? (/Rate|Qty|Total|Cancelled|Net issued/.test(b.cols[i]) ? x : inr(x)) : esc(x ?? '')}</td>`).join('')}</tr>`).join('')}</tbody>
+      ${b.rows.length > 1 && tot.some(t => t !== null) ? `<tfoot><tr>${tot.map((t, i) => `<td class="${i ? 'r' : ''}">${i === 0 ? '<b>Total</b>' : t === null ? '' : `<b>${/Total|Cancelled|Net issued|Qty/.test(b.cols[i]) ? Math.round(t * 1000) / 1000 : inr(t)}</b>`}</td>`).join('')}</tr></tfoot>` : ''}</table></div>`;
+  }
+  function sumTable(sum, j) {
     const r = sum.rows.filter(x => x.recs);
     if (!r.length) return '';
-    return `<table class="tbl g1-sum"><thead><tr><th>Table</th><th class="r">Records</th><th class="r">Taxable value</th><th class="r">IGST</th><th class="r">CGST</th><th class="r">SGST</th><th class="r">Cess</th></tr></thead><tbody>
-      ${r.map(x => `<tr><td>${esc(x.label)}</td><td class="r">${x.recs}</td><td class="r">${x.k === 'doc_issue' ? '' : inr(x.txval)}</td><td class="r">${x.k === 'doc_issue' || x.k === 'nil' ? '' : inr(x.iamt)}</td><td class="r">${x.k === 'doc_issue' || x.k === 'nil' ? '' : inr(x.camt)}</td><td class="r">${x.k === 'doc_issue' || x.k === 'nil' ? '' : inr(x.samt)}</td><td class="r">${x.k === 'doc_issue' || x.k === 'nil' ? '' : inr(x.csamt)}</td></tr>`).join('')}</tbody></table>`;
+    const open = g()?.open || new Set(), canBrk = !!j?.data;
+    const cell = (x, f) => x.k === 'doc_issue' || (x.k === 'nil' && f !== 'txval') ? '' : inr(x[f]);
+    return `${canBrk ? `<div class="row-between g1-sumbar"><span class="muted small">Click a table to see its invoices and amounts.</span><span class="btns"><button class="sm" data-act="g1BrkAll">${open.size ? 'Collapse all' : 'Expand all'}</button><button class="sm" data-act="g1BrkXl">Download breakup (Excel)</button></span></div>` : ''}
+    <table class="tbl g1-sum"><thead><tr><th>Table</th><th class="r">Records</th><th class="r">Taxable value</th><th class="r">IGST</th><th class="r">CGST</th><th class="r">SGST</th><th class="r">Cess</th></tr></thead><tbody>
+      ${r.map(x => { const b = canBrk && open.has(x.k) ? breakup(x.k, j.data, j.names) : null;
+        return `<tr class="${canBrk ? 'g1-click' : ''} ${b ? 'on' : ''}" ${canBrk ? `data-act="g1Brk" data-k="${x.k}" title="Show breakup"` : ''}><td>${canBrk ? `<span class="g1-car">${b ? '▾' : '▸'}</span> ` : ''}${esc(x.label)}</td><td class="r">${x.recs}</td><td class="r">${x.k === 'doc_issue' ? '' : inr(x.txval)}</td><td class="r">${cell(x, 'iamt')}</td><td class="r">${cell(x, 'camt')}</td><td class="r">${cell(x, 'samt')}</td><td class="r">${cell(x, 'csamt')}</td></tr>
+        ${b ? `<tr class="g1-det"><td colspan="7">${b.rows.length ? brkTable(b) : '<p class="muted small">No lines.</p>'}</td></tr>` : ''}`; }).join('')}</tbody></table>`;
   }
+  A.g1Brk = ({ k }) => { const s = g(); s.open ||= new Set(); s.open.has(k) ? s.open.delete(k) : s.open.add(k); draw(); };
+  A.g1BrkAll = () => { const s = g(); s.open = s.open?.size ? new Set() : new Set(s.json.sum.rows.filter(x => x.recs).map(x => x.k)); draw(); };
+  A.g1BrkXl = () => {
+    const s = g(), j = s.json, wb = XLSX.utils.book_new();
+    const sumAoa = [['Table', 'Records', 'Taxable value', 'IGST', 'CGST', 'SGST', 'Cess'], ...j.sum.rows.filter(x => x.recs).map(x => [x.label, x.recs, x.txval, x.iamt, x.camt, x.samt, x.csamt])];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumAoa), 'Summary');
+    for (const x of j.sum.rows.filter(x => x.recs)) {
+      const b = breakup(x.k, j.data, j.names); if (!b) continue;
+      const ws = XLSX.utils.aoa_to_sheet([b.cols, ...b.rows]); ws['!cols'] = b.cols.map(c => ({ wch: Math.max(10, c.length + 2) }));
+      XLSX.utils.book_append_sheet(wb, ws, x.k.toUpperCase().slice(0, 31));
+    }
+    XLSX.writeFile(wb, `${ret().replace('-', '')}_${s.gstin}_${s.fp}_breakup.xlsx`);
+  };
   const msgs = (errs, warns) => `${errs.length ? `<div class="g1-msg err"><b>${errs.length} error${errs.length === 1 ? '' : 's'} — the portal will reject this file</b><ul>${errs.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>` : ''}
     ${warns.length ? `<div class="g1-msg warn"><b>Check before uploading</b><ul>${warns.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>` : ''}`;
 
@@ -157,7 +213,7 @@ export function initGstr1(ctx) {
         ${j?.tally ? `<p class="small mt"><b>${j.tally.count}</b> voucher${j.tally.count === 1 ? '' : 's'} read from <b>${esc(j.tally.company)}</b>.</p>` : ''}`
       : `<p class="small">Choose the ${ret()} JSON generated by the GST Offline Tool or your accounting software. It is checked against this GSTIN and period before you upload it on the portal.</p>
       <label class="g1-drop">${j ? `<b>${esc(j.file.name)}</b><span class="muted tiny">Choose another file</span>` : `<b>Browse JSON file</b><span class="muted tiny">.json — up to 10 MB</span>`}<input type="file" accept=".json,application/json" data-change="g1Json"></label>`}
-      ${j && (src === 'file') === !j.tally ? `${j.sum.errs.length || j.sum.warns.length ? msgs(j.sum.errs, j.sum.warns) : '<div class="g1-msg ok"><b>No errors found.</b> GSTIN and period match.</div>'}${sumTable(j.sum)}
+      ${j && (src === 'file') === !j.tally ? `${j.sum.errs.length || j.sum.warns.length ? msgs(j.sum.errs, j.sum.warns) : '<div class="g1-msg ok"><b>No errors found.</b> GSTIN and period match.</div>'}${sumTable(j.sum, j)}
         <div class="btns mt"><button class="primary" data-act="g1SaveJson" ${j.sum.errs.length ? 'disabled' : ''}>Save JSON and continue</button><button data-act="g1JsonDl">Download JSON</button>${j.sum.errs.length ? `<span class="muted small">${j.tally ? 'Correct these in Tally and fetch again.' : 'Fix the errors in the source file and browse it again.'}</span>` : ''}</div>`
       : p.jsonDoc ? `<div class="g1-msg ok">Saved: <b>${esc(p.jsonName)}</b>${p.savedAt ? ` on ${isoToDisp(p.savedAt.slice(0, 10))}` : ''}. <a href="#" data-act="g1Step" data-i="2">Go to step 2</a></div>${p.sum ? sumTable({ rows: p.sum }) : ''}` : ''}`;
   }
@@ -221,7 +277,7 @@ export function initGstr1(ctx) {
     const file = new File([JSON.stringify(r.json)], `${ret().replace('-', '')}_${s.gstin}_${s.fp}_Tally.json`, { type: 'application/json' });
     const sum = checkJson(r.json, { gstin: s.gstin, fp: s.fp, iff: s.iff, noHsnCheck: !!s.b2bFrom });
     sum.warns = [...r.warns, ...sum.warns];
-    s.json = { file, sum, tally: { count: r.count, company } }; draw();
+    s.json = { file, data: r.json, names: r.names, sum, tally: { count: r.count, company } }; draw();
   });
   C.g1TallyXml = el => {
     const files = [...el.files]; el.value = ''; if (!files.length) return;
@@ -232,7 +288,7 @@ export function initGstr1(ctx) {
       const file = new File([JSON.stringify(r.json)], `${ret().replace('-', '')}_${s.gstin}_${s.fp}_Tally.json`, { type: 'application/json' });
       const sum = checkJson(r.json, { gstin: s.gstin, fp: s.fp, iff: s.iff, noHsnCheck: !!s.b2bFrom });
       sum.warns = [...r.warns, ...sum.warns];
-      s.json = { file, sum, tally: { count: r.count, company: files.map(f => f.name).join(', ') } }; draw();
+      s.json = { file, data: r.json, names: r.names, sum, tally: { count: r.count, company: files.map(f => f.name).join(', ') } }; draw();
     });
   };
   A.g1JsonDl = () => { const j = g().json; if (j) saveBlob(j.file, j.file.name); };
@@ -242,7 +298,7 @@ export function initGstr1(ctx) {
     guard(async () => {
       if (f.size > 10 * 1024 * 1024) throw new Error('The JSON is over 10 MB. Split it or upload it directly on the portal.');
       let j; try { j = JSON.parse(await f.text()); } catch { j = null; }
-      const s = g(); s.json = { file: f, sum: checkJson(j, { gstin: s.gstin, fp: s.fp, iff: s.iff }) }; draw();
+      const s = g(); s.json = { file: f, data: j, names: {}, sum: checkJson(j, { gstin: s.gstin, fp: s.fp, iff: s.iff }) }; draw();
     });
   };
   A.g1SaveJson = () => guard(async () => {

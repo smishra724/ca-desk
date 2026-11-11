@@ -617,3 +617,16 @@ main{padding-bottom:72px}
 .ext-steps{margin:10px 0 0;padding-left:20px;line-height:1.7}
 a.btn{display:inline-flex;align-items:center;padding:7px 14px;border-radius:8px;border:1px solid #C8D0DC;font-weight:600;text-decoration:none;color:#15233F;background:#fff}
 a.btn.primary{background:#0B7A5C;border-color:#0B7A5C;color:#fff}
+.g1-sumbar{margin:12px 0 6px}
+.g1-click{cursor:pointer}
+.g1-click:hover td{background:#F1F4F9}
+.g1-click.on td{background:#EAF0F8;font-weight:600}
+.g1-car{display:inline-block;width:12px;color:#5B6577}
+.g1-det>td{padding:0 0 10px 18px!important;background:#FAFBFD}
+.g1-brk{max-height:320px;overflow:auto;border:1px solid #E3E7EE;border-radius:8px;background:#fff}
+.g1-brk table{width:100%;border-collapse:collapse;font-size:12.5px}
+.g1-brk th{position:sticky;top:0;background:#F3F5F9;font-weight:600;text-align:left;padding:6px 8px;white-space:nowrap}
+.g1-brk td{padding:5px 8px;border-top:1px solid #EEF1F5;white-space:nowrap}
+.g1-brk .r{text-align:right;font-variant-numeric:tabular-nums}
+.g1-brk tfoot td{position:sticky;bottom:0;background:#F3F5F9;border-top:1px solid #D8DEE7}
+.modal-box:has(.g1){max-width:1080px}
