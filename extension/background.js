@@ -12,6 +12,22 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       .catch(e => reply({ ok: false, error: e.message }));
     return true;
   }
+  if (msg.type === 'CAPM_FREQ') {
+    const queue = msg.queue.filter(x => /^[0-9A-Z]{15}$/.test(x.gstin || '')).slice(0, 200);
+    chrome.storage.session.set({ freqjob: { queue, i: 0, t: Date.now() } }).then(() => chrome.tabs.create({ url: 'https://services.gst.gov.in/services/searchtp' }));
+    return;
+  }
+  if (msg.type === 'CAPM_FREQ_GET') { chrome.storage.session.get('freqjob').then(r => reply(r.freqjob && Date.now() - r.freqjob.t < 4 * 3600e3 ? r.freqjob : null)); return true; }
+  if (msg.type === 'CAPM_FREQ_NEXT') { chrome.storage.session.get('freqjob').then(r => r.freqjob && chrome.storage.session.set({ freqjob: { ...r.freqjob, i: r.freqjob.i + 1 } })).then(() => reply(true)); return true; }
+  if (msg.type === 'CAPM_FREQ_CLEAR') { chrome.storage.session.remove('freqjob').then(() => reply(true)); return true; }
+  if (msg.type === 'CAPM_FREQ_RESULT' && sender.url && /services\.gst\.gov\.in\//.test(sender.url)) {
+    const r = { ...msg.result, id: `${msg.result.cid}|${msg.result.gstin}` };
+    chrome.storage.local.get('freqresults').then(x => chrome.storage.local.set({ freqresults: { ...(x.freqresults || {}), [r.id]: r } }))
+      .then(() => chrome.tabs.query({ url: 'https://smishra724.github.io/*' })).then(tabs => { for (const t of tabs) chrome.tabs.sendMessage(t.id, { type: 'CAPM_FREQ_RESULT', result: r }).catch(() => {}); reply(true); });
+    return true;
+  }
+  if (msg.type === 'CAPM_FREQ_PENDING') { chrome.storage.local.get('freqresults').then(r => reply(Object.values(r.freqresults || {}))); return true; }
+  if (msg.type === 'CAPM_FREQ_ACK') { chrome.storage.local.get('freqresults').then(r => { const x = r.freqresults || {}; delete x[msg.id]; return chrome.storage.local.set({ freqresults: x }); }).then(() => reply(true)); return true; }
   if (msg.type === 'CAPM_G1') { // start the GSTR-1 autopilot: keep the job for 2 hours, open the GST login
     let host; try { host = new URL(msg.url).hostname; } catch { return; }
     if (!/\.gst\.gov\.in$/.test(host)) return;

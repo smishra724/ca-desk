@@ -498,7 +498,7 @@ function vDue() {
   };
   const hcell = (k, label) => { const on = dc.f[k] || dc.sort?.k === k; return `<th><button class="hbtn ${on ? 'on' : ''}" data-act="dueHead" data-k="${k}">${label}${dc.sort?.k === k ? (dc.sort.dir === 'desc' ? ' ↓' : ' ↑') : ''}${dc.f[k] ? ' ⏷' : ' ▾'}</button></th>`; };
   const dragOk = g => isAdmin() && /^(GSTR-1|IFF)$/.test(g.name);
-  const panel = g => { const rs = colRows(g.rs); return `<div class="cpanel">${isAdmin() ? `<div class="cp-bar">${dragOk(g) ? `<span class="muted tiny">Drag a client by ⠿ to switch between Monthly and QRMP (IFF).</span>` : ''}<button class="sm" data-act="remindAll" data-k="${esc(g.name)}">${WA_ICON} Remind all ${g.clients} pending client${g.clients === 1 ? '' : 's'}</button></div>` : ''}
+  const panel = g => { const rs = colRows(g.rs); return `<div class="cpanel">${isAdmin() ? `<div class="cp-bar">${dragOk(g) ? `<span class="muted tiny">Drag a client by ⠿ to switch between Monthly and QRMP (IFF), or <a href="#" data-act="freqCheck" data-group="${esc(g.name)}">check filing frequency on the portal</a>.</span>` : ''}<button class="sm" data-act="remindAll" data-k="${esc(g.name)}">${WA_ICON} Remind all ${g.clients} pending client${g.clients === 1 ? '' : 's'}</button></div>` : ''}
     ${rs.length < g.rs.length ? `<div class="fchip">Showing ${rs.length} of ${g.rs.length} — filtered by column <a href="#" data-act="dueColClear">✕ clear filters</a></div>` : ''}
     <table class="tbl"><thead><tr>${hcell('client', 'Client')}${hcell('period', 'Period')}${hcell('due', 'Due')}${isAdmin() ? hcell('status', 'Task status') : ''}<th></th></tr></thead><tbody>
     ${rs.map(r => `<tr class="${r.overdue ? 'od' : ''}" ${dragOk(g) && r.gstin ? `draggable="true" data-drag-cid="${r.c.id}" data-drag-gstin="${esc(r.gstin)}" data-drag-from="${esc(g.name)}"` : ''}>
@@ -610,6 +610,7 @@ function vClients() {
     ${isAdmin() && nSel ? `<div class="selbar"><b>${nSel} selected</b>
       ${cf ? `<button class="sm primary" data-act="moveSel" data-to="itr">Move to Individual – ITR only</button><button class="sm" data-act="moveSel" data-to="business">Move to Business clients</button>`
         : `<button class="sm primary" data-act="moveSel" data-to="${tab === 'itr' ? 'business' : 'itr'}">Move to ${tab === 'itr' ? 'Business clients' : 'Individual – ITR only'}</button>`}
+      ${tab !== 'itr' ? '<button class="sm" data-act="freqCheck" data-sel="1">Check GST filing frequency</button>' : ''}
       <button class="sm danger" data-act="exBulk">Move to ex-clients</button>
       <button class="sm" data-act="selClear">Clear</button></div>` : ''}
     <table class="tbl"><thead>${head}</thead><tbody>
@@ -714,14 +715,14 @@ function tGst() {
   const creds = g => S.creds.filter(cr => cr.gstin === g || (!cr.gstin && cr.portal === 'gst' && regs.length === 1 && !S.creds.some(x => x.gstin)));
   return `
   <div class="row-between wrap"><h2>GST registrations</h2>
-    ${adm ? `<div class="btns"><button class="primary" data-act="editReg">+ Add GSTIN</button><button data-act="fromDoc" data-mode="update">Add from GST certificate</button></div>` : ''}</div>
+    ${adm ? `<div class="btns">${regs.some(r => r.gstin && r.status !== 'Cancelled') ? `<button data-act="freqCheck" data-cid="${S.cid}">Check filing frequency</button>` : ''}<button class="primary" data-act="editReg">+ Add GSTIN</button><button data-act="fromDoc" data-mode="update">Add from GST certificate</button></div>` : ''}</div>
   <p class="muted small">One entry per GSTIN (state / branch). Each gets its own GSTR-1, GSTR-3B and annual return in the compliance calendar, and its own portal login.</p>
   ${S.cid ? '' : '<p class="warn">Save the master data first, then add registrations.</p>'}
   <table class="tbl"><thead><tr><th>State</th><th>GSTIN</th><th>Trade name / address</th><th>Filing</th><th>Since</th><th>Status</th><th>Logins</th>${adm ? '<th></th>' : ''}</tr></thead><tbody>
   ${regs.map(r => `<tr><td><b>${esc(r.state || stateOf(r.gstin))}</b>${r.label ? `<div class="muted tiny">${esc(r.label)}</div>` : ''}</td>
     <td class="mono nowrap">${esc(r.gstin)}</td>
     <td>${esc(r.tradeName)}<div class="muted tiny">${esc(r.address)}</div></td>
-    <td>${esc(r.gstFreq || 'Monthly')}</td><td class="nowrap">${isoToDisp(r.regDate)}</td>
+    <td>${esc(r.gstFreq || 'Monthly')}${r.freqChecked ? `<div class="muted tiny" title="${esc((r.freqTable || []).map(x => `${x.fy} Q${x.q}: ${x.freq}`).join('\n'))}">✓ portal ${isoToDisp(r.freqChecked)}</div>` : adm && r.gstin && r.status !== 'Cancelled' ? `<div><a href="#" class="tiny" data-act="freqCheck" data-cid="${S.cid}" data-gstin="${esc(r.gstin)}">Check on portal</a></div>` : ''}</td><td class="nowrap">${isoToDisp(r.regDate)}</td>
     <td>${r.status === 'Cancelled' ? '<span class="tag red">Cancelled</span>' : '<span class="tag green">Active</span>'}</td>
     <td class="nowrap">${creds(r.gstin).map(cr => `<button class="sm pill" data-act="login" data-id="${cr.id}">${esc(portalByKey(cr.portal).short)} ↗</button>`).join(' ') || (adm ? `<button class="sm" data-act="editCred" data-gstin="${esc(r.gstin)}">+ Login</button>` : '—')}</td>
     ${adm ? `<td class="nowrap"><button class="sm" data-act="editReg" data-id="${r.id}">Edit</button> <button class="sm danger" data-act="delReg" data-id="${r.id}">Delete</button></td>` : ''}</tr>`).join('')
@@ -1080,7 +1081,7 @@ async function compSave(cp) {
 
 /* ---------- settings ---------- */
 // CA Desk Helper Chrome extension: download + install steps, shown in Settings and wherever a feature needs it
-const EXT_VER = '1.3.0';
+const EXT_VER = '1.4.0';
 const extVer = () => document.documentElement.dataset.capmVer || (document.documentElement.dataset.capmTally === '1' ? '1.1.0' : extOn() ? '1.0.0' : '');
 const extCard = (compact = false) => {
   const v = extVer(), ok = v && v >= EXT_VER;
@@ -1093,7 +1094,7 @@ const extCard = (compact = false) => {
   return `<div class="ext-card ${compact ? 'compact' : ''}">
     <div class="row-between wrap"><div><b>CA Desk Helper</b> — Chrome extension ${status}</div>
       ${ok && compact ? '' : `<a class="btn ${ok ? '' : 'primary'}" href="ca-desk-helper.zip" download="ca-desk-helper-${EXT_VER}.zip">Download extension (v${EXT_VER})</a>`}</div>
-    ${compact ? '' : `<p class="muted small">Fills the user ID and password on GST, Income Tax, TRACES, MCA, EPFO and ESIC portals when you click Login (you type the CAPTCHA/OTP), and lets CA Desk read from Tally on this computer, and runs the GSTR-1 autopilot: uploads the JSON and generates the summary, and after you file, saves the ARN and the filed PDF here. It only runs on CA Desk and those portals, keeps a login in memory for 5 minutes, and only reads from Tally — it never changes Tally data.</p>`}
+    ${compact ? '' : `<p class="muted small">Fills the user ID and password on GST, Income Tax, TRACES, MCA, EPFO and ESIC portals when you click Login (you type the CAPTCHA/OTP), and lets CA Desk read from Tally on this computer, and runs the GSTR-1 autopilot: uploads the JSON and generates the summary, and after you file, saves the ARN and the filed PDF here. It also checks each GSTIN's return filing frequency on the portal (you type the CAPTCHA). It only runs on CA Desk and those portals, keeps a login in memory for 5 minutes, and only reads from Tally — it never changes Tally data.</p>`}
     ${ok ? '' : steps}</div>`;
 };
 function vSettings() {
@@ -1189,6 +1190,18 @@ const A = {
   go: ({ v }) => { S.fab = false; if (v === 'due') { S.dueDay = ''; if (S.dueOpen?.has('*')) S.dueOpen = new Set(); } S.view = v; window.scrollTo(0, 0); S.importRows = v === 'import' ? S.importRows : null; render(); if (v === 'settings') loadStaff(); },
   open: ({ id, tab }) => guard(async () => { await openClient(id, tab || 'master'); render(); }),
   tab: ({ t }) => { S.tab = t; render(); },
+  freqCheck: (d) => {
+    let items = [];
+    const add = (c, onlyGstin) => regsOf(c).filter(r => r.gstin && r.status !== 'Cancelled' && (!onlyGstin || r.gstin === onlyGstin)).forEach(r => items.push({ cid: c.id, gstin: r.gstin, name: dispName(c) }));
+    if (d.sel) [...S.sel].forEach(id => { const c = S.clients.find(x => x.id === id); if (c) add(c); });
+    else if (d.group) { const seen = new Set(); dueRows({ back: 365, ahead: 90 }).filter(r => baseForm(r.form) === d.group && r.gstin).forEach(r => { const k = r.c.id + r.gstin; if (!seen.has(k)) { seen.add(k); items.push({ cid: r.c.id, gstin: r.gstin, name: dispName(r.c) }); } }); }
+    else { const c = S.clients.find(x => x.id === d.cid) || S.client; if (c) add({ ...c, id: d.cid || S.cid }, d.gstin); }
+    if (!items.length) return toast('No active GSTIN to check.');
+    if (!(extVer() >= '1.4.0')) return modal(`<h2>Check GST filing frequency</h2><p class="small">This needs the CA Desk Helper extension version 1.4. It opens the portal's Search Taxpayer page, fills each GSTIN, you type the CAPTCHA, and it reads Monthly / Quarterly and updates CA Desk.</p>${extCard(true)}<div class="btns mt"><button data-act="closeModal">Close</button></div>`);
+    if (items.length > 1 && !confirm(`Check the filing frequency of ${items.length} GSTINs on the GST portal?\n\nA portal tab opens. For each GSTIN you only type the CAPTCHA — the rest is automatic, and CA Desk is updated as each result comes in.`)) return;
+    window.postMessage({ type: 'CAPM_FREQ', queue: items }, location.origin);
+    toast(`GST portal opened — type the CAPTCHA for ${items.length === 1 ? items[0].gstin : `each of the ${items.length} GSTINs`}.`, 6000);
+  },
   dueRefresh: () => guard(async () => { busy(true, 'Refreshing…'); await loadClients(); await loadAllFilings(); await T.load(); autoTasks(); render(); }, 'Refreshed'),
   dueHead: ({ k }, el) => { const r = el.getBoundingClientRect(); S.dueMenu = S.dueMenu?.k === k ? null : { k, x: Math.min(r.left, innerWidth - 270), y: r.bottom + 4 }; render(); },
   dueMenuClose: () => { S.dueMenu = null; render(); },
@@ -1964,6 +1977,28 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal
 document.addEventListener('click', e => { if (S.fab && !e.target.closest('.fab')) { S.fab = false; render(); } });
 document.addEventListener('click', e => { if (S.dueMenu && !e.target.closest('.hmenu') && !e.target.closest('[data-act=dueHead]')) { S.dueMenu = null; render(); } });
 // Due dates: drag a GSTR-1 / IFF row onto Monthly or QRMP to change that GSTIN's GST filing
+// filing frequency read from the portal by the extension → update that GSTIN
+const freqSeen = new Set(), freqQueue = [];
+async function applyFreq(r) {
+  if (!r?.cid || !r.gstin || freqSeen.has(r.id + r.at)) return;
+  if (!S.profile || !S.clients?.length) { freqQueue.push(r); return; }
+  freqSeen.add(r.id + r.at);
+  const c = S.clients.find(x => x.id === r.cid); if (!c) { window.postMessage({ type: 'CAPM_FREQ_ACK', id: r.id }, location.origin); return; }
+  const regs = regsOf(c).map(x => ({ ...x })), reg = regs.find(x => x.gstin === r.gstin);
+  if (!reg) { window.postMessage({ type: 'CAPM_FREQ_ACK', id: r.id }, location.origin); return; }
+  const before = reg.gstFreq || 'Monthly';
+  const keep = /composition|not registered/i.test(before) && r.freq === 'QRMP'; // composition dealers file quarterly too — keep their setting
+  if (!keep) reg.gstFreq = r.freq;
+  reg.freqChecked = isoLocalD(new Date(r.at || Date.now())); reg.freqTable = r.table || [];
+  await guard(async () => {
+    await tagLegacyCreds(c.id, c);
+    await updateDoc(doc(db, 'clients', c.id), { ...regMirror(regs), updatedAt: serverTimestamp() });
+    window.postMessage({ type: 'CAPM_FREQ_ACK', id: r.id }, location.origin);
+    await loadClients(); if (S.cid === c.id) await openClient(c.id, S.tab); autoTasks(); render();
+  }, keep || before === reg.gstFreq ? `${dispName(c)} · ${r.gstin}: ${r.freq === 'QRMP' ? 'Quarterly (QRMP)' : 'Monthly'} — confirmed` : `${dispName(c)} · ${r.gstin}: changed ${before} → ${reg.gstFreq}`);
+}
+window.addEventListener('message', e => { if (e.source === window && e.data?.type === 'CAPM_FREQ_RESULT') applyFreq(e.data.result); });
+setInterval(() => { if (freqQueue.length && S.profile && S.clients?.length) applyFreq(freqQueue.shift()); }, 3000);
 let dragRow = null;
 document.addEventListener('dragstart', e => {
   const tr = e.target.closest?.('[data-drag-cid]'); if (!tr) return;

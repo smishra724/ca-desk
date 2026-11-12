@@ -12,6 +12,7 @@ window.addEventListener('message', e => {
     });
     return;
   }
+  if (d && d.type === 'CAPM_FREQ' && Array.isArray(d.queue)) { chrome.runtime.sendMessage({ type: 'CAPM_FREQ', queue: d.queue }); return; }
   if (d && d.type === 'CAPM_G1' && d.job && typeof d.url === 'string') { // GSTR-1 autopilot
     chrome.runtime.sendMessage({ type: 'CAPM_G1', url: d.url, username: d.username || '', password: d.password || '', job: d.job });
     return;
@@ -25,3 +26,9 @@ const pushResult = r => window.postMessage({ type: 'CAPM_G1_RESULT', result: r }
 chrome.runtime.onMessage.addListener(m => { if (m?.type === 'CAPM_G1_RESULT') pushResult(m.result); });
 window.addEventListener('message', e => { if (e.source === window && e.data?.type === 'CAPM_G1_ACK') chrome.runtime.sendMessage({ type: 'CAPM_G1_ACK', id: e.data.id }); });
 setTimeout(() => chrome.runtime.sendMessage({ type: 'CAPM_G1_PENDING' }, list => (list || []).forEach(pushResult)), 4000);
+
+// filing-frequency results → CA Desk page
+const pushFreq = r => window.postMessage({ type: 'CAPM_FREQ_RESULT', result: r }, location.origin);
+chrome.runtime.onMessage.addListener(m => { if (m?.type === 'CAPM_FREQ_RESULT') pushFreq(m.result); });
+window.addEventListener('message', e => { if (e.source === window && e.data?.type === 'CAPM_FREQ_ACK') chrome.runtime.sendMessage({ type: 'CAPM_FREQ_ACK', id: e.data.id }); });
+setTimeout(() => chrome.runtime.sendMessage({ type: 'CAPM_FREQ_PENDING' }, list => (list || []).forEach(pushFreq)), 4500);
