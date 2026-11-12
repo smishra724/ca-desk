@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CA Desk Helper",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "CA Desk helper: portal login autofill (you type CAPTCHA/OTP), Tally data on this computer, and the GSTR-1 autopilot: upload JSON, generate summary, and after you file, save the ARN and PDF to CA Desk, and checks GST return filing frequency (you type the CAPTCHA).",
   "permissions": [
     "downloads",

@@ -12,6 +12,7 @@ window.addEventListener('message', e => {
     });
     return;
   }
+  if (d && d.type === 'CAPM_RELOAD') { chrome.runtime.sendMessage({ type: 'CAPM_RELOAD' }); return; }
   if (d && d.type === 'CAPM_FREQ' && Array.isArray(d.queue)) { chrome.runtime.sendMessage({ type: 'CAPM_FREQ', queue: d.queue }); return; }
   if (d && d.type === 'CAPM_G1' && d.job && typeof d.url === 'string') { // GSTR-1 autopilot
     chrome.runtime.sendMessage({ type: 'CAPM_G1', url: d.url, username: d.username || '', password: d.password || '', job: d.job });

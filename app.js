@@ -8,6 +8,7 @@ import { initPayslips } from './payslips.js';
 import { initPayments, isPayKey } from './payments.js';
 import { initTaskFiles } from './taskfiles.js';
 import { initGstr1 } from './gstr1.js';
+import { updateExtension, newer, canUpdate, linkedFolder, permission } from './extupdate.js';
 import { initDsc } from './dsc.js';
 import { initDriveImport } from './drive-import.js';
 
@@ -126,6 +127,20 @@ function niceErr(e) {
 let settingUp = false;
 onAuthStateChanged(auth, async u => { if (!settingUp) await boot(u); });
 
+// check the linked extension folder; update silently when Chrome already allows editing it
+async function extAutoUpdate() {
+  try {
+    const h = await linkedFolder(); S.extLinked = !!h;
+    if (!h) return;
+    S.extAuto = await permission(h, false) === 'granted';
+    const v = extVer();
+    if (S.extAuto && v && newer(EXT_VER, v) && !newer('1.5.0', v) && !sessionStorage.extTried) {
+      sessionStorage.extTried = '1';
+      await updateExtension({});
+      toast(`CA Desk Helper updated to v${EXT_VER}`, 4000); setTimeout(() => location.reload(), 2500);
+    }
+  } catch { /* stays manual */ }
+}
 async function boot(u) {
   try {
     const s = await getDoc(doc(db, 'meta', 'setup'));
@@ -139,7 +154,7 @@ async function boot(u) {
   S.profile = { uid: u.uid, email: u.email, ...p.data() };
   if (isAdmin()) {
     if (!S.trackFrom) { S.trackFrom = todayISO(); updateDoc(doc(db, 'meta', 'setup'), { trackFrom: S.trackFrom }).catch(() => {}); }
-    await loadClients(); await loadAllFilings(); await T.load(); loadGstLoginFlags(); S.view = 'dashboard'; autoTasks();
+    await loadClients(); await loadAllFilings(); await T.load(); loadGstLoginFlags(); S.view = 'dashboard'; autoTasks(); setTimeout(extAutoUpdate, 3000);
   }
   else { await openClient(S.profile.clientId, 'master'); await T.loadForClient(S.profile.clientId).catch(() => {}); }
   render();
@@ -431,7 +446,8 @@ function vDashboard() {
     : nextDue ? `Next up: ${baseForm(nextDue.form)} on ${dTxt(nextDue.due.getDate())} for ${new Set(week.filter(r => +r.due === +nextDue.due).map(r => r.c.id)).size} client(s).`
     : 'Nothing falls due in the next seven days.';
 
-  return `
+  const extNote = isAdmin() && extVer() && !extAtLeast(EXT_VER) ? `<div class="extnote"><span>A new version of the CA Desk Helper extension (v${EXT_VER}) is available.</span>${canUpdate() ? '<button class="sm primary" data-act="extUpdate">Update now</button>' : ''}<a href="#" data-act="go" data-v="settings">Details</a></div>` : '';
+  return `${extNote}
   <section class="hero2">
     <div class="h2-top">
       <div><p class="h2-date">${today.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
@@ -1081,10 +1097,11 @@ async function compSave(cp) {
 
 /* ---------- settings ---------- */
 // CA Desk Helper Chrome extension: download + install steps, shown in Settings and wherever a feature needs it
-const EXT_VER = '1.4.0';
+const EXT_VER = '1.5.0';
+const extAtLeast = v => { const x = extVer(); return !!x && !newer(v, x); };
 const extVer = () => document.documentElement.dataset.capmVer || (document.documentElement.dataset.capmTally === '1' ? '1.1.0' : extOn() ? '1.0.0' : '');
 const extCard = (compact = false) => {
-  const v = extVer(), ok = v && v >= EXT_VER;
+  const v = extVer(), ok = extAtLeast(EXT_VER);
   const status = ok ? `<span class="tag green">Installed · v${esc(v)}</span>` : v ? `<span class="tag amber">Update available · you have v${esc(v)}</span>` : '<span class="tag">Not installed</span>';
   const steps = `<ol class="ext-steps small">
       <li>Download the file and unzip it into a folder you will keep, e.g. <b>Documents\\CA Desk Helper</b>${v ? ' (replace the old files)' : ''}.</li>
@@ -1093,9 +1110,11 @@ const extCard = (compact = false) => {
       <li>Reload this page (Ctrl + F5). The status here changes to <b>Installed</b>.</li></ol>`;
   return `<div class="ext-card ${compact ? 'compact' : ''}">
     <div class="row-between wrap"><div><b>CA Desk Helper</b> — Chrome extension ${status}</div>
-      ${ok && compact ? '' : `<a class="btn ${ok ? '' : 'primary'}" href="ca-desk-helper.zip" download="ca-desk-helper-${EXT_VER}.zip">Download extension (v${EXT_VER})</a>`}</div>
+      <div class="btns">${v && !ok && canUpdate() ? `<button class="primary" data-act="extUpdate">Update extension now</button>` : ''}
+        ${ok && compact ? '' : `<a class="btn ${ok || v ? '' : 'primary'}" href="ca-desk-helper.zip" download="ca-desk-helper-${EXT_VER}.zip">Download extension (v${EXT_VER})</a>`}</div></div>
+    ${v && !compact ? `<p class="small mt">${S.extLinked ? `Updates go straight into the linked extension folder${S.extAuto ? ' automatically when you open CA Desk' : ' — click Update when a new version is out'}. <a href="#" data-act="extUpdate" data-pick="1">Change folder</a>` : `<b>One-click updates:</b> click <a href="#" data-act="extUpdate" data-pick="1">Link extension folder</a> once and choose the folder you loaded in chrome://extensions. From then on CA Desk updates the extension itself${canUpdate() ? '' : ' (needs Chrome or Edge on a computer)'}.`}</p>` : ''}
     ${compact ? '' : `<p class="muted small">Fills the user ID and password on GST, Income Tax, TRACES, MCA, EPFO and ESIC portals when you click Login (you type the CAPTCHA/OTP), and lets CA Desk read from Tally on this computer, and runs the GSTR-1 autopilot: uploads the JSON and generates the summary, and after you file, saves the ARN and the filed PDF here. It also checks each GSTIN's return filing frequency on the portal (you type the CAPTCHA). It only runs on CA Desk and those portals, keeps a login in memory for 5 minutes, and only reads from Tally — it never changes Tally data.</p>`}
-    ${ok ? '' : steps}</div>`;
+    ${ok || (v && canUpdate()) ? '' : steps}</div>`;
 };
 function vSettings() {
   return `
@@ -1190,6 +1209,16 @@ const A = {
   go: ({ v }) => { S.fab = false; if (v === 'due') { S.dueDay = ''; if (S.dueOpen?.has('*')) S.dueOpen = new Set(); } S.view = v; window.scrollTo(0, 0); S.importRows = v === 'import' ? S.importRows : null; render(); if (v === 'settings') loadStaff(); },
   open: ({ id, tab }) => guard(async () => { await openClient(id, tab || 'master'); render(); }),
   tab: ({ t }) => { S.tab = t; render(); },
+  extUpdate: ({ pick }) => guard(async () => {
+    const before = extVer();
+    const ver = await updateExtension({ pick: !!pick, onStep: m => busy(true, m) });
+    S.extLinked = true;
+    busy(true, 'Restarting the extension…');
+    await new Promise(r => setTimeout(r, 2500));
+    if (before && newer('1.5.0', before)) { busy(false); return modal(`<h2>Extension files updated to v${esc(ver)}</h2><p>This one time, open <b>chrome://extensions</b> and click <b>Reload</b> (↻) on CA Desk Helper, then reload this page. From version 1.5 on, updates restart the extension by themselves.</p><div class="btns mt"><button class="primary" data-act="reloadPage">Reload CA Desk</button><button data-act="closeModal">Close</button></div>`); }
+    location.reload();
+  }, 'Extension updated'),
+  reloadPage: () => location.reload(),
   freqCheck: (d) => {
     let items = [];
     const add = (c, onlyGstin) => regsOf(c).filter(r => r.gstin && r.status !== 'Cancelled' && (!onlyGstin || r.gstin === onlyGstin)).forEach(r => items.push({ cid: c.id, gstin: r.gstin, name: dispName(c) }));
@@ -1197,7 +1226,7 @@ const A = {
     else if (d.group) { const seen = new Set(); dueRows({ back: 365, ahead: 90 }).filter(r => baseForm(r.form) === d.group && r.gstin).forEach(r => { const k = r.c.id + r.gstin; if (!seen.has(k)) { seen.add(k); items.push({ cid: r.c.id, gstin: r.gstin, name: dispName(r.c) }); } }); }
     else { const c = S.clients.find(x => x.id === d.cid) || S.client; if (c) add({ ...c, id: d.cid || S.cid }, d.gstin); }
     if (!items.length) return toast('No active GSTIN to check.');
-    if (!(extVer() >= '1.4.0')) return modal(`<h2>Check GST filing frequency</h2><p class="small">This needs the CA Desk Helper extension version 1.4. It opens the portal's Search Taxpayer page, fills each GSTIN, you type the CAPTCHA, and it reads Monthly / Quarterly and updates CA Desk.</p>${extCard(true)}<div class="btns mt"><button data-act="closeModal">Close</button></div>`);
+    if (!extAtLeast('1.4.0')) return modal(`<h2>Check GST filing frequency</h2><p class="small">This needs the CA Desk Helper extension version 1.4. It opens the portal's Search Taxpayer page, fills each GSTIN, you type the CAPTCHA, and it reads Monthly / Quarterly and updates CA Desk.</p>${extCard(true)}<div class="btns mt"><button data-act="closeModal">Close</button></div>`);
     if (items.length > 1 && !confirm(`Check the filing frequency of ${items.length} GSTINs on the GST portal?\n\nA portal tab opens. For each GSTIN you only type the CAPTCHA — the rest is automatic, and CA Desk is updated as each result comes in.`)) return;
     window.postMessage({ type: 'CAPM_FREQ', queue: items }, location.origin);
     toast(`GST portal opened — type the CAPTCHA for ${items.length === 1 ? items[0].gstin : `each of the ${items.length} GSTINs`}.`, 6000);
@@ -1923,7 +1952,7 @@ const PAY = initPayments({ S, A, C, F, esc, toast, modal, closeModal, guard, ren
   fs: { doc, getDocs, setDoc, collection } });
 const TF = initTaskFiles({ S, A, C, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, db, saveFile, saveBlob, T, WA_ICON, MAIL_ICON, busy,
   fs: { doc, getDocs, deleteDoc, collection, query, where } });
-const G1 = initGstr1({ STATE_CODES, extCard, extVer, EXT_VER, S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, todayISO, db, saveFile, saveBlob, T, busy, extractText, dispName, isoLocalD,
+const G1 = initGstr1({ STATE_CODES, extCard, extVer, extAtLeast, EXT_VER, S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, todayISO, db, saveFile, saveBlob, T, busy, extractText, dispName, isoLocalD,
   portalLogin: gstLogin, gstCred, fs: { doc, setDoc, getDocs, collection, serverTimestamp, query, where } });
 const DSC = initDsc({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, todayISO, db, saveBlob, WA_ICON, MAIL_ICON,
   fs: { doc, getDocs, setDoc, deleteDoc, collection } });

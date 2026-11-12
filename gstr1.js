@@ -400,7 +400,7 @@ export function initGstr1(ctx) {
   }
 
   function s2(s, p) {
-    const auto = (ctx.extVer() || '') >= '1.2.0';
+    const auto = ctx.extAtLeast('1.2.0');
     return `<div class="g1-auto">
         <p class="small"><b>Upload JSON to GST portal</b> runs on autopilot:</p>
         <ol class="g1-howto small">
@@ -511,7 +511,7 @@ export function initGstr1(ctx) {
   A.g1DownloadJson = () => guard(async () => { const j = await savedJson(); saveBlob(new Blob([j.text], { type: 'application/json' }), j.name); });
   A.g1Portal = () => guard(async () => {
     const s = g();
-    if ((ctx.extVer() || '') < '1.2.0') return portalLogin(s.cid, s.gstin);
+    if (!ctx.extAtLeast('1.2.0')) return portalLogin(s.cid, s.gstin);
     const [j, cred] = [await savedJson(), await ctx.gstCred(s.cid, s.gstin)];
     let parsed; try { parsed = JSON.parse(j.text); } catch { throw new Error('The saved JSON cannot be read. Go to step 1 and fetch or browse it again.'); }
     const chk = checkJson(parsed, { gstin: s.gstin, fp: s.fp, iff: s.iff, noHsnCheck: !!s.b2bFrom });

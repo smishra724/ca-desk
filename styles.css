@@ -653,3 +653,5 @@ tr[draggable=true]:active{cursor:grabbing}
 body.dragging-gst .dropbar{display:flex}
 .dz{flex:1;border:2px dashed #9AA4B2;border-radius:10px;padding:14px;text-align:center;background:#F8FAFC;color:#15233F}
 .dz.over{border-color:#0B7A5C;background:#E7F5EF}
+.extnote{display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:#FFF6E3;border:1px solid #F2D9A4;color:#5A3D00;border-radius:10px;padding:10px 14px;margin-bottom:14px}
+.extnote span{flex:1}

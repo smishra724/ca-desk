@@ -12,6 +12,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       .catch(e => reply({ ok: false, error: e.message }));
     return true;
   }
+  if (msg.type === 'CAPM_RELOAD' && sender.url && /^https:\/\/smishra724\.github\.io\//.test(sender.url)) { setTimeout(() => chrome.runtime.reload(), 300); return; } // files were updated by CA Desk
   if (msg.type === 'CAPM_FREQ') {
     const queue = msg.queue.filter(x => /^[0-9A-Z]{15}$/.test(x.gstin || '')).slice(0, 200);
     chrome.storage.session.set({ freqjob: { queue, i: 0, t: Date.now() } }).then(() => chrome.tabs.create({ url: 'https://services.gst.gov.in/services/searchtp' }));
