@@ -699,3 +699,12 @@ body.dragging-gst .dropbar{display:flex}
 .compadd{border:1px dashed #9AA4B2;background:transparent;color:#5B6577;border-radius:10px;padding:8px 14px;cursor:pointer;font-weight:600}
 .compadd:hover{border-color:#0B7A5C;color:#0B7A5C;background:#F2FAF6}
 .compbtn.custom{border-style:solid;border-color:#C9D9F0}
+.msel{position:relative}
+.msel>summary{list-style:none;cursor:pointer;border:1px solid #C8D0DC;border-radius:8px;padding:8px 32px 8px 12px;background:#fff;white-space:nowrap;position:relative}
+.msel>summary::-webkit-details-marker{display:none}
+.msel>summary::after{content:'▾';position:absolute;right:12px;color:#5B6577}
+.msel-pop{position:absolute;z-index:40;top:calc(100% + 4px);left:0;min-width:240px;background:#fff;border:1px solid #D8DEE7;border-radius:10px;box-shadow:0 10px 30px rgba(21,35,63,.15);padding:6px;display:flex;flex-direction:column}
+.msel-pop label{display:flex;gap:8px;align-items:center;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:14px}
+.msel-pop label:hover{background:#F1F4F9}
+.msel-pop label .muted{margin-left:auto}
+.msel-all{border-bottom:1px solid #E3E7EE;margin-bottom:4px;font-weight:600}

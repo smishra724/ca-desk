@@ -1068,10 +1068,10 @@ function vComps() {
   ${sel ? compPanel(sel) : ''}`;
 }
 function compPanel(cp) {
-  const q = (S.compQ || '').toLowerCase(), cf = S.compCons || '';
+  const q = (S.compQ || '').toLowerCase(), cf = Array.isArray(S.compCons) ? S.compCons : [];
   const elig = S.clients.filter(c => !c.exClient && compEligible(cp, c) && !(cp.type === 'flag' && isItrOnly(c)));
   const pick = S.compPick ||= new Set(elig.filter(c => compOn(cp, c)).map(c => c.id));
-  const shown = elig.filter(c => (!cf || (c.constitution || 'Not set') === cf) && (!q || [c.name, c.tradeName, c.pan, c.gstin].some(v => (v || '').toLowerCase().includes(q))))
+  const shown = elig.filter(c => (!cf.length || cf.includes(c.constitution || 'Not set')) && (!q || [c.name, c.tradeName, c.pan, c.gstin].some(v => (v || '').toLowerCase().includes(q))))
     .sort((a, b) => dispName(a).localeCompare(dispName(b)));
   const notElig = S.clients.length - elig.length;
   const why = cp.type === 'auto' ? `Only clients for whom ${esc(cp.name)} can arise are listed (GSTIN / filing type / constitution)${notElig ? ` — ${notElig} others don't qualify` : ''}.`
@@ -1085,7 +1085,10 @@ function compPanel(cp) {
     <p class="muted small">${why}</p>
     <div class="filters">
       <input id="compQ" placeholder="Search client, PAN, GSTIN…" value="${esc(S.compQ || '')}">
-      <select data-change="compCons"><option value="">All constitutions</option>${[...new Set(elig.map(c => c.constitution || 'Not set'))].sort().map(k => `<option ${k === cf ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>
+      ${(() => { const kinds = [...new Set(elig.map(c => c.constitution || 'Not set'))].sort(), n = k => elig.filter(c => (c.constitution || 'Not set') === k).length;
+        return `<details class="msel" ${S.compConsOpen ? 'open' : ''}><summary>${cf.length ? `Constitution: <b>${esc(cf.length > 2 ? `${cf.length} selected` : cf.join(', '))}</b>` : 'All constitutions'}</summary>
+          <div class="msel-pop"><label class="msel-all"><input type="checkbox" data-change="compConsT" value="__all" ${!cf.length ? 'checked' : ''}> All constitutions</label>
+          ${kinds.map(k => `<label><input type="checkbox" data-change="compConsT" value="${esc(k)}" ${cf.includes(k) ? 'checked' : ''}> ${esc(k)} <span class="muted">${n(k)}</span></label>`).join('')}</div></details>`; })()}
       <button class="sm" data-act="compAll" data-v="1">Tick all shown</button><button class="sm" data-act="compAll" data-v="">Untick all shown</button>
     </div>
     <div class="cgrid">${shown.map(c => `<label class="cpick ${pick.has(c.id) ? 'on' : ''}"><input type="checkbox" data-change="compPick" value="${c.id}" ${pick.has(c.id) ? 'checked' : ''}>
@@ -1258,7 +1261,7 @@ const A = {
   cliShow: ({ v }) => { S.showF = v; S.stateF = ''; S.consF = ''; S.view = 'clients'; render(); },
   cliFClear: () => { S.stateF = ''; S.showF = ''; render(); },
   consClear: () => { S.consF = ''; render(); },
-  compOpen: ({ id }) => { S.compSel = S.compSel === id ? null : id; S.compPick = null; S.compQ = ''; S.compCons = ''; render(); if (S.compSel) setTimeout(() => document.getElementById('compPanel')?.scrollIntoView({ behavior: 'smooth' }), 50); },
+  compOpen: ({ id }) => { S.compSel = S.compSel === id ? null : id; S.compPick = null; S.compQ = ''; S.compCons = []; render(); if (S.compSel) setTimeout(() => document.getElementById('compPanel')?.scrollIntoView({ behavior: 'smooth' }), 50); },
   compClose: () => { S.compSel = null; S.compPick = null; render(); },
   compAll: ({ v }) => { for (const i of document.querySelectorAll('[data-change=compPick]')) v ? S.compPick.add(i.value) : S.compPick.delete(i.value); render(); },
   compSave: () => guard(async () => { const n = await compSave(compById(S.compSel)); S.compPick = null; render(); toast(n ? `Saved — ${n} client(s) updated` : 'No changes'); if (n) autoTasks(); }),
@@ -1303,7 +1306,7 @@ const A = {
   gqOpen: ({ id }) => { S.gq = ''; guard(async () => { await openClient(id, 'master'); render(); }); },
   gqLogin: ({ id }) => { S.gq = ''; guard(async () => { await openClient(id, 'logins'); render(); }); },
   gqTask: ({ id }) => { S.gq = ''; A.openTask({ id }); },
-  gqComp: ({ id }) => { S.gq = ''; S.view = 'comps'; S.compSel = id; S.compPick = null; S.compQ = ''; S.compCons = ''; render(); setTimeout(() => document.getElementById('compPanel')?.scrollIntoView({ behavior: 'smooth' }), 50); },
+  gqComp: ({ id }) => { S.gq = ''; S.view = 'comps'; S.compSel = id; S.compPick = null; S.compQ = ''; S.compCons = []; render(); setTimeout(() => document.getElementById('compPanel')?.scrollIntoView({ behavior: 'smooth' }), 50); },
   gqDo: ({ a, v }) => { S.gq = ''; if (a === 'go') A.go({ v }); else if (a === 'newTask') { render(); A.newTask({}); } else A.fabGo({ to: v }); },
   dueDay: ({ d }) => { S.dueDay = d; S.dueF ||= { range: '30', form: '', q: '', history: false }; if (new Date(d) < dayStart(new Date())) S.dueF.history = false; S.dueOpen = new Set(['*']); S.view = 'due'; render(); },
   dueDayClear: () => { S.dueDay = ''; S.dueOpen = new Set(); render(); },
@@ -1776,7 +1779,11 @@ const C = {
     const h = document.querySelector('#compPanel h2 .muted'); if (h) h.textContent = h.textContent.replace(/^\(\d+/, '(' + S.compPick.size); },
   compGrpSel: el => { const b = document.getElementById('newGrpBox'); if (b) b.style.display = el.value === '__new' ? '' : 'none'; },
   compFreqSel: el => { const f = el.form, v = el.value; f.querySelector('#dueBox').style.display = v === 'none' ? 'none' : ''; f.querySelectorAll('.freqA').forEach(x => x.style.display = v === 'annual' ? '' : 'none'); f.querySelectorAll('.nofreqA').forEach(x => x.style.display = v === 'annual' ? 'none' : ''); },
-  compCons: el => { S.compCons = el.value; render(); },
+  compConsT: el => {
+    let cur = Array.isArray(S.compCons) ? [...S.compCons] : [];
+    if (el.value === '__all') cur = []; else cur = el.checked ? [...cur, el.value] : cur.filter(x => x !== el.value);
+    S.compCons = cur; S.compConsOpen = true; render();
+  },
   dueRange: el => { if (el.value === 'pick') { S.dueF.pick = true; render(); document.querySelector('.mpick')?.showPicker?.(); return; } S.dueF.pick = false; S.dueF.range = el.value; S.dueDay = ''; render(); },
   dueMonth: el => { if (el.value) { S.dueF.range = 'm:' + el.value; S.dueDay = ''; render(); } },
   dueColF: el => {
@@ -2067,6 +2074,7 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); if (S.fab) { S.fab = false; render(); } } });
 document.addEventListener('click', e => { if (S.fab && !e.target.closest('.fab')) { S.fab = false; render(); } });
+document.addEventListener('click', e => { if (!e.target.closest('.msel')) { document.querySelectorAll('details.msel[open]').forEach(d => d.removeAttribute('open')); S.compConsOpen = false; } });
 document.addEventListener('click', e => { if (S.dueMenu && !e.target.closest('.hmenu') && !e.target.closest('[data-act=dueHead]')) { S.dueMenu = null; render(); } });
 // Due dates: drag a GSTR-1 / IFF row onto Monthly or QRMP to change that GSTIN's GST filing
 // filing frequency read from the portal by the extension → update that GSTIN
