@@ -8,6 +8,7 @@ import { initPayslips } from './payslips.js';
 import { initPayments, isPayKey } from './payments.js';
 import { initTaskFiles } from './taskfiles.js';
 import { initGstr1 } from './gstr1.js';
+import { initDirectors, COMPANYISH } from './directors.js';
 import { updateExtension, newer, canUpdate, linkedFolder, permission } from './extupdate.js';
 import { initDsc } from './dsc.js';
 import { initDriveImport } from './drive-import.js';
@@ -58,10 +59,10 @@ const CONS_FORM = {
   'Proprietorship': { hide: ['cin', 'people'], name: { doi: 'Date of birth (proprietor)', aadhaar: 'Aadhaar (proprietor)', name: 'Legal name (proprietor)' } },
   'HUF': { hide: ['cin'], name: { doi: 'Date of creation', aadhaar: 'Aadhaar (Karta)', people: 'Karta & coparceners' } },
   'Partnership Firm': { hide: ['cin', 'aadhaar'], name: { doi: 'Date of partnership deed', people: 'Partners (name, PAN, share %)' } },
-  'LLP': { hide: ['aadhaar'], name: { cin: 'LLPIN', doi: 'Date of incorporation', people: 'Designated partners (name, DPIN)' } },
-  'Private Ltd': { hide: ['aadhaar'], name: { cin: 'CIN', doi: 'Date of incorporation', people: 'Directors (name, DIN)' } },
-  'Public Ltd': { hide: ['aadhaar'], name: { cin: 'CIN', doi: 'Date of incorporation', people: 'Directors (name, DIN)' } },
-  'OPC': { hide: ['aadhaar'], name: { cin: 'CIN', doi: 'Date of incorporation', people: 'Director & nominee (name, DIN)' } },
+  'LLP': { hide: ['aadhaar', 'people'], name: { cin: 'LLPIN', doi: 'Date of incorporation', people: 'Designated partners (name, DPIN)' } },
+  'Private Ltd': { hide: ['aadhaar', 'people'], name: { cin: 'CIN', doi: 'Date of incorporation', people: 'Directors (name, DIN)' } },
+  'Public Ltd': { hide: ['aadhaar', 'people'], name: { cin: 'CIN', doi: 'Date of incorporation', people: 'Directors (name, DIN)' } },
+  'OPC': { hide: ['aadhaar', 'people'], name: { cin: 'CIN', doi: 'Date of incorporation', people: 'Director & nominee (name, DIN)' } },
   'Trust': { hide: ['aadhaar'], name: { cin: 'Registration no.', doi: 'Date of registration', people: 'Trustees' } },
   'Society': { hide: ['aadhaar'], name: { cin: 'Registration no.', doi: 'Date of registration', people: 'Governing body members' } },
   'AOP/BOI': { hide: ['aadhaar', 'cin'], name: { doi: 'Date of formation', people: 'Members' } },
@@ -713,7 +714,7 @@ function tMaster() {
   const c = S.client || {};
   if (!isAdmin()) {
     return `<dl class="dl">${formFields(c.constitution).filter(f => c[f[0]] !== undefined && c[f[0]] !== '' && f[0] !== 'notes' && !GST_KEYS.has(f[0])).map(([k, l, t]) => `<dt>${l}</dt><dd>${
-      t === 'bool' ? (flagOn(c, k) ? 'Yes' : 'No') : t === 'date' ? isoToDisp(c[k]) : k === 'aadhaar' ? 'XXXX XXXX ' + esc(String(c[k]).slice(-4)) : esc(c[k]).replace(/\n/g, '<br>')}</dd>`).join('')}</dl>`;
+      t === 'bool' ? (flagOn(c, k) ? 'Yes' : 'No') : t === 'date' ? isoToDisp(c[k]) : k === 'aadhaar' ? 'XXXX XXXX ' + esc(String(c[k]).slice(-4)) : esc(c[k]).replace(/\n/g, '<br>')}</dd>`).join('')}</dl>${DR.section()}`;
   }
   return `<form data-form="master" class="grid">
     ${formFields(c.constitution).filter(f => f[2] !== 'bool' && !GST_KEYS.has(f[0])).map(f => fieldInput(f, c[f[0]])).join('')}
@@ -723,7 +724,7 @@ function tMaster() {
     <div class="span2 btns"><button class="primary">Save master data</button>
       ${S.cid && !S.client?.exClient ? `<button type="button" class="danger" data-act="exAsk">Move to ex-clients</button>` : ''}
       ${S.client?.exClient ? `<button type="button" class="danger" data-act="delClient">Delete permanently</button>` : ''}</div>
-  </form>`;
+  </form>${DR.section()}`;
 }
 
 function tGst() {
@@ -864,7 +865,7 @@ const BOOLS = new Set(['tds', 'epf', 'esic', 'pt', 'lwf', 'audit', 'advTax']);
 
 function vImport() {
   const r = S.importRows;
-  return `
+  return `${DR.bulkCard()}
   <section class="card">
     <h2>Import clients from Excel</h2>
     <ol class="steps">
@@ -1446,8 +1447,8 @@ const A = {
   fromDoc: ({ mode }) => {
     S.pending = { mode };
     modal(`<h2>${mode === 'new' ? 'New client from documents' : 'Fill master data from a document'}</h2>
-      <p class="muted small">Upload a GST certificate (REG-06), PAN, TAN letter, Aadhaar, Certificate of Incorporation or LLP deed — PDF or photo. Text is read on this computer; you review every field before it is saved.</p>
-      <label class="filebtn">Choose document<input type="file" accept=".pdf,image/*" data-change="ocrFile"></label>
+      <p class="muted small">Upload a GST certificate (REG-06), PAN, TAN letter, Aadhaar, Certificate of Incorporation, LLP deed or the MCA master data page — PDF or photo. Text is read on this computer; you review every field before it is saved.</p>
+      <label class="filebtn">Choose document<input type="file" accept=".pdf,.html,.htm,.txt,image/*" data-change="ocrFile"></label>
       <div id="ocrStatus" class="muted small"></div><div id="ocrResult"></div>`);
   },
 
@@ -1504,6 +1505,8 @@ const A = {
       }
     }
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Clients');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Client', 'CIN / LLPIN', 'PAN of company', 'Director / partner name', 'DIN / DPIN', 'PAN', 'Designation', 'Date of appointment', 'Date of cessation'],
+      ...S.clients.flatMap(c => (c.directors || []).map(d => [c.name, c.cin || '', c.pan || '', d.name, d.din || '', d.pan || '', d.designation || '', isoToDisp(d.appointed), isoToDisp(d.ceased)]))]), 'Directors');
     XLSX.writeFile(wb, `CA-Desk-all-clients-${todayISO()}.xlsx`);
   }),
   downloadClient: () => {
@@ -1512,6 +1515,7 @@ const A = {
     const m = [['Field', 'Value'], ...FIELDS.filter(f => (f[0] !== 'notes' || isAdmin()) && !GST_KEYS.has(f[0]))
       .map(([k, l, t]) => [l, t === 'bool' ? (flagOn(c, k) ? 'Yes' : 'No') : t === 'date' ? isoToDisp(c[k]) : c[k] || ''])];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(m), 'Master data');
+    if ((c.directors || []).length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Name', 'DIN / DPIN', 'PAN', 'Designation', 'Date of appointment', 'Date of cessation'], ...c.directors.map(d => [d.name, d.din || '', d.pan || '', d.designation || '', isoToDisp(d.appointed), isoToDisp(d.ceased)])]), 'Directors');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['State', 'GSTIN', 'Trade name', 'Address', 'GST filing', 'Registration date', 'Status'],
       ...regsOf(c).map(r => [r.state || stateOf(r.gstin), r.gstin, r.tradeName || '', r.address || '', r.gstFreq || '', isoToDisp(r.regDate), r.status || 'Active'])]), 'GST registrations');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Portal', 'GSTIN', 'Login URL', 'User ID', 'Password', 'Notes'],
@@ -1737,6 +1741,7 @@ const C = {
     try {
       const res = await extractFromFile(file, m => st.textContent = m);
       S.pending = { ...S.pending, res, file };
+      if (res.type === 'MCA Master Data' && S.pending.mode === 'update' && COMPANYISH.includes(S.client?.constitution)) { A.mcaImport(); DR.show(res, file); return; }
       st.textContent = `Detected: ${res.type}. ${Object.keys(res.fields).length} field(s) found.`;
       $('#ocrResult').innerHTML = ocrReview(res);
     } catch (e) { console.error(e); st.textContent = 'Could not read this file: ' + e.message; }
@@ -1952,6 +1957,7 @@ const PAY = initPayments({ S, A, C, F, esc, toast, modal, closeModal, guard, ren
   fs: { doc, getDocs, setDoc, collection } });
 const TF = initTaskFiles({ S, A, C, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, db, saveFile, saveBlob, T, WA_ICON, MAIL_ICON, busy,
   fs: { doc, getDocs, deleteDoc, collection, query, where } });
+const DR = initDirectors({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, isAdmin, db, fs: { doc, updateDoc, serverTimestamp }, saveFile, openClient: (...a) => openClient(...a), loadClients: () => loadClients(), busy });
 const G1 = initGstr1({ STATE_CODES, extCard, extVer, extAtLeast, EXT_VER, S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, todayISO, db, saveFile, saveBlob, T, busy, extractText, dispName, isoLocalD,
   portalLogin: gstLogin, gstCred, fs: { doc, setDoc, getDocs, collection, serverTimestamp, query, where } });
 const DSC = initDsc({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, todayISO, db, saveBlob, WA_ICON, MAIL_ICON,

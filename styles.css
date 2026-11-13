@@ -693,3 +693,6 @@ body.dragging-gst .dropbar{display:flex}
 .sgi{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:7px 8px;border:1px solid #EEF1F5;border-radius:8px;margin-bottom:5px;cursor:grab;background:#fff}
 .sgi:hover{border-color:#C8D0DC}
 .sgi .sm{white-space:nowrap;flex:none}
+.dirs{margin-top:16px}.dirs h2 .muted{font-weight:400}
+.mcainfo{display:flex;flex-wrap:wrap;gap:6px 18px;margin:6px 0 12px;font-size:13px;padding:8px 12px;background:#F6F8FB;border-radius:8px}
+#mcaPaste{width:100%;margin-top:10px}
