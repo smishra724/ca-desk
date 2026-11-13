@@ -167,6 +167,7 @@ export function initTasks(ctx) {
       notes: [], time: [], log: [{ at: nowISO(), by: me(), text: data.extra?.kind === 'reminder' ? 'Reminder created' : 'Task created' }], starred: false, createdAt: nowISO(), updatedAt: nowISO(),
       ...(data.extra || {}),
     };
+    for (const k of Object.keys(t)) if (t[k] === undefined) t[k] = k === 'clientId' || k === 'catId' ? '' : null; // Firestore refuses undefined (e.g. a to-do with no client)
     const r = await addDoc(collection(db, 'tasks'), t);
     S.tasks.push({ id: r.id, ...t }); return r.id;
   }
