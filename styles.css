@@ -655,3 +655,41 @@ body.dragging-gst .dropbar{display:flex}
 .dz.over{border-color:#0B7A5C;background:#E7F5EF}
 .extnote{display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:#FFF6E3;border:1px solid #F2D9A4;color:#5A3D00;border-radius:10px;padding:10px 14px;margin-bottom:14px}
 .extnote span{flex:1}
+/* Tasks: due-date ranges, Pending summary, My day */
+.hm-rng{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:6px}
+.hm-rng button{border:1px solid #D8DEE7;background:#fff;border-radius:6px;padding:6px 8px;font-size:13px;cursor:pointer;text-align:left}
+.hm-rng button:hover{background:#F1F4F9}.hm-rng button.on{background:#15233F;color:#fff;border-color:#15233F}
+.hm-cust{display:flex;gap:4px;align-items:center;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #E3E7EE;font-size:12px}
+.hm-cust input{flex:1;min-width:0;padding:4px;font-size:12px}
+.pend{margin-bottom:14px}.pend h3{margin:0 0 8px}
+.pend2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}.pend2>.card{min-width:0;margin:0 0 14px}
+.myday{display:block}
+@media (max-width:1100px){.pend2{grid-template-columns:1fr}}
+.ptab td,.ptab th{padding:7px 10px}
+.ptab a.pc{display:inline-block;min-width:28px;text-align:center;padding:2px 6px;border-radius:6px;background:#EEF2F7;color:#15233F;font-weight:600;text-decoration:none}
+.ptab a.pc.late{background:#FDECEC;color:#B42318}.ptab a.pc.today{background:#FFF1D6;color:#8A5300}
+.ptab .pz{color:#C3CAD5}
+.day-top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.day-top h2{margin:0 0 4px}
+.dprog{height:6px;background:#E8ECF2;border-radius:4px;width:280px;margin-top:6px;overflow:hidden}.dprog i{display:block;height:100%;background:#0B7A5C}
+.dstrip{display:flex;gap:6px;align-items:stretch;margin-bottom:14px;overflow-x:auto}
+.dday{flex:1;min-width:104px;display:flex;flex-direction:column;align-items:flex-start;gap:1px;border:1px solid #D8DEE7;background:#fff;border-radius:10px;padding:8px 10px;cursor:pointer;text-align:left}
+.dday span{font-size:12px;color:#5B6577;font-weight:600}.dday b{font-size:20px;color:#15233F}.dday i{font-style:normal;font-size:11px;color:#8A94A6}
+.dday.is-today{border-color:#E3A13B}.dday.on{background:#15233F;border-color:#15233F}.dday.on span,.dday.on b,.dday.on i{color:#fff}
+.dday.over,.dlist.over{outline:2px dashed #0B7A5C;outline-offset:2px}
+.day-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);gap:14px;align-items:start}
+@media (max-width:1000px){.day-grid{grid-template-columns:1fr}}
+.dtask{display:flex;gap:12px;align-items:center;padding:10px 6px;border-bottom:1px solid #EEF1F5;cursor:grab}
+.dtask.od .dmain b{color:#B42318}.dtask.dn .dmain{opacity:.55;text-decoration:line-through}
+.dchk{width:24px;height:24px;border-radius:50%;border:2px solid #9AA4B2;background:#fff;color:#fff;font-weight:700;flex:none;cursor:pointer;padding:0;line-height:20px}
+.dtask.dn .dchk{background:#0B7A5C;border-color:#0B7A5C}
+.dmain{flex:1;min-width:0}.dmain a{text-decoration:none;color:#15233F}
+.dside{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.amber-t{color:#8A5300}
+.dempty{padding:28px;text-align:center;color:#8A94A6;border:2px dashed #E3E7EE;border-radius:10px;margin-bottom:8px}
+.dadd{display:flex;gap:8px;margin-top:12px}.dadd input{flex:1}
+.dsug h3{margin:0 0 8px}
+.sg{margin-bottom:12px}.sg-h{font-weight:600;font-size:13px;margin-bottom:6px;display:flex;gap:6px;align-items:center}.sg-h .link{margin-left:auto}
+.sgi{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:7px 8px;border:1px solid #EEF1F5;border-radius:8px;margin-bottom:5px;cursor:grab;background:#fff}
+.sgi:hover{border-color:#C8D0DC}
+.sgi .sm{white-space:nowrap;flex:none}

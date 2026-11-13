@@ -209,6 +209,31 @@ export function initTasks(ctx) {
     if (n < 0 && !['Completed', 'Not required', 'Cancelled'].includes(t.status)) return 'Overdue';
     return n === 0 ? 'Today' : n > 0 && n <= 7 ? 'Next 7 days' : t.due.slice(0, 7) === todayISO().slice(0, 7) ? 'Later this month' : n < 0 ? 'Earlier (done)' : 'Later';
   };
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  // quick date ranges for the Due date column ("This month" etc.)
+  function dueRange(r) {
+    const d = new Date(); d.setHours(0, 0, 0, 0);
+    const m = off => { const a = new Date(d.getFullYear(), d.getMonth() + off, 1), b = new Date(d.getFullYear(), d.getMonth() + off + 1, 0); return { from: iso(a), to: iso(b), label: `${MON[a.getMonth()]} ${a.getFullYear()}` }; };
+    if (r === 'month') return { ...m(0), label: `This month (${m(0).label})` };
+    if (r === 'next') return { ...m(1), label: `Next month (${m(1).label})` };
+    if (r === 'last') return { ...m(-1), label: `Last month (${m(-1).label})` };
+    if (r === 'today') return { from: iso(d), to: iso(d), label: 'Today' };
+    if (r === 'week') { const a = new Date(d); a.setDate(d.getDate() - ((d.getDay() + 6) % 7)); const b = new Date(a); b.setDate(a.getDate() + 6); return { from: iso(a), to: iso(b), label: 'This week (Mon–Sun)' }; }
+    if (r === 'next7') { const b = new Date(d); b.setDate(d.getDate() + 7); return { from: iso(d), to: iso(b), label: 'Next 7 days' }; }
+    return null;
+  }
+  // Pending summary buckets
+  const PB = ['Overdue', 'Today', 'This week', 'Rest of this month', 'Next month', 'Later', 'No due date'];
+  const pBucket = t => {
+    if (!t.due) return 'No due date';
+    const n = daysTo(t.due); if (n < 0) return 'Overdue'; if (n === 0) return 'Today'; if (n <= 7) return 'This week';
+    const now = new Date(), nm = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    if (t.due.slice(0, 7) === todayISO().slice(0, 7)) return 'Rest of this month';
+    if (t.due.slice(0, 7) === iso(nm).slice(0, 7)) return 'Next month';
+    return 'Later';
+  };
+  const workGroup = t => (t.title || t.cat || 'Other').replace(/\s+—\s+.*$/, '');
   const DUE_ORDER = ['Overdue', 'Today', 'Next 7 days', 'Later this month', 'Later', 'Earlier (done)', 'No due date'];
   const COLS = {
     no: { label: 'Task no.', sort: t => t.no || 0 },
@@ -233,7 +258,8 @@ export function initTasks(ctx) {
       (!f.dept || t.deptId === f.dept) &&
       (!f.client || t.clientId === f.client) && (!f.cat || t.catId === f.cat) && (!f.period || t.period === f.period) &&
       (!f.prio || (t.priority || 'Normal') === f.prio) && (!f.from || (t.due && t.due >= f.from)) && (!f.to || (t.due && t.due <= f.to)) &&
-      (!f.star || t.starred) && (!f.kind || t.kind === f.kind) && colPass(t, skipCol));
+      (!f.star || t.starred) && (!f.kind || t.kind === f.kind) && (!f.dr || (t.due && t.due >= f.dr.from && t.due <= f.dr.to)) &&
+      (!f.pw || workGroup(t) === f.pw) && (!f.pb || pBucket(t) === f.pb) && colPass(t, skipCol));
   }
   function filtered() {
     const f = S.tf, today = todayISO();
@@ -257,7 +283,9 @@ export function initTasks(ctx) {
       for (const v of cur || []) cnt[v] ??= 0;
       vals = Object.entries(cnt).sort((a, b) => c.order ? c.order.indexOf(a[0]) - c.order.indexOf(b[0]) : a[0].localeCompare(b[0]));
     }
-    return `<div class="hmenu" data-col="${k}">
+    const rng = k === 'due' ? `<div class="hm-rng">${[['today', 'Today'], ['week', 'This week'], ['next7', 'Next 7 days'], ['month', 'This month'], ['next', 'Next month'], ['last', 'Last month']].map(([r, l]) => `<button class="${S.tf.dr?.r === r ? 'on' : ''}" data-act="hrange" data-r="${r}">${l}</button>`).join('')}</div>
+      <div class="hm-cust"><input type="date" id="hdrF" value="${S.tf.dr?.r === 'custom' ? S.tf.dr.from : ''}"><span>to</span><input type="date" id="hdrT" value="${S.tf.dr?.r === 'custom' ? S.tf.dr.to : ''}"><button class="sm" data-act="hrange" data-r="custom">Go</button></div>` : '';
+    return `<div class="hmenu" data-col="${k}">${rng}
       ${c.sort ? `<button class="hm-sort" data-act="hsort" data-k="${k}" data-d="1">${k === 'fee' || k === 'progress' || k === 'no' ? 'Sort smallest first' : k === 'due' ? 'Sort earliest first' : 'Sort A to Z'}</button>
         <button class="hm-sort" data-act="hsort" data-k="${k}" data-d="-1">${k === 'fee' || k === 'progress' || k === 'no' ? 'Sort largest first' : k === 'due' ? 'Sort latest first' : 'Sort Z to A'}</button>` : ''}
       ${c.val ? `${vals.length > 8 ? '<input class="hm-q" placeholder="Search values" data-hmq="1">' : ''}
@@ -267,7 +295,7 @@ export function initTasks(ctx) {
     </div>`;
   }
   const thF = (k, extra = '') => {
-    const on = S.tf.cf?.[k] || S.tf.sort?.k === k;
+    const on = S.tf.cf?.[k] || S.tf.sort?.k === k || (k === 'due' && S.tf.dr);
     return `<th class="hf ${on ? 'on' : ''} ${extra}"><button class="hbtn" data-act="hopen" data-k="${k}">${COLS[k].label}${S.tf.sort?.k === k ? (S.tf.sort.d > 0 ? ' ↑' : ' ↓') : ''}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 7v6l-4 2v-8z"/></svg></button></th>`;
   };
 
@@ -318,7 +346,7 @@ export function initTasks(ctx) {
     const staff = [...new Set([...(S.wf.staff || []), ...base.map(t => t.assignee).filter(Boolean)])];
     const staffRows = [['', 'Everyone', base.length], ...staff.map(n => [n, n, base.filter(t => t.assignee === n).length]), ['_none', 'Unassigned', base.filter(t => !t.assignee).length]]
       .filter(([id, , n]) => !id || n).map(([id, l, n]) => `<button class="fl ${f.assignee === id ? 'on' : ''}" data-act="tfset" data-k="assignee" data-v="${esc(id)}"><span>${id && id !== '_none' ? `<i class="av">${esc(initials(l))}</i>` : ''}${esc(l)}</span><b>${n}</b></button>`).join('');
-    const modes = [['list', 'Register'], ['board', 'Board'], ['time', 'Timesheet'], ['billing', 'Billing']]
+    const modes = [['day', 'My day'], ['pending', 'Pending summary'], ['list', 'Register'], ['board', 'Board'], ['time', 'Timesheet'], ['billing', 'Billing']]
       .map(([m, l]) => `<button class="${f.mode === m ? 'on' : ''}" data-act="taskMode" data-m="${m}">${l}</button>`).join('');
     const stOpts = cur => STATUSES.map(x => `<option ${x === cur ? 'selected' : ''}>${x}</option>`).join('');
     let bodyHtml = '';
@@ -352,6 +380,8 @@ export function initTasks(ctx) {
         </tbody></table></div>
         <div class="reg-foot">${list.length} task${list.length === 1 ? '' : 's'} shown · Fee total ₹${list.reduce((a, t) => a + (+t.fee || 0), 0).toLocaleString('en-IN')}</div>`;
     } else if (f.mode === 'time') bodyHtml = vTime();
+    else if (f.mode === 'pending') bodyHtml = vPending();
+    else if (f.mode === 'day') bodyHtml = vDay();
     else bodyHtml = vBilling(list);
     const showSide = ['list', 'board', 'billing'].includes(f.mode);
     return `
@@ -371,12 +401,89 @@ export function initTasks(ctx) {
   function filterChips() {
     const f = S.tf, chips = [];
     for (const [k, vals] of Object.entries(f.cf || {})) if (vals) chips.push(`<span class="fchip2">${COLS[k].label}: <b>${esc(vals.length > 2 ? `${vals.slice(0, 2).join(', ')} +${vals.length - 2}` : vals.join(', ') || 'none')}</b><button data-act="hclear" data-k="${k}" aria-label="Remove filter">✕</button></span>`);
+    if (f.dr) chips.push(`<span class="fchip2">Due: <b>${esc(f.dr.label)}</b><button data-act="hrangeClear" aria-label="Remove filter">✕</button></span>`);
+    if (f.pw || f.pb) chips.push(`<span class="fchip2">Pending: <b>${esc([f.pw, f.pb].filter(Boolean).join(' · '))}</b><button data-act="pendClear" aria-label="Remove filter">✕</button></span>`);
     if (f.kind) chips.push(`<span class="fchip2">Showing <b>my reminders</b><button data-act="tkind" aria-label="Remove filter">✕</button></span>`);
     if (f.sort) chips.push(`<span class="fchip2">Sorted by ${COLS[f.sort.k].label} ${f.sort.d > 0 ? '↑' : '↓'}<button data-act="hsortClear" aria-label="Remove sort">✕</button></span>`);
     if (f.dept || f.assignee || f.due || f.client || f.cat || f.period || f.prio || f.from || f.to) chips.push(`<span class="fchip2">Dashboard filter<button data-act="tfClear" aria-label="Remove">✕</button></span>`);
     return chips.length ? `<div class="fchips">${chips.join('')}<button class="link" data-act="tfClear">Clear all filters</button></div>` : '';
   }
   const statusTag = s => `<span class="tag ${({ 'Completed': 'green', 'Waiting on client': 'amber', 'Under review': 'blue', 'In progress': 'blue', 'Cancelled': '', 'Not required': 'grey' })[s] ?? ''}">${esc(s)}</span>`;
+
+  /* ---------- Pending summary: everything open, by work, staff and client ---------- */
+  function vPending() {
+    const open = S.tasks.filter(t => !CLOSED.includes(t.status));
+    const grid = (title, keyOf, rowsLimit) => {
+      const m = new Map();
+      for (const t of open) { const k = keyOf(t); const r = m.get(k) || Object.fromEntries(PB.map(b => [b, 0])); r[pBucket(t)]++; m.set(k, r); }
+      let rows = [...m.entries()].map(([k, r]) => [k, r, PB.reduce((s, b) => s + r[b], 0)]).sort((a, b) => b[1].Overdue - a[1].Overdue || b[2] - a[2]);
+      if (rowsLimit) rows = rows.slice(0, rowsLimit);
+      const tot = Object.fromEntries(PB.map(b => [b, open.filter(t => pBucket(t) === b).length]));
+      const cell = (k, b, n) => n ? `<a href="#" class="pc ${b === 'Overdue' ? 'late' : b === 'Today' ? 'today' : ''}" data-act="${keyOf === workGroup ? 'pendGo' : 'pendGo2'}" data-w="${esc(k)}" data-b="${b}" data-kind="${title}">${n}</a>` : '<span class="pz">·</span>';
+      return `<section class="card pend"><h3>${title}</h3><div class="reg-wrap"><table class="reg ptab"><thead><tr><th>${title.replace(/^By /, '')}</th>${PB.map(b => `<th class="num">${b}</th>`).join('')}<th class="num">Total</th></tr></thead><tbody>
+        ${rows.map(([k, r, n]) => `<tr><td>${esc(k)}</td>${PB.map(b => `<td class="num">${cell(k, b, r[b])}</td>`).join('')}<td class="num"><b>${keyOf === workGroup ? `<a href="#" data-act="pendGo" data-w="${esc(k)}">${n}</a>` : n}</b></td></tr>`).join('') || `<tr><td colspan="${PB.length + 2}" class="empty muted">Nothing pending.</td></tr>`}
+        </tbody>${rows.length > 1 && !rowsLimit ? `<tfoot><tr><td><b>Total</b></td>${PB.map(b => `<td class="num"><b>${tot[b] || '·'}</b></td>`).join('')}<td class="num"><b>${open.length}</b></td></tr></tfoot>` : ''}</table></div></section>`;
+    };
+    const tiles = [['Overdue', 'late'], ['Today', 'today'], ['This week', ''], ['Rest of this month', ''], ['Next month', ''], ['Later', '']]
+      .map(([b, c]) => `<button class="ctr ${c === 'late' ? 'c-late' : c === 'today' ? 'c-today' : 'c-ns'}" data-act="pendGo" data-b="${b}"><b>${open.filter(t => pBucket(t) === b).length}</b><span>${b}</span></button>`).join('');
+    return `<div class="ctrs"><button class="ctr c-all on"><b>${open.length}</b><span>Pending in total</span></button>${tiles}</div>
+      <p class="muted small">Every open task, wherever it is. Click a number to open those tasks in the register.</p>
+      ${grid('By work', workGroup)}
+      <div class="pend2">${grid('By staff', t => t.assignee || 'Unassigned')}${grid('By status', t => t.status)}</div>
+      ${grid('By client (top 15)', t => cn(t) || '—', 15)}`;
+  }
+
+  /* ---------- My day: plan tasks onto days and work through the list ---------- */
+  const dayLbl = d => { const x = new Date(d + 'T00:00'), n = daysTo(d); return n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : n === -1 ? 'Yesterday' : x.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }); };
+  function vDay() {
+    const f = S.tf, today = todayISO(), day = f.day || today;
+    const who = f.who ?? ((S.wf?.staff || []).includes(me()) ? me() : '');
+    const mine = t => !who || t.assignee === who || (who && !t.assignee && t.planBy === who);
+    const planned = S.tasks.filter(t => mine(t) && t.planOn === day).sort((a, b) => (a.planOrder ?? 999) - (b.planOrder ?? 999) || (a.due || '9').localeCompare(b.due || '9'));
+    const carried = day === today ? S.tasks.filter(t => mine(t) && t.planOn && t.planOn < today && !CLOSED.includes(t.status)) : [];
+    const list = [...carried, ...planned], done = list.filter(t => CLOSED.includes(t.status)).length;
+    // 7-day strip starting today (or the chosen week)
+    const start = f.dayStart || today, days = [...Array(7)].map((_, i) => { const d = new Date(start + 'T00:00'); d.setDate(d.getDate() + i); return iso(d); });
+    const strip = days.map(d => { const ts = S.tasks.filter(t => mine(t) && t.planOn === d), o = ts.filter(t => !CLOSED.includes(t.status)).length, dueN = S.tasks.filter(t => mine(t) && t.due === d && !CLOSED.includes(t.status)).length;
+      return `<button class="dday ${d === day ? 'on' : ''} ${d === today ? 'is-today' : ''}" data-act="daySet" data-d="${d}" data-planday="${d}"><span>${dayLbl(d)}</span><b>${o}</b><i>${o ? 'planned' : 'free'}${dueN ? ` · ${dueN} due` : ''}</i></button>`; }).join('');
+    const row = (t, carry) => `<div class="dtask ${CLOSED.includes(t.status) ? 'dn' : ''} ${overdue(t) ? 'od' : ''}" draggable="true" data-tid="${t.id}">
+        <button class="dchk" data-act="dayDone" data-id="${t.id}" title="${CLOSED.includes(t.status) ? 'Done' : 'Mark done'}">${CLOSED.includes(t.status) ? '✓' : ''}</button>
+        <div class="dmain"><a href="#" data-act="openTask" data-id="${t.id}"><b>${esc(cn(t) || t.title)}</b></a><div class="small">${esc(cn(t) ? t.title : '')}${t.period ? ` · ${esc(shortPer(t.period))}` : ''} <span class="mono tiny muted">${tno(t)}</span></div>
+          ${carry ? `<div class="tiny amber-t">Carried over from ${isoToDisp(t.planOn)}</div>` : ''}</div>
+        <div class="dside">${t.due ? `<span class="small">${isoToDisp(t.due)}</span> ${dueBadge(t)}` : ''}
+          ${isAdmin() ? `<select class="st-sel ${STC[t.status]}" data-change="tstat" data-id="${t.id}">${STATUSES.map(x => `<option ${x === t.status ? 'selected' : ''}>${x}</option>`).join('')}</select>` : ''}
+          ${!CLOSED.includes(t.status) ? `<button class="sm" data-act="dayMove" data-id="${t.id}" data-to="next" title="Move to the next day">→ ${day === today ? 'Tomorrow' : 'Next day'}</button>` : ''}
+          <button class="icon" data-act="dayDrop" data-id="${t.id}" title="Remove from this day">✕</button></div></div>`;
+    // suggestions: not yet planned for any future day
+    const free = S.tasks.filter(t => mine(t) && !CLOSED.includes(t.status) && !(t.planOn && t.planOn >= today));
+    const sug = [['Overdue', free.filter(overdue)], ['Due today', free.filter(t => t.due === today)], ['Due in the next 3 days', free.filter(t => { const n = daysTo(t.due); return n > 0 && n <= 3; })],
+      ['Waiting on client — follow up', free.filter(t => t.status === 'Waiting on client' && !overdue(t))], ['Due later this month', free.filter(t => { const n = daysTo(t.due); return n > 3 && t.due.slice(0, 7) === today.slice(0, 7); })]];
+    const sugHtml = sug.filter(([, l]) => l.length).map(([h, l]) => `<div class="sg"><div class="sg-h">${h} <span class="muted">${l.length}</span>${l.length > 1 ? `<button class="link tiny" data-act="dayAddAll" data-ids="${l.slice(0, 30).map(t => t.id).join(',')}">+ all to ${dayLbl(day)}</button>` : ''}</div>
+      ${l.slice(0, 6).map(t => `<div class="sgi" draggable="true" data-tid="${t.id}"><div><b>${esc(cn(t) || t.title)}</b><div class="tiny muted">${esc(cn(t) ? t.title : '')}${t.due ? ` · due ${isoToDisp(t.due)}` : ''}</div></div><button class="sm" data-act="dayAdd" data-id="${t.id}">+ ${dayLbl(day)}</button></div>`).join('')}
+      ${l.length > 6 ? `<div class="tiny muted">+ ${l.length - 6} more — open <a href="#" data-act="taskMode" data-m="pending">Pending summary</a></div>` : ''}</div>`).join('') || '<p class="muted small">Nothing urgent left to plan. 🎉</p>';
+    const staff = [...new Set([...(S.wf?.staff || []), ...S.tasks.map(t => t.assignee).filter(Boolean)])];
+    const pct = list.length ? Math.round(done / list.length * 100) : 0;
+    return `<div class="myday">
+      <div class="day-top">
+        <div><h2>${day === today ? 'My day' : dayLbl(day)} <span class="muted">— ${new Date(day + 'T00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</span></h2>
+          <div class="small">${list.length ? `<b>${done}</b> of <b>${list.length}</b> done` : 'Nothing planned yet — add from the right, or drag tasks onto a day.'}</div>
+          ${list.length ? `<div class="dprog"><i style="width:${pct}%"></i></div>` : ''}</div>
+        <label class="small">Plan for <select data-change="dayWho"><option value="">Everyone</option>${staff.map(x => `<option ${x === who ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
+      </div>
+      <div class="dstrip"><button class="icon" data-act="dayShift" data-n="-7" title="Previous week">‹</button>${strip}<button class="icon" data-act="dayShift" data-n="7" title="Next week">›</button></div>
+      <div class="day-grid">
+        <section class="card dlist" data-planday="${day}">
+          ${list.map(t => row(t, t.planOn < today && day === today)).join('') || '<div class="dempty">Drag tasks here, or click <b>+ Today</b> on a suggestion.</div>'}
+          <form data-form="dayTodo" class="dadd"><input name="text" placeholder="Add a to-do for ${dayLbl(day).toLowerCase() === 'today' ? 'today' : dayLbl(day)} (e.g. Call Vidaxl for October sales data)" required><button class="sm primary">Add</button></form>
+        </section>
+        <aside class="card dsug"><h3>To plan</h3>${sugHtml}</aside>
+      </div></div>`;
+  }
+  async function planTo(t, d) {
+    if (!t) return;
+    const same = S.tasks.filter(x => x.planOn === d);
+    await patch(t.id, { planOn: d, planOrder: same.length, planBy: me() }, d ? `Planned for ${isoToDisp(d)}` : 'Removed from plan');
+  }
 
   function vTime() {
     const from = S.tf.tFrom || todayISO().slice(0, 8) + '01', to = S.tf.tTo || todayISO();
@@ -540,8 +647,31 @@ export function initTasks(ctx) {
       const on = all.filter(i => i.checked).map(i => i.value);
       S.tf.cf ||= {}; S.tf.cf[k] = on.length === all.length ? null : on; if (k === 'status' && S.tf.cf[k]) { S.tf.status = 'all'; S.tf.due = ''; } S.hf = null; S.tsel = new Set(); render();
     },
+    hrange: ({ r }) => {
+      if (r === 'custom') { const a = document.getElementById('hdrF')?.value, b = document.getElementById('hdrT')?.value; if (!a || !b) return toast('Choose both dates.'); S.tf.dr = { r, from: a <= b ? a : b, to: a <= b ? b : a, label: `${isoToDisp(a <= b ? a : b)} – ${isoToDisp(a <= b ? b : a)}` }; }
+      else S.tf.dr = S.tf.dr?.r === r ? null : { r, ...dueRange(r) };
+      if (S.tf.dr) S.tf.due = '';
+      S.hf = null; S.tsel = new Set(); render();
+    },
+    daySet: ({ d }) => { S.tf.day = d; render(); },
+    dayShift: ({ n }) => { const d = new Date((S.tf.dayStart || todayISO()) + 'T00:00'); d.setDate(d.getDate() + +n); S.tf.dayStart = iso(d); S.tf.day = iso(d); render(); },
+    dayAdd: ({ id }) => guard(async () => { await planTo(S.tasks.find(t => t.id === id), S.tf.day || todayISO()); render(); }),
+    dayAddAll: ({ ids }) => guard(async () => { for (const id of ids.split(',')) await planTo(S.tasks.find(t => t.id === id), S.tf.day || todayISO()); render(); }, 'Added to the plan'),
+    dayDrop: ({ id }) => guard(async () => { await patch(id, { planOn: '', planOrder: null }, 'Removed from plan'); render(); }),
+    dayMove: ({ id }) => guard(async () => { const d = new Date((S.tf.day || todayISO()) + 'T00:00'); d.setDate(d.getDate() + 1); await planTo(S.tasks.find(t => t.id === id), iso(d)); render(); }, 'Moved to the next day'),
+    dayDone: ({ id }) => guard(async () => { const t = S.tasks.find(x => x.id === id); if (!CLOSED.includes(t.status)) await setStatus(t, 'Completed'); else await setStatus(t, 'In progress'); render(); }),
+    hrangeClear: () => { S.tf.dr = null; render(); },
+    pendClear: () => { S.tf.pw = ''; S.tf.pb = ''; render(); },
+    pendGo2: ({ w, b, kind }) => {
+      const base = { pw: '', pb: b || '', status: 'open', due: '', dr: null, mode: 'list', assignee: '', client: '' };
+      if (/staff/i.test(kind)) base.assignee = w === 'Unassigned' ? '_none' : w;
+      else if (/status/i.test(kind)) { S.tf.cf = { ...(S.tf.cf || {}), status: [w] }; }
+      else { const c = S.clients.find(x => dispName(x) === w); if (c) base.client = c.id; else S.tf.q = w; }
+      Object.assign(S.tf, base); render();
+    },
+    pendGo: ({ w, b }) => { Object.assign(S.tf, { pw: w || '', pb: b || '', status: 'open', due: '', dr: null, mode: 'list' }); render(); },
     hclear: ({ k }) => { if (S.tf.cf) S.tf.cf[k] = null; S.hf = null; render(); },
-    tfClear: () => { Object.assign(S.tf, { q: '', assignee: '', dept: '', status: 'open', due: '', star: false, client: '', cat: '', period: '', prio: '', from: '', to: '', cf: {}, sort: null, kind: '' }); S.hf = null; S.tsel = new Set(); render(); },
+    tfClear: () => { Object.assign(S.tf, { q: '', assignee: '', dept: '', status: 'open', due: '', star: false, client: '', cat: '', period: '', prio: '', from: '', to: '', cf: {}, sort: null, kind: '', dr: null, pw: '', pb: '' }); S.hf = null; S.tsel = new Set(); render(); },
     openTask: ({ id }) => { S.task = id; S.view = 'task'; render(); window.scrollTo(0, 0); },
     newTask: ({ cid, multi, cat, title } = {}) => {
       S.newMulti = Array.isArray(multi) ? multi : null; // several clients picked on the Compliances page → one task each
@@ -612,6 +742,11 @@ export function initTasks(ctx) {
 
   /* ---------- forms ---------- */
   Object.assign(F, {
+    dayTodo: fd => guard(async () => {
+      const day = S.tf.day || todayISO(), who = S.tf.who ?? ((S.wf?.staff || []).includes(me()) ? me() : '');
+      await createTask({ title: String(fd.get('text')).trim(), due: day, assignee: who || '', catId: '', extra: { kind: 'todo', planOn: day, planOrder: 999, planBy: me() } });
+      render(); setTimeout(() => document.querySelector('.dadd input')?.focus(), 50);
+    }),
     newTask: fd => guard(async () => {
       const a = fd.get('assignee');
       if (S.newMulti) {
@@ -693,6 +828,7 @@ export function initTasks(ctx) {
 
   /* ---------- change handlers ---------- */
   Object.assign(C, {
+    dayWho: el => { S.tf.who = el.value; render(); },
     tstat: el => { const t = S.tasks.find(x => x.id === el.dataset.id);
       if (el.value === 'Completed' && isPayTask(t) && !t.pay?.challan) { render(); return openPay(t.id); } // payments close with a challan
       guard(async () => { await setStatus(t, el.value); render(); }, `${tno(t)}: ${el.value}`); },
@@ -745,6 +881,14 @@ export function initTasks(ctx) {
   addEventListener('scroll', e => { if (S.hf && !e.target.closest?.('.hmenu')) { S.hf = null; render(); } }, true);
   let dragId = null;
   document.addEventListener('dragstart', e => { const c = e.target.closest?.('[data-tid]'); if (c) { dragId = c.dataset.tid; e.dataTransfer.effectAllowed = 'move'; } });
+  document.addEventListener('dragover', e => { const pd = e.target.closest?.('[data-planday]'); if (pd && dragId) { e.preventDefault(); pd.classList.add('over'); } });
+  document.addEventListener('dragleave', e => { const pd = e.target.closest?.('[data-planday]'); if (pd) pd.classList.remove('over'); });
+  document.addEventListener('drop', e => {
+    const pd = e.target.closest?.('[data-planday]'); if (!pd || !dragId) return; e.preventDefault();
+    const t = S.tasks.find(x => x.id === dragId), d = pd.dataset.planday; dragId = null;
+    if (!t || t.planOn === d) return render();
+    guard(async () => { await planTo(t, d); render(); }, `Planned for ${dayLbl(d)}`);
+  });
   document.addEventListener('dragover', e => { const col = e.target.closest?.('.col'); if (col && dragId) { e.preventDefault(); col.classList.add('over'); } });
   document.addEventListener('dragleave', e => { const col = e.target.closest?.('.col'); if (col) col.classList.remove('over'); });
   document.addEventListener('drop', e => {
