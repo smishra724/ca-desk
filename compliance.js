@@ -57,6 +57,29 @@ const LWF_ANNUAL = new Set(['Karnataka', 'Tamil Nadu', 'Andhra Pradesh', 'Telang
 const LWF_MONTHLY = new Set(['Haryana']);
 export const flagOn = (c, k) => k === 'epf' || k === 'esic' ? (c[k] ?? !!c.pfesic) : !!c[k];
 
+// Compliances you add yourself on the Compliances page (with a frequency and due day) — set by the app at start
+let CUSTOM = [];
+export function setCustomComps(list) { CUSTOM = (list || []).filter(x => x && x.id && x.code); }
+function customItems(c, from, to, add) {
+  for (const cc of CUSTOM) {
+    if (!cc.freq || cc.freq === 'none' || !(c.services || []).includes(cc.id)) continue;
+    const day = Math.min(28, Math.max(1, +cc.day || 15));
+    if (cc.freq === 'annual') {
+      for (let y = from.getFullYear() - 1; y <= to.getFullYear() + 1; y++) {
+        const mo = Math.min(12, Math.max(1, +cc.month || 4)) - 1, due = new Date(y, mo, day), fy = mo < 3 ? y - 1 : y;
+        add(`${cc.code}-${y}`, cc.name, cc.periodFy === false ? String(y) : fyLabel(cc.after === 'prev' ? fy - 1 : fy), due);
+      }
+      continue;
+    }
+    for (let pm = new Date(from.getFullYear(), from.getMonth() - 7, 1); pm <= to; pm = new Date(pm.getFullYear(), pm.getMonth() + 1, 1)) {
+      const y = pm.getFullYear(), m = pm.getMonth(), id = `${y}-${pad(m + 1)}`, due = new Date(y, m + 1 + (+cc.lag || 0), day);
+      if (cc.freq === 'monthly') add(`${cc.code}-${id}`, cc.name, `${MON[m]} ${y}`, due);
+      else if (cc.freq === 'quarterly' && m % 3 === 2) add(`${cc.code}-${id}`, cc.name, `${qName(m)} ${fyLabel(m < 3 ? y - 1 : y)}`, due);
+      else if (cc.freq === 'halfyearly' && (m === 8 || m === 2)) add(`${cc.code}-${id}`, cc.name, `${m === 8 ? 'Apr–Sep' : 'Oct–Mar'} ${fyLabel(m < 3 ? y - 1 : y)}`, due);
+    }
+  }
+}
+
 export function dueItems(c, from, to) {
   const out = [];
   if (isItrOnly(c)) c = { ...c, gstRegs: [], gstin: '', tds: false, pfesic: false, epf: false, esic: false, pt: false, lwf: false, constitution: c.constitution || 'Individual', _itr: true };
@@ -147,6 +170,7 @@ export function dueItems(c, from, to) {
     }
   }
   const off = new Set(c.off || []); // compliances switched off for this client on the Compliances page
+  customItems(c, from, to, add);
   return out.filter(i => !off.has(codeOf(i.key))).sort((a, b) => a.due - b.due || a.form.localeCompare(b.form));
 }
 

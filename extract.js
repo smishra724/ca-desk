@@ -258,7 +258,7 @@ export function parseMasterData(input) {
   for (const r of rows) {
     const dates = (r.raw.match(DATE_RE) || []).map(toISO).filter(Boolean);
     const des = (r.raw.match(DESIG) || [])[1] || '';
-    let nm = r.raw.replace(r.id, ' ').replace(DATE_RE, ' ').replace(DESIG, ' ').replace(/\b(yes|no|-|na|n\/a|whole|time)\b/gi, ' ').replace(/^\s*\d{1,3}[.)]?\s/, ' ').replace(/\b\d+\b/g, ' ');
+    let nm = r.raw.replace(r.id, ' ').replace(DATE_RE, ' ').replace(DESIG, ' ').replace(/\b(promoter|professional|independent|nominee|executive|non[- ]executive|ministry of corporate affairs|mca services|page \d+ of \d+|\d{1,2}:\d{2}(:\d{2})?\s*(am|pm)?)\b/gi, ' ').replace(/\b(yes|no|-|na|n\/a|whole|time)\b/gi, ' ').replace(/^\s*\d{1,3}[.)]?\s/, ' ').replace(/\b\d+\b/g, ' ');
     nm = nm.split('\t').map(x => x.replace(/[^A-Za-z .'-]/g, ' ').replace(/\s+/g, ' ').trim()).filter(x => x.length > 2).sort((a, b) => b.length - a.length)[0] || '';
     if (!nm) continue;
     directors.push({ name: nm.toUpperCase(), din: /^\d{8}$/.test(r.id) ? r.id : '', pan: /^\d{8}$/.test(r.id) ? '' : r.id, designation: des ? des.replace(/\b\w/g, c => c.toUpperCase()) : '', appointed: dates[0] || '', ceased: dates[1] || '' });
@@ -327,4 +327,56 @@ export async function extractText(file, onProgress = () => {}, opts = {}) {
 export async function extractFromFile(file, onProgress) {
   const text = await extractText(file, onProgress);
   return parse(text);
+}
+
+/* ---------- MCA master data PDF: read the director table by column position ----------
+   Printed MCA pages wrap names over several lines and centre other cells vertically, so plain
+   text loses which name goes with which DIN. Here every word keeps its x/y on the page:
+   columns come from the header (DIN/PAN, Name, Designation, Category, Date of Appointment, Cessation),
+   rows from each DIN, and every other word goes to the nearest DIN row in its column. */
+const COLDEF = [['din', /^(din|dpin)\s*\/?\s*(pan)?$|^din\/pan$|^din$/i], ['name', /^(full\s*)?name$/i], ['desig', /^designation$/i], ['cat', /^category$/i],
+  ['appt', /appointment|^begin|^date of$/i], ['cess', /cessation|^end\s*date/i], ['sign', /^signatory$|^surrendered/i]];
+export async function mcaDirectorsFromPdf(file) {
+  const lib = window.pdfjsLib;
+  lib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const pdf = await lib.getDocument({ data: await file.arrayBuffer() }).promise;
+  const out = []; let cols = null;
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const items = (await (await pdf.getPage(p)).getTextContent()).items.map(i => ({ s: i.str.trim(), x: i.transform[4], y: i.transform[5], w: i.width })).filter(i => i.s);
+    // header of the director table on this page
+    const sec = items.filter(i => /director|signatory|designated partner/i.test(i.s) && /detail|signator/i.test(i.s)).sort((a, b) => b.y - a.y)[0];
+    const dinH = items.filter(i => /^(din|dpin)\b/i.test(i.s) && (!sec || i.y <= sec.y)).sort((a, b) => b.y - a.y)[0];
+    let top = Infinity;
+    if (dinH) {
+      const hy = dinH.y, hs = items.filter(i => Math.abs(i.y - hy) <= 14);
+      cols = [];
+      for (const h of hs) { const d = COLDEF.find(([, re]) => re.test(h.s)); if (d && !cols.some(c => c.k === d[0])) cols.push({ k: d[0], x: h.x }); }
+      if (!cols.some(c => c.k === 'din')) cols.push({ k: 'din', x: dinH.x });
+      cols.sort((a, b) => a.x - b.x);
+      top = Math.min(...hs.map(i => i.y)) - 2;
+    } else if (!cols) continue;
+    const colOf = x => { let k = cols[0].k; for (let i = 0; i < cols.length; i++) { const lo = i ? (cols[i - 1].x + cols[i].x) / 2 - 2 : -1e9; if (x >= lo) k = cols[i].k; } return k; };
+    const body = items.filter(i => i.y < top);
+    const anchors = body.filter(i => colOf(i.x) === 'din' && (/^\d{8}$/.test(i.s) || /^[A-Z]{5}\d{4}[A-Z]$/.test(i.s))).sort((a, b) => b.y - a.y);
+    if (!anchors.length) { if (dinH) cols = cols; continue; }
+    const gap = anchors.length > 1 ? Math.min(...anchors.slice(1).map((a, i) => anchors[i].y - a.y)) : 40;
+    const half = Math.max(12, gap / 2 + 1), lowest = anchors[anchors.length - 1].y - half;
+    const rows = anchors.map(a => ({ a, cells: {} }));
+    for (const it of body) {
+      if (it.y < lowest || it.y > anchors[0].y + half) continue;
+      if (rows.some(r => r.a === it)) continue;
+      const k = colOf(it.x), r = rows.reduce((b, r) => Math.abs(r.a.y - it.y) < Math.abs(b.a.y - it.y) ? r : b, rows[0]);
+      if (Math.abs(r.a.y - it.y) > half) continue;
+      (r.cells[k] ||= []).push(it);
+    }
+    for (const r of rows) {
+      const txt = k => (r.cells[k] || []).sort((a, b) => b.y - a.y || a.x - b.x).map(i => i.s).join(' ').replace(/\s+/g, ' ').trim();
+      const date = k => toISO((txt(k).match(/\d{1,2}[\/\-.](?:\d{1,2}|[A-Za-z]{3})[\/\-.]\d{4}/) || [''])[0]);
+      const name = txt('name').replace(/[^A-Za-z .'-]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!name) continue;
+      out.push({ name: name.toUpperCase(), din: /^\d{8}$/.test(r.a.s) ? r.a.s : '', pan: /^\d{8}$/.test(r.a.s) ? '' : r.a.s, designation: txt('desig').replace(/\s+/g, ' '), category: txt('cat'), appointed: date('appt'), ceased: date('cess') });
+    }
+  }
+  const seen = new Set();
+  return out.filter(d => { const k = d.din || d.pan || d.name; if (seen.has(k)) return false; seen.add(k); return true; });
 }

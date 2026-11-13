@@ -1,7 +1,7 @@
 // Directors / designated partners as a proper register (name, DIN, designation, appointed, ceased)
 // and import from the MCA "Company / LLP Master Data" page — one client from the client page,
 // or many clients at once from the Excel import page (matched by CIN, then name).
-import { parseMasterData, masterDataFromHtml, extractText } from './extract.js';
+import { parseMasterData, masterDataFromHtml, extractText, mcaDirectorsFromPdf } from './extract.js';
 
 export const COMPANYISH = ['Private Ltd', 'Public Ltd', 'OPC', 'LLP'];
 const MCA_FIELDS = [['name', 'Legal name'], ['cin', 'CIN / LLPIN'], ['doi', 'Date of incorporation'], ['email', 'Email'], ['address', 'Registered address'], ['state', 'State'], ['pincode', 'PIN code'], ['constitution', 'Constitution']];
@@ -22,7 +22,7 @@ export function initDirectors(ctx) {
     for (const r of read) {
       const ex = out.find(d => (r.din && d.din === r.din) || (r.pan && d.pan === r.pan) || (!r.din && !r.pan && norm(d.name) === norm(r.name)));
       if (!ex) { out.push({ ...r }); changes.push(['New', r]); continue; }
-      const diff = ['name', 'designation', 'appointed', 'ceased', 'din', 'pan'].filter(k => r[k] && r[k] !== ex[k]);
+      const diff = ['name', 'designation', 'category', 'appointed', 'ceased', 'din', 'pan'].filter(k => r[k] && r[k] !== ex[k]);
       if (diff.length) { Object.assign(ex, Object.fromEntries(diff.map(k => [k, r[k]]))); changes.push(['Updated: ' + diff.join(', '), r]); } else changes.push(['Same', r]);
     }
     return { list: out, changes };
@@ -39,7 +39,7 @@ export function initDirectors(ctx) {
         ${adm ? `<div class="btns"><button data-act="mcaImport">Import MCA master data</button><button class="primary" data-act="dirEdit">+ Add</button></div>` : ''}</div>
       ${info ? `<div class="mcainfo">${info}${c.mca?.at ? `<span class="muted tiny">from MCA master data, ${isoToDisp(c.mca.at)}</span>` : ''}</div>` : ''}
       <table class="tbl"><thead><tr><th>Name</th><th>${c.constitution === 'LLP' ? 'DPIN / DIN' : 'DIN'}</th><th>Designation</th><th>Date of appointment</th><th>Date of cessation</th>${adm ? '<th></th>' : ''}</tr></thead><tbody>
-      ${rows.map(({ d, i }) => `<tr class="${d.ceased ? 'muted' : ''}"><td><b>${esc(d.name)}</b>${d.pan ? `<div class="tiny mono muted">PAN ${esc(d.pan)}</div>` : ''}</td><td class="mono">${esc(d.din || '—')}</td><td>${esc(d.designation || '')}</td>
+      ${rows.map(({ d, i }) => `<tr class="${d.ceased ? 'muted' : ''}"><td><b>${esc(d.name)}</b>${d.pan ? `<div class="tiny mono muted">PAN ${esc(d.pan)}</div>` : ''}</td><td class="mono">${esc(d.din || '—')}</td><td>${esc(d.designation || '')}${d.category ? `<div class="tiny muted">${esc(d.category)}</div>` : ''}</td>
         <td class="nowrap">${isoToDisp(d.appointed) || '—'}</td><td class="nowrap">${d.ceased ? `${isoToDisp(d.ceased)} <span class="tag">Ceased</span>` : '<span class="tag green">Current</span>'}</td>
         ${adm ? `<td class="nowrap"><button class="icon" data-act="dirEdit" data-i="${i}" title="Edit">✎</button><button class="icon" data-act="dirDel" data-i="${i}" title="Delete">✕</button></td>` : ''}</tr>`).join('')
         || `<tr><td colspan="6" class="muted empty">No ${label(c).toLowerCase()} yet.${c.people && adm ? ` <a href="#" data-act="dirFromPeople">Use the names already saved (${esc(c.people.split('\n').filter(Boolean).length)})</a> or` : ''} ${adm ? 'Click <b>Import MCA master data</b> — browse the master data page saved from the MCA site (PDF or web page), or paste it.' : ''}</td></tr>`}</tbody></table>
@@ -81,7 +81,11 @@ export function initDirectors(ctx) {
   async function readMca(file, onStep) {
     if (/\.html?$/i.test(file.name) || file.type === 'text/html') return masterDataFromHtml(await file.text());
     if (/\.txt$/i.test(file.name)) return parseMasterData(await file.text());
-    return parseMasterData(await extractText(file, onStep));
+    const res = parseMasterData(await extractText(file, onStep));
+    if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') {
+      try { const dirs = await mcaDirectorsFromPdf(file); if (dirs.length) res.directors = dirs; } catch { /* keep the text-based reading */ }
+    }
+    return res;
   }
   A.mcaImport = () => {
     S.mca = null;

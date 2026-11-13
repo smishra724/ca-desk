@@ -1,7 +1,7 @@
 import { firebaseConfig } from './firebase-config.js';
 import { PORTALS, portalByKey } from './portals.js';
 import { extractFromFile, extractText, toISO, STATE_CODES } from './extract.js';
-import { dueItems, fmtDate, regsOf, activeRegs, filingFor, isItrOnly, codeOf, flagOn, dispName, subName } from './compliance.js';
+import { dueItems, fmtDate, regsOf, activeRegs, filingFor, isItrOnly, codeOf, flagOn, dispName, subName, setCustomComps } from './compliance.js';
 import { initTasks } from './tasks.js';
 import { initSend } from './send.js';
 import { initPayslips } from './payslips.js';
@@ -142,6 +142,15 @@ async function extAutoUpdate() {
     }
   } catch { /* stays manual */ }
 }
+// compliances / work added on the Compliances page (meta/comps)
+async function loadCustomComps() {
+  try { const d = await getDoc(doc(db, 'meta', 'comps')); S.customComps = d.exists() ? d.data().items || [] : []; } catch { S.customComps = []; }
+  setCustomComps(S.customComps);
+}
+async function saveCustomComps(items) {
+  S.customComps = items; setCustomComps(items);
+  await setDoc(doc(db, 'meta', 'comps'), { items, updatedAt: serverTimestamp() });
+}
 async function boot(u) {
   try {
     const s = await getDoc(doc(db, 'meta', 'setup'));
@@ -155,7 +164,7 @@ async function boot(u) {
   S.profile = { uid: u.uid, email: u.email, ...p.data() };
   if (isAdmin()) {
     if (!S.trackFrom) { S.trackFrom = todayISO(); updateDoc(doc(db, 'meta', 'setup'), { trackFrom: S.trackFrom }).catch(() => {}); }
-    await loadClients(); await loadAllFilings(); await T.load(); loadGstLoginFlags(); S.view = 'dashboard'; autoTasks(); setTimeout(extAutoUpdate, 3000);
+    await loadCustomComps(); await loadClients(); await loadAllFilings(); await T.load(); loadGstLoginFlags(); S.view = 'dashboard'; autoTasks(); setTimeout(extAutoUpdate, 3000);
   }
   else { await openClient(S.profile.clientId, 'master'); await T.loadForClient(S.profile.clientId).catch(() => {}); }
   render();
@@ -1031,7 +1040,7 @@ const COMPS = [
   { id: 'FS', name: 'Finalisation of accounts', type: 'service', grp: 'Other work' },
   { id: 'GEN', name: 'General work', type: 'service', grp: 'Other work' },
 ];
-const compById = id => COMPS.find(x => x.id === id) || (id.startsWith('svc:') ? { id, name: id.slice(4), type: 'service', grp: 'Other work' } : null);
+const compById = id => COMPS.find(x => x.id === id) || ((x => x && { ...x, type: 'service', custom: true })((S.customComps || []).find(x => x.id === id))) || (id.startsWith('svc:') ? { id, name: id.slice(4), type: 'service', grp: 'Other work' } : null);
 // clients the law makes it possible for (ignoring this client's own switch-offs)
 const compEligible = (cp, c) => {
   if (cp.type !== 'auto') return true;
@@ -1042,34 +1051,37 @@ const compOn = (cp, c) => cp.type === 'flag' ? flagOn(c, cp.flag) && !isItrOnly(
   : cp.type === 'service' ? (c.services || []).includes(cp.id)
   : compEligible(cp, c) && !cp.codes.some(k => (c.off || []).includes(k));
 function vComps() {
-  const svcExtra = [...new Set(S.clients.flatMap(c => c.services || []).filter(x => x.startsWith('svc:')))].map(compById);
-  const all = [...COMPS, ...svcExtra];
+  const custom = (S.customComps || []).map(x => ({ ...x, type: 'service', custom: true }));
+  const svcExtra = [...new Set(S.clients.flatMap(c => c.services || []).filter(x => x.startsWith('svc:') && !custom.some(k => k.id === x)))].map(compById);
+  const all = [...COMPS, ...custom, ...svcExtra];
   const cnt = cp => S.clients.filter(c => compOn(cp, c)).length;
   const groups = [...new Set(all.map(x => x.grp))];
   const sel = S.compSel && compById(S.compSel);
   return `
   <section class="card">
-    <div class="row-between wrap"><h2>Compliances &amp; work</h2><button class="sm" data-act="compNew">+ Add other work</button></div>
+    <div class="row-between wrap"><h2>Compliances &amp; work</h2><button class="sm" data-act="compNew" data-grp="">+ New group / compliance</button></div>
     <p class="muted small">Click a compliance or task to see and tick the clients it applies to. The due-dates calendar and task generation follow these ticks.</p>
     ${groups.map(g => `<h3 class="cgrp">${esc(g)}</h3><div class="cbtns">${all.filter(x => x.grp === g).map(cp => `
-      <button class="compbtn ${S.compSel === cp.id ? 'on' : ''}" data-act="compOpen" data-id="${esc(cp.id)}"><span>${esc(cp.name)}</span><b>${cnt(cp)}</b></button>`).join('')}</div>`).join('')}
+      <button class="compbtn ${S.compSel === cp.id ? 'on' : ''} ${cp.custom ? 'custom' : ''}" data-act="compOpen" data-id="${esc(cp.id)}" title="${cp.custom ? esc(freqText(cp)) : ''}"><span>${esc(cp.name)}</span><b>${cnt(cp)}</b></button>`).join('')}
+      <button class="compadd" data-act="compNew" data-grp="${esc(g)}" title="Add a compliance or work under ${esc(g)}">+ Add</button></div>`).join('')}
   </section>
   ${sel ? compPanel(sel) : ''}`;
 }
 function compPanel(cp) {
   const q = (S.compQ || '').toLowerCase(), cf = S.compCons || '';
-  const elig = S.clients.filter(c => compEligible(cp, c) && !(cp.type === 'flag' && isItrOnly(c)));
+  const elig = S.clients.filter(c => !c.exClient && compEligible(cp, c) && !(cp.type === 'flag' && isItrOnly(c)));
   const pick = S.compPick ||= new Set(elig.filter(c => compOn(cp, c)).map(c => c.id));
   const shown = elig.filter(c => (!cf || (c.constitution || 'Not set') === cf) && (!q || [c.name, c.tradeName, c.pan, c.gstin].some(v => (v || '').toLowerCase().includes(q))))
     .sort((a, b) => dispName(a).localeCompare(dispName(b)));
   const notElig = S.clients.length - elig.length;
   const why = cp.type === 'auto' ? `Only clients for whom ${esc(cp.name)} can arise are listed (GSTIN / filing type / constitution)${notElig ? ` — ${notElig} others don't qualify` : ''}.`
     : cp.type === 'flag' ? `Ticking switches on ${esc(cp.name)} in the client's compliance calendar.${cp.id === 'pt' ? ' Due dates follow the state in the client\'s address; states without PT (e.g. UP, Delhi, Haryana, Rajasthan) get no PT dates.' : cp.id === 'lwf' ? ' Monthly, half-yearly or annual depending on the client\'s state.' : ''}${notElig ? ` ITR-only clients (${notElig}) are excluded.` : ''}`
+    : cp.custom && cp.freq && cp.freq !== 'none' ? `${esc(freqText(cp))}. Ticked clients get it in their compliance calendar, on Due dates and as tasks.`
     : 'Work without a statutory due date. Use "Create tasks" to raise a task for every ticked client.';
   return `<section class="card" id="compPanel">
     <div class="row-between wrap"><h2>${esc(cp.name)} <span class="muted">(${pick.size} of ${elig.length} ticked)</span></h2>
       <div class="btns"><button class="primary" data-act="compSave">Save</button>
-        <button data-act="compTasks">Create tasks for ticked clients…</button><button data-act="compClose">Close</button></div></div>
+        <button data-act="compTasks">Create tasks for ticked clients…</button>${cp.custom ? `<button data-act="compNew" data-edit="${esc(cp.id)}">Edit</button><button class="danger" data-act="compDel" data-id="${esc(cp.id)}">Delete</button>` : ''}<button data-act="compClose">Close</button></div></div>
     <p class="muted small">${why}</p>
     <div class="filters">
       <input id="compQ" placeholder="Search client, PAN, GSTIN…" value="${esc(S.compQ || '')}">
@@ -1080,6 +1092,8 @@ function compPanel(cp) {
       <span><b>${esc(c.name)}</b><span class="muted tiny">${esc(c.constitution || '')}${c.pan ? ' · ' + esc(c.pan) : ''}${regsOf(c).length ? ' · ' + regsOf(c).length + ' GSTIN' : ''}</span></span></label>`).join('') || '<p class="muted">No clients match.</p>'}</div>
   </section>`;
 }
+const freqText = cp => !cp.freq || cp.freq === 'none' ? 'No due date' : cp.freq === 'annual' ? `Yearly, due ${cp.day} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][(+cp.month || 4) - 1]}`
+  : `${({ monthly: 'Monthly', quarterly: 'Quarterly', halfyearly: 'Half-yearly' })[cp.freq]}, due on the ${cp.day}${['th', 'st', 'nd', 'rd'][(cp.day % 10 > 3 || [11, 12, 13].includes(+cp.day)) ? 0 : cp.day % 10]} of the ${+cp.lag ? `${+cp.lag + 1}${+cp.lag === 1 ? 'nd' : 'rd'} month` : 'month'} after the period`;
 async function compSave(cp) {
   const pick = S.compPick; let b = writeBatch(db), n = 0, changed = 0;
   for (const c of S.clients) {
@@ -1248,7 +1262,36 @@ const A = {
   compClose: () => { S.compSel = null; S.compPick = null; render(); },
   compAll: ({ v }) => { for (const i of document.querySelectorAll('[data-change=compPick]')) v ? S.compPick.add(i.value) : S.compPick.delete(i.value); render(); },
   compSave: () => guard(async () => { const n = await compSave(compById(S.compSel)); S.compPick = null; render(); toast(n ? `Saved — ${n} client(s) updated` : 'No changes'); if (n) autoTasks(); }),
-  compNew: () => { const n = prompt('Name of the work (e.g. Monthly MIS, Trademark renewal)'); if (n?.trim()) { S.compSel = 'svc:' + n.trim(); S.compPick = new Set(); render(); } },
+  compNew: ({ grp, edit }) => {
+    const cur = edit ? (S.customComps || []).find(x => x.id === edit) || {} : {};
+    const groups = [...new Set([...COMPS.map(x => x.grp), ...(S.customComps || []).map(x => x.grp)])];
+    const g = cur.grp ?? grp ?? '';
+    modal(`<h2>${edit ? 'Edit' : 'Add'} compliance / work${g && !edit ? ` under ${esc(g)}` : ''}</h2>
+      <form data-form="compNewSave" class="grid"><input type="hidden" name="edit" value="${esc(edit || '')}">
+        <label class="span2">Name<input name="name" value="${esc(cur.name || '')}" placeholder="e.g. Export of services: Monthly compliance, Trademark renewal, MIS report" required></label>
+        <label>Group<select name="grp" data-change="compGrpSel">${groups.map(x => `<option ${x === (g || 'Other work') ? 'selected' : ''}>${esc(x)}</option>`).join('')}<option value="__new">New group…</option></select></label>
+        <label id="newGrpBox" style="display:none">New group name<input name="newGrp" placeholder="e.g. FEMA / RBI"></label>
+        <label>How often<select name="freq" data-change="compFreqSel">${[['none', 'No due date (one-off / as needed)'], ['monthly', 'Monthly'], ['quarterly', 'Quarterly'], ['halfyearly', 'Half-yearly'], ['annual', 'Yearly']].map(([v, l]) => `<option value="${v}" ${(cur.freq || 'none') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <div id="dueBox" class="span2 grid" style="${!cur.freq || cur.freq === 'none' ? 'display:none' : ''}">
+          <label>Due day<input type="number" name="day" min="1" max="28" value="${esc(cur.day || 15)}"></label>
+          <label class="nofreqA">Due in<select name="lag"><option value="0" ${!+cur.lag ? 'selected' : ''}>the month after the period</option><option value="1" ${+cur.lag === 1 ? 'selected' : ''}>the 2nd month after the period</option><option value="2" ${+cur.lag === 2 ? 'selected' : ''}>the 3rd month after the period</option></select></label>
+          <label class="freqA">Due month<select name="month">${['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, i) => `<option value="${i + 1}" ${(+cur.month || 9) === i + 1 ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
+        </div>
+        <p class="span2 muted small">With a frequency, it appears on Due dates and gets tasks automatically for the clients you tick. Without one, raise tasks when needed with “Create tasks”.</p>
+        <div class="span2 btns"><button class="primary">${edit ? 'Save' : 'Add and pick clients'}</button><button type="button" data-act="closeModal">Cancel</button></div></form>`);
+    const f = document.querySelector('[data-form=compNewSave]'); C.compFreqSel(f.elements.freq);
+  },
+  compDel: ({ id }) => {
+    const cp = compById(id), users = S.clients.filter(c => (c.services || []).includes(id));
+    if (!confirm(`Delete “${cp.name}”?${users.length ? `\n\nIt is ticked for ${users.length} client(s); it will be removed from them. Tasks already created stay.` : ''}`)) return;
+    guard(async () => {
+      let b = writeBatch(db), n = 0;
+      for (const c of users) { const sv = (c.services || []).filter(x => x !== id); b.update(doc(db, 'clients', c.id), { services: sv, updatedAt: serverTimestamp() }); c.services = sv; if (++n % 400 === 0) { await b.commit(); b = writeBatch(db); } }
+      await b.commit();
+      await saveCustomComps((S.customComps || []).filter(x => x.id !== id));
+      S.compSel = null; S.compPick = null; render();
+    }, 'Deleted');
+  },
   compTasks: () => {
     const cp = compById(S.compSel), ids = [...S.compPick];
     if (!ids.length) return toast('Tick at least one client first');
@@ -1654,6 +1697,18 @@ const F = {
   firm: fd => guard(async () => {
     S.firm = fd.get('firm').trim(); await updateDoc(doc(db, 'meta', 'setup'), { firmName: S.firm }); render(); loadStaff();
   }, 'Saved'),
+  compNewSave: fd => guard(async () => {
+    const name = String(fd.get('name')).trim(), edit = fd.get('edit');
+    let grp = fd.get('grp'); if (grp === '__new') grp = String(fd.get('newGrp') || '').trim() || 'Other work';
+    const freq = fd.get('freq'), list = [...(S.customComps || [])];
+    const slug = name.toUpperCase().replace(/[^A-Z0-9]+/g, '').slice(0, 14) || 'WORK';
+    const item = { id: edit || 'svc:' + name, name, grp, freq, day: +fd.get('day') || 15, lag: +fd.get('lag') || 0, month: +fd.get('month') || 9,
+      code: (edit && list.find(x => x.id === edit)?.code) || ('CUS' + slug + (list.some(x => x.code === 'CUS' + slug) ? Date.now().toString(36).slice(-3).toUpperCase() : '')) };
+    const i = list.findIndex(x => x.id === item.id); if (i >= 0) list[i] = item; else list.push(item);
+    await saveCustomComps(list);
+    closeModal(); S.compSel = item.id; S.compPick = null; autoTasks(); render();
+    setTimeout(() => document.getElementById('compPanel')?.scrollIntoView({ behavior: 'smooth' }), 60);
+  }, 'Saved — now tick the clients it applies to'),
   applyOcr: (fd, form) => guard(async () => {
     const { res, file, mode } = S.pending;
     const val = k => { let v = (fd.get('f_' + k) || '').trim(); if (UPPER.has(k)) v = v.toUpperCase(); return v; };
@@ -1719,6 +1774,8 @@ const C = {
   consF: el => { S.consF = el.value; S.sel = new Set(); render(); },
   compPick: el => { el.checked ? S.compPick.add(el.value) : S.compPick.delete(el.value); el.closest('.cpick')?.classList.toggle('on', el.checked);
     const h = document.querySelector('#compPanel h2 .muted'); if (h) h.textContent = h.textContent.replace(/^\(\d+/, '(' + S.compPick.size); },
+  compGrpSel: el => { const b = document.getElementById('newGrpBox'); if (b) b.style.display = el.value === '__new' ? '' : 'none'; },
+  compFreqSel: el => { const f = el.form, v = el.value; f.querySelector('#dueBox').style.display = v === 'none' ? 'none' : ''; f.querySelectorAll('.freqA').forEach(x => x.style.display = v === 'annual' ? '' : 'none'); f.querySelectorAll('.nofreqA').forEach(x => x.style.display = v === 'annual' ? 'none' : ''); },
   compCons: el => { S.compCons = el.value; render(); },
   dueRange: el => { if (el.value === 'pick') { S.dueF.pick = true; render(); document.querySelector('.mpick')?.showPicker?.(); return; } S.dueF.pick = false; S.dueF.range = el.value; S.dueDay = ''; render(); },
   dueMonth: el => { if (el.value) { S.dueF.range = 'm:' + el.value; S.dueDay = ''; render(); } },

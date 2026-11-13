@@ -696,3 +696,6 @@ body.dragging-gst .dropbar{display:flex}
 .dirs{margin-top:16px}.dirs h2 .muted{font-weight:400}
 .mcainfo{display:flex;flex-wrap:wrap;gap:6px 18px;margin:6px 0 12px;font-size:13px;padding:8px 12px;background:#F6F8FB;border-radius:8px}
 #mcaPaste{width:100%;margin-top:10px}
+.compadd{border:1px dashed #9AA4B2;background:transparent;color:#5B6577;border-radius:10px;padding:8px 14px;cursor:pointer;font-weight:600}
+.compadd:hover{border-color:#0B7A5C;color:#0B7A5C;background:#F2FAF6}
+.compbtn.custom{border-style:solid;border-color:#C9D9F0}
