@@ -254,7 +254,7 @@ const NAV_ICON = {
 const PAGE_TITLE = { dashboard: 'Dashboard', due: 'Due dates', tasks: 'Tasks', task: 'Task', workflow: 'Work categories', clients: 'Masters', client: 'Master', comps: 'Compliances', dsc: 'DSC register', import: 'Excel import', settings: 'Settings' };
 function render() {
   if (!S.profile) return;
-  const items = isAdmin() ? [['dashboard', 'Dashboard'], ['due', 'Due dates'], ['tasks', 'Tasks'], ['clients', 'Masters'], ['comps', 'Compliances'], ['dsc', 'DSC register'], ['import', 'Excel import'], ['settings', 'Settings']] : [];
+  const items = isAdmin() ? [['dashboard', 'Dashboard'], ['clients', 'Masters'], ['due', 'Due dates'], ['tasks', 'Tasks'], ['comps', 'Compliances'], ['dsc', 'DSC register'], ['import', 'Excel import'], ['settings', 'Settings']] : [];
   const active = v => S.view === v || (v === 'tasks' && ['task', 'workflow'].includes(S.view)) || (v === 'clients' && S.view === 'client');
   const nav = items.map(([v, l]) => `<button class="nav ${active(v) ? 'on' : ''}" data-act="go" data-v="${v}"><svg viewBox="0 0 24 24" aria-hidden="true">${NAV_ICON[v]}</svg><span>${l}</span></button>`).join('');
   const who = S.profile.name || S.profile.email || '';
