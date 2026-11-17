@@ -223,7 +223,7 @@ export function initBooks(ctx) {
   /* ---------- upload & read ---------- */
   async function addFiles(files, kindHint) {
     const s = st(), c = client(), mode = ls.get('cadesk.readMode') || 'both', bankLedger = s.bankLedger || '';
-    if (kindHint === 'bank' && !bankLedger) throw new Error('Choose the bank ledger (in Tally) that this statement belongs to.');
+    if ((kindHint === 'bank' || kindHint === 'contra') && !bankLedger) throw new Error('Choose the bank ledger (in Tally) for this statement / slip first.');
     let n = 0, made = 0;
     for (const f of files) {
       n++;
@@ -248,6 +248,11 @@ export function initBooks(ctx) {
         for (const t of x.transactions || []) { const d = draftFromBank(t, bankLedger); b.set(doc(collection(db, 'clients', s.cid, 'books')), { src, ex: t, ...d, status: 'review', createdAt: serverTimestamp() }); made++; if (++k % 400 === 0) { await b.commit(); b = writeBatch(db); } }
         await b.commit();
       } else {
+        if (kindHint === 'contra') { // deposit / withdrawal slip or transfer advice → Contra between cash and the chosen bank
+          const amt = r2(x.total || x.taxable), cash = (L().find(l => /cash-in-hand/i.test(l.r)) || {}).n || 'Cash';
+          const d = { kind: 'bank', v: { type: 'Contra', date: x.invoice_date || '', no: x.invoice_no || '', party: cash, ledger: bankLedger, total: amt, dir: /withdraw/i.test(JSON.stringify(x)) ? 'out' : 'in', narration: /withdraw/i.test(JSON.stringify(x)) ? 'Cash withdrawn from bank' : 'Cash deposited in bank' }, warn: bankLedger ? [] : ['Choose the bank ledger'] };
+          await addDoc(collection(db, 'clients', s.cid, 'books'), { src, ex: x, ...d, status: 'review', createdAt: serverTimestamp() }); made++; continue;
+        }
         const d = x._err ? { kind: kindHint || 'purchase', v: { type: 'Purchase', date: '', no: '', party: '', ledger: '', total: 0 }, warn: ['Could not read: ' + x._err] } : draftFromInvoice(x, kindHint, c);
         await addDoc(collection(db, 'clients', s.cid, 'books'), { src, ex: x, ...d, status: 'review', createdAt: serverTimestamp() }); made++;
       }
