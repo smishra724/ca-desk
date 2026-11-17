@@ -1,0 +1,4 @@
+# Optional: full path of your token's PKCS#11 driver file, one per line. Lines starting with # are ignored.
+# The helper already checks the common ePass, ProxKey, eToken, mToken and OpenSC driver locations.
+# Windows example:  C:\Windows\System32\eps2003csp11.dll
+# Mac example:      /usr/local/lib/libcastle_v2.1.0.dylib

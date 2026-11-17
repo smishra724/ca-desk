@@ -39,7 +39,7 @@ export function initDsc(ctx) {
     const ctr = (k, v, l, cls, on) => `<button class="ctr ${cls} ${on ? 'on' : ''}" data-act="dscF" data-k="${k}" data-v="${v}"><b>${n[{ show: v === 'soon' ? 'soon' : v === 'expired' ? 'exp' : 'all', cust: v === 'In office' ? 'office' : 'client' }[k]]}</b><span>${l}</span></button>`;
     return `<section class="card">
       <div class="row-between wrap"><div><h2>DSC register</h2><p class="muted small">Digital signature tokens held for clients — validity, PIN and where each token is.</p></div>
-        <div class="btns"><button data-act="dscExport">Export Excel</button><button class="primary" data-act="dscEdit">+ Add DSC</button></div></div>
+        <div class="btns"><button data-act="dscExport">Export Excel</button>${isAdmin() ? '<button data-act="dscRead" title="Plug in the DSC token, then click">Read from token</button>' : ''}<button class="primary" data-act="dscEdit">+ Add DSC</button></div></div>
       <div class="ctrs dscctr">
         ${ctr('show', '', 'Active DSCs', 'c-all', !f.show && !f.cust)}${ctr('cust', 'In office', 'In office', 'c-cp', f.cust === 'In office')}${ctr('cust', 'With client', 'With client', 'c-wc', f.cust === 'With client')}
         ${ctr('show', 'soon', 'Expiring in 30 days', 'c-today', f.show === 'soon')}${ctr('show', 'expired', 'Expired', 'c-late', f.show === 'expired')}
@@ -76,13 +76,14 @@ export function initDsc(ctx) {
 
   /* ---------- add / edit ---------- */
   A.dscEdit = ({ id, cid }) => {
-    const x = (S.dsc || []).find(d => d.id === id) || { cid: cid || '', custody: 'In office', cls: CLASSES[0], status: 'Active' };
+    const pre = !id && S.dscPre ? S.dscPre : null; S.dscPre = null;
+    const x = (S.dsc || []).find(d => d.id === id) || { cid: cid || '', custody: 'In office', cls: CLASSES[0], status: 'Active', ...(pre || {}) };
     const opt = (arr, v) => arr.map(o => `<option ${o === v ? 'selected' : ''}>${o}</option>`).join('');
     const c = S.clients.find(y => y.id === x.cid);
     modal(`<h2>${id ? 'Edit DSC' : 'Add DSC'}</h2><form data-form="dscSave" data-id="${id || ''}" class="grid">
       <label class="span2">Client<input name="client" list="dscClients" required autocomplete="off" value="${c ? esc(c.name) : ''}" placeholder="Type client name, PAN or GSTIN"></label>
       <datalist id="dscClients">${S.clients.map(y => `<option value="${esc(y.name)}">`).join('')}</datalist>
-      <label>Holder name<input name="holder" required value="${esc(x.holder || '')}"></label>
+      <input type="hidden" name="certSerial" value="${esc(x.certSerial || '')}"><label>Holder name<input name="holder" required value="${esc(x.holder || '')}"></label>
       <label>Role<select name="role">${opt(ROLES, x.role)}</select></label>
       <label>Holder PAN<input name="pan" class="mono up" value="${esc(x.pan || '')}"></label>
       <label>Mobile<input name="mobile" value="${esc(x.mobile || '')}"></label>
@@ -106,6 +107,7 @@ export function initDsc(ctx) {
     const c = pick(fd.get('client')); if (!c) throw new Error('Pick the client from the list.');
     const id = form.dataset.id, old = (S.dsc || []).find(d => d.id === id);
     const data = Object.fromEntries(['holder', 'role', 'pan', 'mobile', 'email', 'cls', 'issuer', 'token', 'serial', 'pin', 'validFrom', 'validTo', 'custody', 'location', 'status', 'notes'].map(k => [k, (fd.get(k) || '').trim()]));
+    data.certSerial = (fd.get('certSerial') || old?.certSerial || '').trim();
     data.pan = data.pan.toUpperCase(); data.moves = old?.moves || []; data.updatedAt = new Date().toISOString();
     if (old && old.cid !== c.id) await deleteDoc(doc(db, 'clients', old.cid, 'dsc', id)); // moved to another client
     const ref = id && old?.cid === c.id ? doc(db, 'clients', c.id, 'dsc', id) : doc(collection(db, 'clients', c.id, 'dsc'));
@@ -131,6 +133,54 @@ export function initDsc(ctx) {
     const upd = { custody: fd.get('custody'), moves: [...(x.moves || []), m], updatedAt: new Date().toISOString() };
     await setDoc(doc(db, 'clients', x.cid, 'dsc', x.id), upd, { merge: true }); Object.assign(x, upd); closeModal(); render();
   }, 'Recorded in the movement log');
+
+  /* ---------- read the certificate from a plugged-in token (CA Desk Helper extension + DSC helper program) ---------- */
+  const ext = () => document.documentElement.dataset;
+  const askHelper = type => new Promise(ok => {
+    const id = 'dsc' + Date.now() + Math.random(); let done = false;
+    const fin = r => { if (done) return; done = true; window.removeEventListener('message', on); clearTimeout(t); ok(r); };
+    const on = e => { if (e.source === window && e.data?.type === 'CAPM_DSC_RES' && e.data.id === id) fin(e.data); };
+    const t = setTimeout(() => fin({ ok: false, error: 'The token did not answer in time. Check it is plugged in and try again.' }), 90000);
+    window.addEventListener('message', on); window.postMessage({ type, id }, location.origin);
+  });
+  const helpHtml = why => `<h2>Read from token</h2><p>${why}</p>
+    <ol class="small"><li>Download and run the installer for this computer once: <a href="ca-desk-dsc-helper-windows.zip" download><b>Windows</b></a> · <a href="ca-desk-dsc-helper-mac.zip" download><b>Mac</b></a> (unzip, then double-click <span class="mono">install.bat</span> / <span class="mono">install.command</span>).</li>
+    <li>In <b>chrome://extensions</b>, reload <b>CA Desk Helper</b> (version 1.6 or later) and allow its new permission.</li>
+    <li>Plug in the token and click <b>Read from token</b> again. Your token PIN is never asked for or read.</li></ol>
+    <div class="btns"><button type="button" data-act="closeModal">Close</button></div>`;
+  const tkSame = (x, t) => t.certSerial && x.certSerial === t.certSerial || (!x.certSerial && x.serial && t.tokenSerial && x.serial === t.tokenSerial && x.holder && x.holder.toLowerCase() === t.holder.toLowerCase());
+  A.dscRead = async () => {
+    if (ext().capmExt !== '1') return modal(helpHtml('The CA Desk Helper extension is not active in this browser.'));
+    if (ext().capmDsc !== '1') return modal(helpHtml('Your CA Desk Helper extension is an older version that cannot read tokens.'));
+    modal('<h2>Read from token</h2><p class="muted">Reading the plugged-in token… this can take up to a minute the first time.</p>');
+    const r = await askHelper('CAPM_DSC');
+    if (!r.ok) return modal(r.missing ? helpHtml('The DSC helper program is not installed on this computer.') : `<h2>Read from token</h2><p class="err">${esc(r.error || 'Could not read the token.')}</p><div class="btns"><button type="button" data-act="closeModal">Close</button></div>`);
+    S.dscTok = r.certs || [];
+    if (!S.dscTok.length) {
+      const tried = (r.tried || []).filter(t => t.status !== 'skipped').length;
+      return modal(`<h2>No token found</h2><p>Plug in the DSC token (wait for its light), unlock nothing — no PIN is needed — and click <b>Read from token</b> again.</p>
+        <p class="small muted">Checked ${tried} driver${tried === 1 ? '' : 's'} on this computer. If your token's driver is installed but still not found, add the driver file path to <span class="mono">libs.txt</span> next to the DSC helper, or send me the output of <span class="mono">cadesk-dsc-host --scan</span>.</p>
+        <div class="btns"><button type="button" data-act="closeModal">Close</button></div>`);
+    }
+    modal(`<h2>Token found</h2><p class="muted small">${S.dscTok.length} certificate${S.dscTok.length === 1 ? '' : 's'} read from the token. Pick what to do with each.</p>
+      <div class="reg-wrap"><table class="reg"><thead><tr><th>Holder</th><th>Issuer / token</th><th>Valid</th><th></th></tr></thead><tbody>
+      ${S.dscTok.map((t, i) => { const m = (S.dsc || []).find(x => tkSame(x, t)); return `<tr class="${t.expired ? 'late' : ''}"><td>${esc(t.holder)}<div class="sub">${esc(t.org || '')}${t.email ? ' · ' + esc(t.email) : ''}${t.usage === 'encryption' ? ' · encryption cert' : ''}</div></td>
+        <td class="small">${esc(t.issuer || t.issuerName)}<div class="sub">${esc(t.token || t.tokenModel || '')}${t.tokenSerial ? ` · <span class="mono">${esc(t.tokenSerial)}</span>` : ''}</div></td>
+        <td class="nowrap">${isoToDisp(t.validFrom)} → ${isoToDisp(t.validTo)}${t.expired ? ' <span class="dd late">Expired</span>' : ''}</td>
+        <td class="nowrap">${m ? `<button class="sm primary" data-act="dscTokUpd" data-i="${i}" data-id="${m.id}" data-cid="${m.cid}">Update dates</button><div class="sub">In register: ${esc(cName(m.cid))}</div>` : `<button class="sm primary" data-act="dscTokAdd" data-i="${i}">Add to register</button>`}</td></tr>`; }).join('')}
+      </tbody></table></div><div class="btns"><button type="button" data-act="closeModal">Close</button></div>`);
+  };
+  A.dscTokAdd = ({ i }) => {
+    const t = S.dscTok[+i]; if (!t) return;
+    S.dscPre = { holder: t.holder, validFrom: t.validFrom, validTo: t.validTo, issuer: t.issuer || '', token: t.token || '', serial: t.tokenSerial || '', email: t.email || '', certSerial: t.certSerial,
+      cls: t.usage === 'both' ? 'Class 3 – Signing & Encryption' : CLASSES[0], notes: t.issuer ? '' : (t.issuerName ? 'Issuer on certificate: ' + t.issuerName : '') };
+    A.dscEdit({});
+  };
+  A.dscTokUpd = ({ i, id, cid }) => guard(async () => {
+    const t = S.dscTok[+i], x = (S.dsc || []).find(d => d.id === id); if (!t || !x) return;
+    const upd = { validFrom: t.validFrom, validTo: t.validTo, certSerial: t.certSerial, serial: x.serial || t.tokenSerial || '', issuer: x.issuer || t.issuer || '', token: x.token || t.token || '', updatedAt: new Date().toISOString() };
+    await setDoc(doc(db, 'clients', cid, 'dsc', id), upd, { merge: true }); Object.assign(x, upd); closeModal(); render();
+  }, 'DSC dates updated from the token');
 
   /* ---------- PIN, reminders, export, filters ---------- */
   A.dscPin = (_, el) => { const s = el.parentElement.querySelector('.pin'); const shown = s.textContent !== '••••••'; s.textContent = shown ? '••••••' : s.dataset.pin; if (!shown) navigator.clipboard?.writeText(s.dataset.pin).then(() => toast('PIN copied')); };

@@ -1,6 +1,7 @@
 // Runs on the CA Desk page. Tells the page the extension is installed and relays Login clicks.
 document.documentElement.dataset.capmExt = '1';
 document.documentElement.dataset.capmTally = '1';
+document.documentElement.dataset.capmDsc = '1';
 document.documentElement.dataset.capmVer = chrome.runtime.getManifest().version;
 window.addEventListener('message', e => {
   if (e.source !== window || e.origin !== location.origin) return;
@@ -9,6 +10,13 @@ window.addEventListener('message', e => {
     chrome.runtime.sendMessage({ type: 'CAPM_TALLY', url: d.url, xml: d.xml }, r => {
       const res = r || { ok: false, error: chrome.runtime.lastError?.message || 'no reply' };
       window.postMessage({ type: 'CAPM_TALLY_RES', id: d.id, ...res }, location.origin);
+    });
+    return;
+  }
+  if (d && (d.type === 'CAPM_DSC' || d.type === 'CAPM_DSC_PING')) { // DSC token read (native helper on this computer)
+    chrome.runtime.sendMessage({ type: d.type }, r => {
+      const res = r || { ok: false, error: chrome.runtime.lastError?.message || 'no reply' };
+      window.postMessage({ type: 'CAPM_DSC_RES', id: d.id, ...res }, location.origin);
     });
     return;
   }

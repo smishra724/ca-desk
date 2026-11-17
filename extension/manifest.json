@@ -1,11 +1,13 @@
 {
   "manifest_version": 3,
   "name": "CA Desk Helper",
-  "version": "1.5.0",
-  "description": "CA Desk helper: portal login autofill (you type CAPTCHA/OTP), Tally data on this computer, and the GSTR-1 autopilot: upload JSON, generate summary, and after you file, save the ARN and PDF to CA Desk, and checks GST return filing frequency (you type the CAPTCHA).",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkZy2gz+BUPLG+H9QhtQjhnCITF4ixPAt2+DPUF4zcbkn6PE/W9NK5toU3qjkZnCSOKVYZyrPZD2Tdf64YoP9i/dGnfRSeN34hBL6du+utIs9v3vgGN0dNb7LsIRFM5TY/RejvDv11+U0vUkxGpOrI7JA8CNTrOVHikeK+Q1OH+kT8onDoZYf5GLlApLYHI66gUHC0StQRn1+aJ1EOOQBjjr9mxS0oEnperzBtPy2efZ7A+PpqSWMJD9yUwp7OpcqZmbID2u75WR/+Dso81+BAxWMRMW4WM5soxYPSLJwWz8nrBmXzEuRrg+QIkhZs3C3tCMo6sfr+cMeRPayPMYoPQIDAQAB",
+  "version": "1.6.0",
+  "description": "CA Desk helper: portal login autofill (you type CAPTCHA/OTP), Tally data on this computer, and the GSTR-1 autopilot: upload JSON, generate summary, and after you file, save the ARN and PDF to CA Desk, and checks GST return filing frequency (you type the CAPTCHA). Reads DSC token details on this computer (with the CA Desk DSC helper) to fill the DSC register.",
   "permissions": [
     "downloads",
-    "storage"
+    "storage",
+    "nativeMessaging"
   ],
   "background": {
     "service_worker": "background.js"

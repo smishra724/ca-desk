@@ -3,6 +3,14 @@ const TTL = 5 * 60 * 1000;
 const key = url => 'pending:' + new URL(url).hostname;
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  if (msg.type === 'CAPM_DSC' || msg.type === 'CAPM_DSC_PING') { // read DSC token certificates through the CA Desk DSC helper on this computer
+    if (!(sender.url && /^(https:\/\/smishra724\.github\.io\/|http:\/\/(localhost|127\.0\.0\.1)[:\/])/.test(sender.url))) return;
+    chrome.runtime.sendNativeMessage('in.cadesk.dsc', { cmd: msg.type === 'CAPM_DSC' ? 'read' : 'ping' }, r => {
+      const e = chrome.runtime.lastError;
+      reply(e ? { ok: false, missing: /not found|forbidden|Specified native messaging host/i.test(e.message), error: e.message } : r || { ok: false, error: 'no answer from the DSC helper' });
+    });
+    return true;
+  }
   if (msg.type === 'CAPM_TALLY') { // Tally on this computer only, export (read) requests only
     let u; try { u = new URL(msg.url); } catch { return; }
     if (u.protocol !== 'http:' || !['localhost', '127.0.0.1'].includes(u.hostname)) return;

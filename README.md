@@ -20,6 +20,9 @@ You (and staff) manage everything; each client logs in and sees only their own d
 
 **GSTR-1 from Tally** — on Due dates, **File** on a GSTR-1 / IFF row → **Fetch from Tally** reads the month's (or QRMP quarter's) sales, credit and debit notes from Tally over its ODBC/HTTP port (default 9000) through the CA Desk Helper extension, builds the portal JSON (B2B, B2CL, B2CS, CDNR, CDNUR, nil, HSN B2B/B2C, documents issued), checks it, and then guides upload on the portal and reads the ARN from the filed PDF.
 
+**Read DSC token (plug in → fill the register)** — on **DSC register** click **Read from token** with the DSC token plugged into this computer. CA Desk Helper (1.6+) asks a small helper program on this computer to read the certificate on the token (holder, issuer, valid from/till, token serial) and offers **Add to register** or, if that certificate is already in the register, **Update dates** (handy at renewal). The token PIN is never asked for, read or stored, and nothing is signed.
+Setup once per computer: download `ca-desk-dsc-helper-windows.zip` or `ca-desk-dsc-helper-mac.zip`, unzip, run `install.bat` (Windows) / `install.command` (Mac — right-click → Open), then reload CA Desk Helper in `chrome://extensions`. The token's own driver (the one used to sign on GST/MCA) must be installed. It checks the common ePass 2003/3003, WatchData ProxKey, SafeNet eToken, mToken, HyperSecu and OpenSC drivers (32- and 64-bit on Windows, Apple Silicon and Intel on Mac), plus any path listed in `libs.txt`; run `cadesk-dsc-host-… --scan` in a terminal to see exactly what it tried. Source is in `dsc-host/`; rebuild the zips with `tools/build-dsc-host.sh` (needs Go).
+
 **One-click portal login** — with the included Chrome extension, **Login** opens the portal and fills the user ID and password (and TAN on TRACES; on Income Tax it fills the password after you click Continue). You enter CAPTCHA / OTP and sign in. Without the extension, Login opens the portal and copies the password.
 
 ## Import from Google Drive
@@ -109,4 +112,5 @@ portals.js                         portal list and login URLs (edit to add more)
 firebase-config.js                 your Firebase keys
 firestore.rules                    security rules — paste into Firebase console
 extension/                         CA Desk Autofill Chrome extension
+dsc-host/                          Go source + installers for the DSC token helper (Windows / Mac)
 ```
