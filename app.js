@@ -9,6 +9,7 @@ import { initPayments, isPayKey } from './payments.js';
 import { initTaskFiles } from './taskfiles.js';
 import { initGstr1 } from './gstr1.js';
 import { initDirectors, COMPANYISH } from './directors.js';
+import { initBooks } from './books.js';
 import { updateExtension, newer, canUpdate, linkedFolder, permission } from './extupdate.js';
 import { initDsc } from './dsc.js';
 import { initDriveImport } from './drive-import.js';
@@ -247,14 +248,15 @@ const NAV_ICON = {
   tasks: '<path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>',
   clients: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6M16 4.5a3.5 3.5 0 0 1 0 7M18 14c2.2.6 3.5 2.7 3.5 6"/>',
   comps: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13l2 2 4-4"/>',
+  books: '<path d="M4 5a2 2 0 0 1 2-2h12v15H6a2 2 0 0 0-2 2z"/><path d="M4 20a2 2 0 0 0 2 1h12v-3M8 7h6M8 11h6"/>',
   dsc: '<rect x="7" y="2.5" width="10" height="14" rx="2"/><path d="M10 16.5v3.5a2 2 0 0 0 4 0v-3.5M10 7h4M10 10h4"/>',
   import: '<path d="M12 3v12M7 10l5 5 5-5M4 19h16"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
 };
-const PAGE_TITLE = { dashboard: 'Dashboard', due: 'Due dates', tasks: 'Tasks', task: 'Task', workflow: 'Work categories', clients: 'Masters', client: 'Master', comps: 'Compliances', dsc: 'DSC register', import: 'Excel import', settings: 'Settings' };
+const PAGE_TITLE = { dashboard: 'Dashboard', due: 'Due dates', tasks: 'Tasks', task: 'Task', workflow: 'Work categories', clients: 'Masters', client: 'Master', books: 'Clients — bookkeeping', comps: 'Compliances', dsc: 'DSC register', import: 'Excel import', settings: 'Settings' };
 function render() {
   if (!S.profile) return;
-  const items = isAdmin() ? [['dashboard', 'Dashboard'], ['clients', 'Masters'], ['due', 'Due dates'], ['tasks', 'Tasks'], ['comps', 'Compliances'], ['dsc', 'DSC register'], ['import', 'Excel import'], ['settings', 'Settings']] : [];
+  const items = isAdmin() ? [['dashboard', 'Dashboard'], ['clients', 'Masters'], ['books', 'Clients'], ['due', 'Due dates'], ['tasks', 'Tasks'], ['comps', 'Compliances'], ['dsc', 'DSC register'], ['import', 'Excel import'], ['settings', 'Settings']] : [];
   const active = v => S.view === v || (v === 'tasks' && ['task', 'workflow'].includes(S.view)) || (v === 'clients' && S.view === 'client');
   const nav = items.map(([v, l]) => `<button class="nav ${active(v) ? 'on' : ''}" data-act="go" data-v="${v}"><svg viewBox="0 0 24 24" aria-hidden="true">${NAV_ICON[v]}</svg><span>${l}</span></button>`).join('');
   const who = S.profile.name || S.profile.email || '';
@@ -292,6 +294,7 @@ function render() {
 const GO = [
   ['Dashboard', 'go', 'dashboard', 'home overview'], ['Due dates', 'go', 'due', 'pending returns calendar'], ['Tasks', 'go', 'tasks', 'register board work'],
   ['Masters', 'go', 'clients', 'clients list business itr masters'], ['Compliances — tick clients for each compliance or work', 'go', 'comps', 'compliances applicable assign multiple clients select tick applicability work'],
+  ['Clients — bookkeeping: upload bills, review, post to Tally', 'go', 'books', 'bookkeeping tally bills invoices receipts bank statement post vouchers handwritten'],
   ['DSC register — digital signatures', 'go', 'dsc', 'dsc digital signature token expiry class 3'],
   ['Excel import', 'go', 'import', 'upload excel bulk'], ['Settings', 'go', 'settings', 'firm backup drive staff logins'], ['Work categories & staff', 'go', 'workflow', 'departments checklist staff automatic tasks'],
   ['New task', 'newTask', '', 'add create task'], ['New client', 'fabGo', 'client', 'add create client'], ['Add a reminder', 'fabGo', 'reminder', 'add create reminder note follow up'],
@@ -327,6 +330,7 @@ function body() {
     case 'settings': return vSettings();
     case 'comps': return vComps();
     case 'dsc': return DSC.view();
+    case 'books': return BK.view();
     case 'tasks': return T.vTasks();
     case 'task': return T.vTask();
     case 'workflow': return T.vWorkflow();
@@ -1115,7 +1119,7 @@ async function compSave(cp) {
 
 /* ---------- settings ---------- */
 // CA Desk Helper Chrome extension: download + install steps, shown in Settings and wherever a feature needs it
-const EXT_VER = '1.5.0';
+const EXT_VER = '1.6.0';
 const extAtLeast = v => { const x = extVer(); return !!x && !newer(v, x); };
 const extVer = () => document.documentElement.dataset.capmVer || (document.documentElement.dataset.capmTally === '1' ? '1.1.0' : extOn() ? '1.0.0' : '');
 const extCard = (compact = false) => {
@@ -2021,6 +2025,8 @@ const PAY = initPayments({ S, A, C, F, esc, toast, modal, closeModal, guard, ren
   fs: { doc, getDocs, setDoc, collection } });
 const TF = initTaskFiles({ S, A, C, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, db, saveFile, saveBlob, T, WA_ICON, MAIL_ICON, busy,
   fs: { doc, getDocs, deleteDoc, collection, query, where } });
+const BK = initBooks({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, todayISO, db, saveFile, busy, dispName, regsOf, isAdmin,
+  fs: { doc, getDoc, setDoc, getDocs, addDoc, updateDoc, deleteDoc, collection, serverTimestamp, writeBatch } });
 const DR = initDirectors({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, isAdmin, db, fs: { doc, updateDoc, serverTimestamp }, saveFile, openClient: (...a) => openClient(...a), loadClients: () => loadClients(), busy });
 const G1 = initGstr1({ STATE_CODES, extCard, extVer, extAtLeast, EXT_VER, S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, todayISO, db, saveFile, saveBlob, T, busy, extractText, dispName, isoLocalD,
   portalLogin: gstLogin, gstCred, fs: { doc, setDoc, getDocs, collection, serverTimestamp, query, where } });
@@ -2040,7 +2046,7 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('submit', e => {
   const fn = F[e.target.dataset.form]; if (!fn) return;
-  e.preventDefault(); fn(new FormData(e.target), e.target);
+  e.preventDefault(); fn(new FormData(e.target), e.target, e);
 });
 document.addEventListener('change', e => {
   const el = e.target.closest('[data-change]'); if (el && C[el.dataset.change]) C[el.dataset.change](el, e);

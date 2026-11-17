@@ -6,7 +6,9 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg.type === 'CAPM_TALLY') { // Tally on this computer only, export (read) requests only
     let u; try { u = new URL(msg.url); } catch { return; }
     if (u.protocol !== 'http:' || !['localhost', '127.0.0.1'].includes(u.hostname)) return;
-    if (!/<TALLYREQUEST>\s*Export\s*<\/TALLYREQUEST>/i.test(msg.xml)) { reply({ ok: false, error: 'only export requests are allowed' }); return; }
+    // reading is allowed from CA Desk; posting (Import Data) only from the CA Desk page after you approve the entries there
+    const fromDesk = sender.url && /^https:\/\/smishra724\.github\.io\//.test(sender.url);
+    if (!/<TALLYREQUEST>\s*Export\s*<\/TALLYREQUEST>/i.test(msg.xml) && !(fromDesk && /<TALLYREQUEST>\s*Import Data\s*<\/TALLYREQUEST>/i.test(msg.xml))) { reply({ ok: false, error: 'only export requests are allowed' }); return; }
     fetch(u.origin, { method: 'POST', body: msg.xml, headers: { 'Content-Type': 'text/xml' } })
       .then(r => r.arrayBuffer()).then(b => { const t = new TextDecoder('utf-8').decode(b); reply({ ok: true, text: t.includes('\u0000') ? new TextDecoder('utf-16le').decode(b) : t }); })
       .catch(e => reply({ ok: false, error: e.message }));

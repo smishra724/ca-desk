@@ -341,3 +341,14 @@ function build(vchs, { gstin, fp, iff, L, I, start, end, b2bFrom }) {
   if (!used) warns.push('No GST sales, credit notes or debit notes were found in Tally for this period.');
   return { json: j, names, issues, vmap, count: used, warns: [...new Set(warns)].slice(0, 30) };
 }
+
+// shared with the bookkeeping workspace
+export { env as tallyEnv, parseXml as tallyParse, xesc as tallyEsc };
+// Import (create) masters or vouchers in Tally; returns { created, altered, errors, lineErrors }
+export async function tallyImport(company, report, inner, opt) {
+  const xml = `<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>${report}</REPORTNAME><STATICVARIABLES><SVCURRENTCOMPANY>${xesc(company)}</SVCURRENTCOMPANY></STATICVARIABLES></REQUESTDESC><REQUESTDATA>${inner}</REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>`;
+  const t = await tallyPost(xml, opt);
+  const g = tag => +((t.match(new RegExp(`<${tag}>\\s*(-?\\d+)\\s*</${tag}>`, 'i')) || [])[1] || 0);
+  const lineErrors = [...t.matchAll(/<LINEERROR>([\s\S]*?)<\/LINEERROR>/gi)].map(m => m[1].trim());
+  return { created: g('CREATED'), altered: g('ALTERED'), errors: g('ERRORS') + (lineErrors.length && !g('ERRORS') ? lineErrors.length : 0), exceptions: g('EXCEPTIONS'), lineErrors, raw: t };
+}

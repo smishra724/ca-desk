@@ -708,3 +708,24 @@ body.dragging-gst .dropbar{display:flex}
 .msel-pop label:hover{background:#F1F4F9}
 .msel-pop label .muted{margin-left:auto}
 .msel-all{border-bottom:1px solid #E3E7EE;margin-bottom:4px;font-weight:600}
+/* Clients — bookkeeping */
+.bk{display:grid;grid-template-columns:260px minmax(0,1fr);gap:14px;align-items:start}
+@media (max-width:900px){.bk{grid-template-columns:1fr}}
+.bk-cl{padding:10px;position:sticky;top:12px;max-height:calc(100vh - 110px);display:flex;flex-direction:column}
+.bk-q{margin-bottom:8px}
+.bk-list{overflow:auto;display:flex;flex-direction:column;gap:2px}
+.bk-list button{display:flex;flex-direction:column;align-items:flex-start;text-align:left;border:0;background:none;padding:7px 9px;border-radius:7px;cursor:pointer}
+.bk-list button span{font-size:11px;color:#8A94A6}.bk-list button:hover{background:#F1F4F9}.bk-list button.on{background:#15233F;color:#fff}.bk-list button.on span{color:#C8D0DC}
+.bk-tally{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.bk-ai{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0;padding:8px 12px;background:#F6F8FB;border-radius:8px}
+.bk-up{display:flex;gap:10px;align-items:stretch;flex-wrap:wrap;margin-top:8px}.bk-up select{max-width:260px}
+.bk-drop{flex:1;min-width:240px;margin:0;justify-content:center}
+.tabs-s{display:flex;gap:4px;flex-wrap:wrap}.tabs-s button{border:1px solid #D8DEE7;background:#fff;border-radius:8px;padding:6px 12px;cursor:pointer}.tabs-s button.on{background:#15233F;color:#fff;border-color:#15233F}
+.bk-t td{vertical-align:top}
+.modal-box.wide{max-width:1280px;width:96vw}
+.bk-rev{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(360px,1fr);gap:16px;align-items:start}
+@media (max-width:900px){.bk-rev{grid-template-columns:1fr}}
+.bk-doc{position:sticky;top:0;height:78vh;border:1px solid #E3E7EE;border-radius:10px;overflow:auto;background:#F6F8FB}
+.bk-doc iframe{width:100%;height:100%;border:0}.bk-doc img{width:100%;display:block}
+.bk-form h2{margin-top:0}.bk-newp{border:1px dashed #C8D0DC;border-radius:8px;padding:8px 10px}.bk-newp.hide{display:none}
+.bk-chk{align-self:end;padding-bottom:10px}.green-t{color:#0B7A5C}
