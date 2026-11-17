@@ -251,10 +251,10 @@ const NAV_ICON = {
   import: '<path d="M12 3v12M7 10l5 5 5-5M4 19h16"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
 };
-const PAGE_TITLE = { dashboard: 'Dashboard', due: 'Due dates', tasks: 'Tasks', task: 'Task', workflow: 'Work categories', clients: 'Clients', client: 'Client', comps: 'Compliances', dsc: 'DSC register', import: 'Excel import', settings: 'Settings' };
+const PAGE_TITLE = { dashboard: 'Dashboard', due: 'Due dates', tasks: 'Tasks', task: 'Task', workflow: 'Work categories', clients: 'Masters', client: 'Master', comps: 'Compliances', dsc: 'DSC register', import: 'Excel import', settings: 'Settings' };
 function render() {
   if (!S.profile) return;
-  const items = isAdmin() ? [['dashboard', 'Dashboard'], ['due', 'Due dates'], ['tasks', 'Tasks'], ['clients', 'Clients'], ['comps', 'Compliances'], ['dsc', 'DSC register'], ['import', 'Excel import'], ['settings', 'Settings']] : [];
+  const items = isAdmin() ? [['dashboard', 'Dashboard'], ['due', 'Due dates'], ['tasks', 'Tasks'], ['clients', 'Masters'], ['comps', 'Compliances'], ['dsc', 'DSC register'], ['import', 'Excel import'], ['settings', 'Settings']] : [];
   const active = v => S.view === v || (v === 'tasks' && ['task', 'workflow'].includes(S.view)) || (v === 'clients' && S.view === 'client');
   const nav = items.map(([v, l]) => `<button class="nav ${active(v) ? 'on' : ''}" data-act="go" data-v="${v}"><svg viewBox="0 0 24 24" aria-hidden="true">${NAV_ICON[v]}</svg><span>${l}</span></button>`).join('');
   const who = S.profile.name || S.profile.email || '';
@@ -291,7 +291,7 @@ function render() {
 // "Search anything": pages & actions, compliances, clients, portal logins (usernames only) and tasks
 const GO = [
   ['Dashboard', 'go', 'dashboard', 'home overview'], ['Due dates', 'go', 'due', 'pending returns calendar'], ['Tasks', 'go', 'tasks', 'register board work'],
-  ['Clients', 'go', 'clients', 'list business itr'], ['Compliances — tick clients for each compliance or work', 'go', 'comps', 'compliances applicable assign multiple clients select tick applicability work'],
+  ['Masters', 'go', 'clients', 'clients list business itr masters'], ['Compliances — tick clients for each compliance or work', 'go', 'comps', 'compliances applicable assign multiple clients select tick applicability work'],
   ['DSC register — digital signatures', 'go', 'dsc', 'dsc digital signature token expiry class 3'],
   ['Excel import', 'go', 'import', 'upload excel bulk'], ['Settings', 'go', 'settings', 'firm backup drive staff logins'], ['Work categories & staff', 'go', 'workflow', 'departments checklist staff automatic tasks'],
   ['New task', 'newTask', '', 'add create task'], ['New client', 'fabGo', 'client', 'add create client'], ['Add a reminder', 'fabGo', 'reminder', 'add create reminder note follow up'],
