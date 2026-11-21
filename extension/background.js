@@ -14,6 +14,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       .catch(e => reply({ ok: false, error: e.message }));
     return true;
   }
+  if (msg.type === 'CAPM_DSC' && sender.url && /^https:\/\/smishra724\.github\.io\//.test(sender.url)) {
+    try { chrome.runtime.sendNativeMessage('com.smconsultancy.cadesk_dsc', { cmd: 'list' }, r => reply(r || { ok: false, error: chrome.runtime.lastError?.message || 'no reply', missing: /not found|forbidden/i.test(chrome.runtime.lastError?.message || '') })); }
+    catch (e) { reply({ ok: false, error: e.message }); }
+    return true;
+  }
   if (msg.type === 'CAPM_RELOAD' && sender.url && /^https:\/\/smishra724\.github\.io\//.test(sender.url)) { setTimeout(() => chrome.runtime.reload(), 300); return; } // files were updated by CA Desk
   if (msg.type === 'CAPM_FREQ') {
     const queue = msg.queue.filter(x => /^[0-9A-Z]{15}$/.test(x.gstin || '')).slice(0, 200);

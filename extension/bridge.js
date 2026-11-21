@@ -2,6 +2,7 @@
 document.documentElement.dataset.capmExt = '1';
 document.documentElement.dataset.capmTally = '1';
 document.documentElement.dataset.capmVer = chrome.runtime.getManifest().version;
+document.documentElement.dataset.capmId = chrome.runtime.id;
 window.addEventListener('message', e => {
   if (e.source !== window || e.origin !== location.origin) return;
   const d = e.data;
@@ -10,6 +11,10 @@ window.addEventListener('message', e => {
       const res = r || { ok: false, error: chrome.runtime.lastError?.message || 'no reply' };
       window.postMessage({ type: 'CAPM_TALLY_RES', id: d.id, ...res }, location.origin);
     });
+    return;
+  }
+  if (d && d.type === 'CAPM_DSC') { // read plugged-in DSC certificates through the CA Desk DSC reader on this computer
+    chrome.runtime.sendMessage({ type: 'CAPM_DSC' }, r => window.postMessage({ type: 'CAPM_DSC_RES', id: d.id, ...(r || { ok: false, error: chrome.runtime.lastError?.message || 'no reply' }) }, location.origin));
     return;
   }
   if (d && d.type === 'CAPM_RELOAD') { chrome.runtime.sendMessage({ type: 'CAPM_RELOAD' }); return; }

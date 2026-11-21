@@ -8,6 +8,8 @@ const TOKENS = ['ePass 2003', 'ProxKey', 'mToken', 'HyperSecu', 'Trust Key', 'WD
 const ROLES = ['Director', 'Partner', 'Designated partner', 'Proprietor', 'Authorised signatory', 'Karta', 'Trustee', 'Individual'];
 const CUSTODY = ['In office', 'With client', 'With other CA', 'Lost / not available'];
 
+import { parseCertFile, certToDsc } from './dsccert.js';
+
 export function initDsc(ctx) {
   const { S, A, C, F, esc, toast, modal, closeModal, guard, render, isAdmin, isoToDisp, todayISO, db, fs, saveBlob, WA_ICON, MAIL_ICON } = ctx;
   const { doc, getDocs, setDoc, deleteDoc, collection } = fs;
@@ -47,9 +49,89 @@ export function initDsc(ctx) {
       <div class="filters"><input id="dscQ" placeholder="Search holder, client, PAN, serial no., mobile" value="${esc(f.q)}">
         <select data-change="dscShow"><option value="">Active</option><option value="soon" ${f.show === 'soon' ? 'selected' : ''}>Expiring in 30 days</option><option value="expired" ${f.show === 'expired' ? 'selected' : ''}>Expired</option><option value="inactive" ${f.show === 'inactive' ? 'selected' : ''}>Inactive / surrendered</option></select>
         ${f.q || f.show || f.cust ? '<a href="#" data-act="dscClear" class="small">Clear filters</a>' : ''}</div>
+      ${live()}
       ${table(list, true)}
     </section>`;
   };
+
+  /* ---------- plugged-in tokens (CA Desk DSC reader on this computer, through the extension) ---------- */
+  const normN = s => String(s || '').toUpperCase().replace(/[^A-Z ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const inReg = c => (S.dsc || []).find(x => (x.certThumb && x.certThumb === c.thumb) || (x.certSerial && x.certSerial === c.serial)) || (S.dsc || []).find(x => normN(x.holder) === normN(c.cn) && (!x.validTo || x.validTo === c.to));
+  // client the DSC most likely belongs to: organisation name, a director / partner / proprietor, or the individual client
+  function guessClient(c) {
+    const n = normN(c.cn), o = normN(c.o);
+    const hit = S.clients.find(x => o && o.length > 4 && normN(x.name).startsWith(o.split(' ').slice(0, 2).join(' ')))
+      || S.clients.find(x => (x.directors || []).some(d => !d.ceased && normN(d.name) === n))
+      || S.clients.find(x => normN(x.people || '').includes(n) || normN(x.proprietor || x.propName || '') === n)
+      || S.clients.find(x => normN(x.name) === n);
+    return hit || null;
+  }
+  const ask = () => new Promise(res => {
+    const id = 'd' + Date.now() + Math.random().toString(36).slice(2, 6);
+    const to = setTimeout(() => { window.removeEventListener('message', on); res({ ok: false, error: 'No answer from the DSC reader' }); }, 20000);
+    function on(e) { if (e.source !== window || e.data?.type !== 'CAPM_DSC_RES' || e.data.id !== id) return; clearTimeout(to); window.removeEventListener('message', on); res(e.data); }
+    window.addEventListener('message', on); window.postMessage({ type: 'CAPM_DSC', id }, location.origin);
+  });
+  const extOk = () => { const v = document.documentElement.dataset.capmVer || ''; const [a, b] = v.split('.').map(Number); return a > 1 || (a === 1 && b >= 7); };
+  let busyPoll = false;
+  async function poll() {
+    if (busyPoll || S.view !== 'dsc' || document.hidden || !isAdmin()) return;
+    const L = S.dscLive ||= { state: 'check', certs: [], seen: null, fresh: [] };
+    if (!extOk()) { if (L.state !== 'noext') { L.state = 'noext'; render(); } return; }
+    busyPoll = true;
+    try {
+      const r = await ask();
+      if (!r.ok) { const st = r.missing || /native messaging host|not found|forbidden/i.test(r.error || '') ? 'nohelper' : 'error'; if (L.state !== st) { L.state = st; L.error = r.error; render(); } return; }
+      const certs = (r.certs || []).filter(c => c.onToken || /mudhra|capricorn|verasys|vsign|panta|xtra|idsign|sify|safescrypt|nsdl|protean|ca for|sub ca/i.test(`${c.io} ${c.icn}`));
+      const thumbs = certs.map(c => c.thumb).sort().join(',');
+      const was = L.seen;
+      const fresh = was === null ? [] : certs.filter(c => !was.split(',').includes(c.thumb)).map(c => c.thumb);
+      if (fresh.length) { const c = certs.find(x => x.thumb === fresh[0]); toast(`DSC detected: ${c.cn} (${certToDsc(c).issuer}, valid till ${isoToDisp(c.to)})`, 7000); }
+      const changed = L.state !== 'ok' || thumbs !== was || (r.tokens || []).join() !== (L.tokens || []).join();
+      Object.assign(L, { state: 'ok', certs, tokens: r.tokens || [], seen: thumbs, fresh: fresh.length ? fresh : L.fresh });
+      if (changed) render();
+    } finally { busyPoll = false; }
+  }
+  setInterval(poll, 5000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+  function live() {
+    if (!isAdmin()) return '';
+    const L = S.dscLive || { state: 'check' };
+    setTimeout(poll, 50);
+    const fileBtn = '<label class="sm btn-like">Read a certificate file<input type="file" accept=".cer,.crt,.pem,.der" data-change="dscCertFile" hidden></label>';
+    if (L.state === 'noext') return `<div class="dsclive off"><div><b>Detect plugged-in DSC tokens</b><p class="small muted">Needs the CA Desk Helper extension version 1.7 — update it from Settings → Browser extension (or the Update button on the Dashboard). Meanwhile you can read a certificate file exported from the token’s software.</p></div>${fileBtn}</div>`;
+    if (L.state === 'nohelper' || L.state === 'error') return `<div class="dsclive off"><div><b>Detect plugged-in DSC tokens</b><p class="small">Like the GST and Income Tax portals (emBridge / emSigner), CA Desk needs a small reader on this computer to see the token. Install it once — about 10 seconds, no admin rights:</p>
+      <ol class="small"><li><button class="sm primary" data-act="dscHelper">Download DSC reader</button> and double-click <b>CA-Desk-DSC-reader.cmd</b> (if Windows shows “Windows protected your PC”, click <b>More info → Run anyway</b>).</li><li>Come back here — plugged-in tokens appear within a few seconds.</li></ol>
+      <p class="tiny muted">The reader only lists the certificates Windows sees on the token (name, issuer, validity). It never asks for the PIN or signs anything.${L.state === 'error' ? ` Last message: ${esc(L.error || '')}` : ''}</p></div>${fileBtn}</div>`;
+    if (L.state !== 'ok') return `<div class="dsclive"><span class="muted small">Looking for plugged-in DSC tokens…</span></div>`;
+    const rows = (L.certs || []).map(c => { const d = certToDsc(c), reg = inReg(c), cl = reg ? null : guessClient(c), fresh = (L.fresh || []).includes(c.thumb);
+      const upd = reg && (reg.validTo !== c.to || !reg.certThumb);
+      return `<div class="dscc ${fresh ? 'fresh' : ''}"><div class="dscc-i">🔑</div><div class="dscc-m"><b>${esc(c.cn)}</b>${c.o && d.certOrg ? ` <span class="muted">· ${esc(c.o)}</span>` : ''}
+          <div class="small">${esc(d.issuer)} · ${esc(d.cls)} · valid ${isoToDisp(c.from)} – <b>${isoToDisp(c.to)}</b>${c.provider ? ` · ${esc(d.token || c.provider)}` : ''}</div>
+          <div class="tiny muted">${reg ? `In register under <b>${esc(cName(reg.cid))}</b>${upd ? ` — register says valid till ${isoToDisp(reg.validTo) || '—'}` : ' — up to date'}` : cl ? `Not in register · looks like <b>${esc(cl.name)}</b>` : 'Not in register'}</div></div>
+        <div class="btns">${reg ? (upd ? `<button class="sm primary" data-act="dscLiveUpd" data-t="${c.thumb}">Update register</button>` : `<button class="sm" data-act="dscEdit" data-id="${reg.id}" data-cid="${reg.cid}">Open</button>`) : `<button class="sm primary" data-act="dscLiveAdd" data-t="${c.thumb}">Add to register</button>`}</div></div>`; }).join('');
+    return `<div class="dsclive on"><div class="row-between wrap"><b>Plugged-in DSC tokens</b><span class="small muted">${(L.tokens || []).length ? esc(L.tokens.join(', ')) : 'No token connected'} · checks every few seconds ${fileBtn}</span></div>
+      ${rows || '<p class="small muted">Plug in a DSC token — it shows up here with holder, issuer and validity. (If a token is plugged in but nothing shows, open its software once so Windows registers the certificate.)</p>'}</div>`;
+  }
+  A.dscHelper = () => {
+    const id = document.documentElement.dataset.capmId; if (!id) return toast('Update the CA Desk Helper extension to version 1.7 first.');
+    guard(async () => {
+      const t = await (await fetch('dsc-reader-install.tpl', { cache: 'reload' })).text();
+      const cmd = t.replace('__EXTID__', id).replace(/\r?\n/g, '\r\n');
+      ctx.saveBlob(new Blob([cmd], { type: 'application/octet-stream' }), 'CA-Desk-DSC-reader.cmd');
+    });
+  };
+  const fromCert = c => { const d = certToDsc(c), cl = guessClient(c); S.dscPrefill = { ...d, cid: cl?.id || '', role: d.certOrg ? 'Authorised signatory' : (cl?.directors || []).some(x => normN(x.name) === normN(c.cn)) ? 'Director' : '', notes: c.provider ? `Detected from token (${c.provider})` : 'Read from certificate file' }; A.dscEdit({}); };
+  A.dscLiveAdd = ({ t }) => { const c = (S.dscLive?.certs || []).find(x => x.thumb === t); if (c) fromCert(c); };
+  A.dscLiveUpd = ({ t }) => {
+    const c = (S.dscLive?.certs || []).find(x => x.thumb === t), reg = c && inReg(c); if (!reg) return;
+    guard(async () => {
+      const d = certToDsc(c), data = { ...reg, validFrom: d.validFrom, validTo: d.validTo, certThumb: d.certThumb, certSerial: d.certSerial, issuer: reg.issuer || d.issuer, token: reg.token || d.token, status: 'Active', updatedAt: new Date().toISOString() };
+      const { id, cid, ...save } = data; await setDoc(doc(db, 'clients', reg.cid, 'dsc', reg.id), save);
+      Object.assign(reg, data); render();
+    }, 'Register updated from the token');
+  };
+  C.dscCertFile = el => { const f = el.files[0]; el.value = ''; if (!f) return; guard(async () => { const c = await parseCertFile(f); const reg = inReg(c); if (reg) { (S.dscLive ||= { certs: [] }).certs = [...(S.dscLive.certs || []).filter(x => x.thumb !== c.thumb), c]; S.dscLive.state ||= 'ok'; } if (reg) { A.dscEdit({ id: reg.id, cid: reg.cid }); toast(`Already in the register — valid till ${isoToDisp(c.to)} on the certificate.`, 6000); } else fromCert(c); }); };
   function table(list, withClient) {
     if (!list.length) return `<div class="empty-state small">${withClient ? 'No DSCs match. Add the tokens you keep for clients with "+ Add DSC".' : 'No DSC recorded for this client.'}</div>`;
     return `<div class="reg-wrap"><table class="reg"><thead><tr><th class="srn">Sr.</th><th>Holder</th>${withClient ? '<th>Client</th>' : ''}<th>Class / issuer</th><th>Valid till</th><th>Token PIN</th><th>Custody</th><th></th></tr></thead><tbody>
@@ -76,10 +158,11 @@ export function initDsc(ctx) {
 
   /* ---------- add / edit ---------- */
   A.dscEdit = ({ id, cid }) => {
-    const x = (S.dsc || []).find(d => d.id === id) || { cid: cid || '', custody: 'In office', cls: CLASSES[0], status: 'Active' };
+    const x = (S.dsc || []).find(d => d.id === id) || { cid: cid || '', custody: 'In office', cls: CLASSES[0], status: 'Active', ...(S.dscPrefill || {}) };
+    S.dscPrefill = null;
     const opt = (arr, v) => arr.map(o => `<option ${o === v ? 'selected' : ''}>${o}</option>`).join('');
     const c = S.clients.find(y => y.id === x.cid);
-    modal(`<h2>${id ? 'Edit DSC' : 'Add DSC'}</h2><form data-form="dscSave" data-id="${id || ''}" class="grid">
+    modal(`<h2>${id ? 'Edit DSC' : x.certThumb ? 'Add DSC — read from the token' : 'Add DSC'}</h2><form data-form="dscSave" data-id="${id || ''}" class="grid"><input type="hidden" name="certThumb" value="${esc(x.certThumb || '')}"><input type="hidden" name="certSerial" value="${esc(x.certSerial || '')}">
       <label class="span2">Client<input name="client" list="dscClients" required autocomplete="off" value="${c ? esc(c.name) : ''}" placeholder="Type client name, PAN or GSTIN"></label>
       <datalist id="dscClients">${S.clients.map(y => `<option value="${esc(y.name)}">`).join('')}</datalist>
       <label>Holder name<input name="holder" required value="${esc(x.holder || '')}"></label>
@@ -105,7 +188,7 @@ export function initDsc(ctx) {
   F.dscSave = (fd, form) => guard(async () => {
     const c = pick(fd.get('client')); if (!c) throw new Error('Pick the client from the list.');
     const id = form.dataset.id, old = (S.dsc || []).find(d => d.id === id);
-    const data = Object.fromEntries(['holder', 'role', 'pan', 'mobile', 'email', 'cls', 'issuer', 'token', 'serial', 'pin', 'validFrom', 'validTo', 'custody', 'location', 'status', 'notes'].map(k => [k, (fd.get(k) || '').trim()]));
+    const data = Object.fromEntries(['holder', 'role', 'pan', 'mobile', 'email', 'cls', 'issuer', 'token', 'serial', 'pin', 'validFrom', 'validTo', 'custody', 'location', 'status', 'notes', 'certThumb', 'certSerial'].map(k => [k, (fd.get(k) || '').trim()]));
     data.pan = data.pan.toUpperCase(); data.moves = old?.moves || []; data.updatedAt = new Date().toISOString();
     if (old && old.cid !== c.id) await deleteDoc(doc(db, 'clients', old.cid, 'dsc', id)); // moved to another client
     const ref = id && old?.cid === c.id ? doc(db, 'clients', c.id, 'dsc', id) : doc(collection(db, 'clients', c.id, 'dsc'));
