@@ -24,16 +24,24 @@ export function initGstDesk(ctx) {
     if (e.data.event) { if (e.data.event === 'changed' || e.data.event === 'ready') { S.gdSum = null; if (S.view === 'gstdesk') G.refresh(); } return; }
     const w = waiting.get(e.data.id); if (!w) return;
     waiting.delete(e.data.id); clearTimeout(w.t);
+    if (e.data.stale) { S.gdStale = true; if (S.view === 'gstdesk') render(); }
     e.data.ok ? w.ok(e.data.data) : w.bad(new Error(e.data.error || 'GST Desk did not do that'));
   });
   const ask = (action, extra = {}, ms = 15000) => new Promise((ok, bad) => {
     if (!ver()) return bad(new Error('GST Desk is not installed in this Chrome. Set it up from the GST Desk page.'));
     const id = 'gd' + (++seq);
-    waiting.set(id, { ok, bad, t: setTimeout(() => { waiting.delete(id); bad(new Error('GST Desk did not answer. Reload this page (Ctrl + F5) and try again.')); }, ms) });
+    waiting.set(id, { ok, bad, t: setTimeout(() => { waiting.delete(id); S.gdStale = true; if (S.view === 'gstdesk') render(); bad(new Error('GST Desk did not answer – it was probably just updated. Reload this page (F5) once and try again.')); }, ms) });
     window.postMessage({ gstdesk: 'page', id, action, ...extra }, location.origin);
   });
   G.installed = ver;
-  G.open = (hash = '#clients') => ask('open', { hash }).catch(e => toast(e.message, 6000));
+  // Newer GST Desk lets this page open it with a plain link (works even right after GST Desk was updated)
+  const extId = () => document.documentElement.getAttribute('data-gstdesk-id') || '';
+  const openTab = (hash) => {
+    const id = extId();
+    if (id) { const w = window.open(`chrome-extension://${id}/manager.html${hash}`, '_blank'); if (w) return Promise.resolve(); }
+    return ask('open', { hash }, 6000);
+  };
+  G.open = (hash = '#clients') => openTab(hash).catch(e => toast(e.message, 8000));
 
   /* ---------- latest version + one-click install / update ---------- */
   async function latest() {
@@ -140,7 +148,7 @@ export function initGstDesk(ctx) {
   // From a client's page: send it, then open GST Desk on that GSTIN
   G.openClient = (cid, gstin) => guard(async () => {
     await G.send([cid], { quiet: true });
-    await ask('open', { hash: '#gstin=' + encodeURIComponent(gstin || '') });
+    await openTab('#gstin=' + encodeURIComponent(gstin || ''));
   }, '');
 
   /* ---------- page ---------- */
@@ -181,6 +189,7 @@ export function initGstDesk(ctx) {
     const qDone = queue ? queue.items.reduce((n, it) => n + it.jobs.filter(j => j.status === 'done').length, 0) : 0;
     const qAll = queue ? queue.items.reduce((n, it) => n + it.jobs.length, 0) : 0;
     return `
+    ${S.gdStale ? '<div class="warn" style="margin-bottom:12px;display:flex;gap:10px;align-items:center;justify-content:space-between"><span>GST Desk was updated or reloaded since this page opened, so the buttons cannot reach it. Reload this page once.</span><button class="primary sm" data-act="gdReload">Reload page</button></div>' : ''}
     <section class="card">
       <div class="row-between wrap"><div><h2 style="margin:0">GST Desk</h2><p class="muted small" style="margin:.2rem 0 0">Chrome extension for the GST portal — works alongside CA Desk.</p></div>
         <div>${tag}</div></div>
@@ -220,6 +229,7 @@ export function initGstDesk(ctx) {
 
   /* ---------- actions ---------- */
   A.gdOpen = ({ h }) => G.open(h);
+  A.gdReload = () => location.reload();
   A.gdSetup = () => G.setup();
   A.gdUpdate = ({ pick }) => G.update({ pick: !!pick });
   A.gdCopy = ({ t }) => navigator.clipboard.writeText(t).then(() => toast('Copied — paste it in the Chrome address bar'));
