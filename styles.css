@@ -737,3 +737,13 @@ body.dragging-gst .dropbar{display:flex}
 .dscc.fresh{background:#E7F5EF;border-radius:8px;padding:10px;margin-top:6px}
 .dscc-i{font-size:22px}.dscc-m{flex:1;min-width:0}
 .btn-like{display:inline-flex;align-items:center;border:1px solid #C8D0DC;border-radius:8px;padding:5px 10px;background:#fff;cursor:pointer;font-size:13px;font-weight:600;margin-left:8px}
+
+/* GST Desk page */
+.gd-feats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .6rem; margin-top: 1rem; }
+.gd-feats > div { border: 1px solid var(--line, #e3e7ef); border-radius: 10px; padding: .7rem .8rem; display: flex; flex-direction: column; gap: .25rem; }
+.gd-feats span { font-size: .82rem; color: var(--muted, #667085); line-height: 1.4; }
+.gd-stats { display: flex; gap: .8rem; flex-wrap: wrap; }
+.gd-stats > div { border: 1px solid var(--line, #e3e7ef); border-radius: 10px; padding: .6rem 1rem; min-width: 140px; display: flex; flex-direction: column; }
+.gd-stats b { font-size: 1.4rem; }
+.gd-stats span { font-size: .8rem; color: var(--muted, #667085); }
+#gdQ { min-width: 220px; width: auto; margin-top: 0; }

@@ -13,6 +13,7 @@ import { initBooks } from './books.js';
 import { updateExtension, newer, canUpdate, linkedFolder, permission } from './extupdate.js';
 import { initDsc } from './dsc.js';
 import { initDriveImport } from './drive-import.js';
+import { initGstDesk } from './gstdesk.js';
 
 // Local mode (no login, data in this browser) until firebase-config.js has real keys.
 const LOCAL = !firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith('PASTE');
@@ -165,7 +166,7 @@ async function boot(u) {
   S.profile = { uid: u.uid, email: u.email, ...p.data() };
   if (isAdmin()) {
     if (!S.trackFrom) { S.trackFrom = todayISO(); updateDoc(doc(db, 'meta', 'setup'), { trackFrom: S.trackFrom }).catch(() => {}); }
-    await loadCustomComps(); await loadClients(); await loadAllFilings(); await T.load(); loadGstLoginFlags(); S.view = 'dashboard'; autoTasks(); setTimeout(extAutoUpdate, 3000);
+    await loadCustomComps(); await loadClients(); await loadAllFilings(); await T.load(); loadGstLoginFlags(); S.view = 'dashboard'; autoTasks(); setTimeout(extAutoUpdate, 3000); setTimeout(() => GD.autoUpdate(), 5000);
   }
   else { await openClient(S.profile.clientId, 'master'); await T.loadForClient(S.profile.clientId).catch(() => {}); }
   render();
@@ -251,12 +252,13 @@ const NAV_ICON = {
   books: '<path d="M4 5a2 2 0 0 1 2-2h12v15H6a2 2 0 0 0-2 2z"/><path d="M4 20a2 2 0 0 0 2 1h12v-3M8 7h6M8 11h6"/>',
   dsc: '<rect x="7" y="2.5" width="10" height="14" rx="2"/><path d="M10 16.5v3.5a2 2 0 0 0 4 0v-3.5M10 7h4M10 10h4"/>',
   import: '<path d="M12 3v12M7 10l5 5 5-5M4 19h16"/>',
+  gstdesk: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h6M15 15.5l1.5 1.5 3-3"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
 };
-const PAGE_TITLE = { dashboard: 'Dashboard', due: 'Due dates', tasks: 'Tasks', task: 'Task', workflow: 'Work categories', clients: 'Masters', client: 'Master', books: 'Clients — bookkeeping', comps: 'Compliances', dsc: 'DSC register', import: 'Excel import', settings: 'Settings' };
+const PAGE_TITLE = { dashboard: 'Dashboard', due: 'Due dates', tasks: 'Tasks', task: 'Task', workflow: 'Work categories', clients: 'Masters', client: 'Master', books: 'Clients — bookkeeping', comps: 'Compliances', dsc: 'DSC register', gstdesk: 'GST Desk', import: 'Excel import', settings: 'Settings' };
 function render() {
   if (!S.profile) return;
-  const items = isAdmin() ? [['dashboard', 'Dashboard'], ['clients', 'Masters'], ['books', 'Clients'], ['due', 'Due dates'], ['tasks', 'Tasks'], ['comps', 'Compliances'], ['dsc', 'DSC register'], ['import', 'Excel import'], ['settings', 'Settings']] : [];
+  const items = isAdmin() ? [['dashboard', 'Dashboard'], ['clients', 'Masters'], ['books', 'Clients'], ['due', 'Due dates'], ['tasks', 'Tasks'], ['comps', 'Compliances'], ['dsc', 'DSC register'], ['gstdesk', 'GST Desk'], ['import', 'Excel import'], ['settings', 'Settings']] : [];
   const active = v => S.view === v || (v === 'tasks' && ['task', 'workflow'].includes(S.view)) || (v === 'clients' && S.view === 'client');
   const nav = items.map(([v, l]) => `<button class="nav ${active(v) ? 'on' : ''}" data-act="go" data-v="${v}"><svg viewBox="0 0 24 24" aria-hidden="true">${NAV_ICON[v]}</svg><span>${l}</span></button>`).join('');
   const who = S.profile.name || S.profile.email || '';
@@ -296,6 +298,7 @@ const GO = [
   ['Masters', 'go', 'clients', 'clients list business itr masters'], ['Compliances — tick clients for each compliance or work', 'go', 'comps', 'compliances applicable assign multiple clients select tick applicability work'],
   ['Clients — bookkeeping: upload bills, review, post to Tally', 'go', 'books', 'bookkeeping tally bills invoices receipts bank statement post vouchers handwritten'],
   ['DSC register — digital signatures', 'go', 'dsc', 'dsc digital signature token expiry class 3'],
+  ['GST Desk — GST portal extension: download GSTR-1 / 2B / 3B, import from GST portal, registration, Tally', 'go', 'gstdesk', 'gst desk extension returns download gstr1 gstr2b gstr3b portal import registration reconciliation'],
   ['Excel import', 'go', 'import', 'upload excel bulk'], ['Settings', 'go', 'settings', 'firm backup drive staff logins'], ['Work categories & staff', 'go', 'workflow', 'departments checklist staff automatic tasks'],
   ['New task', 'newTask', '', 'add create task'], ['New client', 'fabGo', 'client', 'add create client'], ['Add a reminder', 'fabGo', 'reminder', 'add create reminder note follow up'],
   ['Remind a client on WhatsApp / email', 'fabGo', 'remind', 'whatsapp email reminder send message'],
@@ -330,6 +333,7 @@ function body() {
     case 'settings': return vSettings();
     case 'comps': return vComps();
     case 'dsc': return DSC.view();
+    case 'gstdesk': return GD.view();
     case 'books': return BK.view();
     case 'tasks': return T.vTasks();
     case 'task': return T.vTask();
@@ -745,7 +749,7 @@ function tGst() {
   const creds = g => S.creds.filter(cr => cr.gstin === g || (!cr.gstin && cr.portal === 'gst' && regs.length === 1 && !S.creds.some(x => x.gstin)));
   return `
   <div class="row-between wrap"><h2>GST registrations</h2>
-    ${adm ? `<div class="btns">${regs.some(r => r.gstin && r.status !== 'Cancelled') ? `<button data-act="freqCheck" data-cid="${S.cid}">Check filing frequency</button>` : ''}<button class="primary" data-act="editReg">+ Add GSTIN</button><button data-act="fromDoc" data-mode="update">Add from GST certificate</button></div>` : ''}</div>
+    ${adm ? `<div class="btns">${regs.some(r => r.gstin && r.status !== 'Cancelled') ? `<button data-act="freqCheck" data-cid="${S.cid}">Check filing frequency</button>${S.cid && GD.installed() ? `<button data-act="gdClient" data-id="${S.cid}" data-gstin="${esc(regs.find(r => r.gstin && r.status !== 'Cancelled').gstin)}" title="Sends this client's GSTINs and GST login to GST Desk and opens it">Open in GST Desk</button>` : ''}` : ''}<button class="primary" data-act="editReg">+ Add GSTIN</button><button data-act="fromDoc" data-mode="update">Add from GST certificate</button></div>` : ''}</div>
   <p class="muted small">One entry per GSTIN (state / branch). Each gets its own GSTR-1, GSTR-3B and annual return in the compliance calendar, and its own portal login.</p>
   ${S.cid ? '' : '<p class="warn">Save the master data first, then add registrations.</p>'}
   <table class="tbl"><thead><tr><th>State</th><th>GSTIN</th><th>Trade name / address</th><th>Filing</th><th>Since</th><th>Status</th><th>Logins</th>${adm ? '<th></th>' : ''}</tr></thead><tbody>
@@ -2032,6 +2036,7 @@ const G1 = initGstr1({ STATE_CODES, extCard, extVer, extAtLeast, EXT_VER, S, A, 
   portalLogin: gstLogin, gstCred, fs: { doc, setDoc, getDocs, collection, serverTimestamp, query, where } });
 const DSC = initDsc({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, todayISO, db, saveBlob, WA_ICON, MAIL_ICON,
   fs: { doc, getDocs, setDoc, deleteDoc, collection } });
+const GD = initGstDesk({ S, A, C, esc, toast, guard, render: () => render(), regsOf, dispName, isoToDisp, db, fs: { getDocs, collectionGroup } });
 const PS = initPayslips({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, db, saveBlob, busy, WA_ICON, MAIL_ICON,
   fs: { doc, getDocs, setDoc, updateDoc, deleteDoc, collection, writeBatch, arrayUnion } });
 
@@ -2053,6 +2058,7 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('input', e => {
   if (e.target.id === 'gq') { S.gq = e.target.value; gqResults(); return; }
+  if (e.target.id === 'gdQ') { S.gdQ = e.target.value; const p = e.target.selectionStart; render(); const s = $('#gdQ'); s.focus(); s.setSelectionRange(p, p); return; }
   if (e.target.id === 'dscQ') { S.dscF.q = e.target.value; const p = e.target.selectionStart; render(); const s = $('#dscQ'); s.focus(); s.setSelectionRange(p, p); return; }
   if (e.target.id === 'dueQ') {
     S.dueF.q = e.target.value; const pos = e.target.selectionStart; render();

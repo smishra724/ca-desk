@@ -49,6 +49,14 @@ Open the site in Chrome / Edge → address bar **Install** icon (or ⋮ → Cast
 - Excel import: one row per GSTIN; rows with the same PAN are combined into one client. Export writes one row per GSTIN.
 - Clients created before this change keep working: their single GSTIN becomes the first registration and existing filed records and GST login stay linked to it.
 
+## GST Desk (GST portal extension)
+Menu → **GST Desk**. GST Desk is a separate Chrome extension for the GST portal: bulk GSTR-1 / 2B / 3B downloads, import of a client's details from the GST portal, new-registration filling and Tally GST work.
+- **Set up GST Desk** writes the extension into a *GST Desk* folder you choose; then load it once in chrome://extensions (Developer mode → Load unpacked).
+- **Update GST Desk now** writes new versions into that folder and restarts it; with "Allow on every visit" CA Desk keeps it updated on its own.
+- **Send clients to GST Desk**: every active GSTIN becomes a GST Desk client with its GST portal user ID and password (stored encrypted inside GST Desk). Sending again only fills blanks; tick *Replace GST Desk passwords that differ* to overwrite.
+- **Open in GST Desk** (GST registrations tab or the GST Desk page) sends that client and opens it in GST Desk.
+- The page also shows how many clients GST Desk has, the download queue and recent files.
+
 ## Task manager
 Inspired by ERPCA's workflow model.
 - **Workflow masters** (Tasks → Workflow & staff): departments → work categories, each with *documents required from client*, *activities with % weight* (drives progress) and *outcome documents*. Ships with GST, Income Tax, TDS, ROC/LLP, Payroll, Accounting defaults; fully editable. Staff list and default assignee per department.
