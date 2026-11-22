@@ -166,7 +166,7 @@ async function boot(u) {
   S.profile = { uid: u.uid, email: u.email, ...p.data() };
   if (isAdmin()) {
     if (!S.trackFrom) { S.trackFrom = todayISO(); updateDoc(doc(db, 'meta', 'setup'), { trackFrom: S.trackFrom }).catch(() => {}); }
-    await loadCustomComps(); await loadClients(); await loadAllFilings(); await T.load(); loadGstLoginFlags(); S.view = 'dashboard'; autoTasks(); setTimeout(extAutoUpdate, 3000); setTimeout(() => GD.autoUpdate(), 5000);
+    await loadCustomComps(); await loadClients(); await loadAllFilings(); await T.load(); loadGstLoginFlags(); S.view = 'dashboard'; if (isAdmin()) GD.fromHash(); autoTasks(); setTimeout(extAutoUpdate, 3000); setTimeout(() => GD.autoUpdate(), 5000);
   }
   else { await openClient(S.profile.clientId, 'master'); await T.loadForClient(S.profile.clientId).catch(() => {}); }
   render();

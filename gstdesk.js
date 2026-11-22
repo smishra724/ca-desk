@@ -227,6 +227,22 @@ export function initGstDesk(ctx) {
     </section>` : ''}`;
   };
 
+  // GST Desk → "Get it from CA Desk" opens CA Desk at #gstdesk=<Tally company>: show the GST Desk page with that client picked
+  G.fromHash = () => {
+    const m = /^#gstdesk(?:=(.*))?$/.exec(location.hash || ''); if (!m) return false;
+    const q = decodeURIComponent(m[1] || '').trim();
+    const key = s => String(s || '').toUpperCase().replace(/\bPRIVATE\b/g, 'PVT').replace(/\bLIMITED\b/g, 'LTD').replace(/[^A-Z0-9]/g, '');
+    S.view = 'gstdesk';
+    if (q) {
+      const hits = S.clients.filter(c => !c.exClient && regsOf(c).some(r => r.gstin && r.status !== 'Cancelled') && [c.name, c.tradeName, dispName(c)].some(n => n && (key(n) === key(q) || key(n).includes(key(q)) || key(q).includes(key(n)))));
+      S.gdSel = new Set(hits.map(c => c.id));
+      S.gdQ = hits.length ? '' : q.split(/\s+/)[0];
+      setTimeout(() => toast(hits.length ? `Found ${hits.map(dispName).join(', ')} – click “Send to GST Desk”` : `No CA Desk client with an active GSTIN matches “${q}”. Search below or add the client in Masters first.`, 8000), 600);
+    }
+    history.replaceState(null, '', location.pathname);
+    return true;
+  };
+
   /* ---------- actions ---------- */
   A.gdOpen = ({ h }) => G.open(h);
   A.gdReload = () => location.reload();
