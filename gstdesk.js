@@ -348,7 +348,9 @@ export function initGstDesk(ctx) {
     const stuck = exp && v && newer(exp, v) ? `<div class="warn small" style="margin:.6rem 0">The new files (v${esc(exp)}) are in the extension folder, but Chrome is still running v${esc(v)}. One click finishes it: open <b>chrome://extensions</b> <button class="sm" data-act="gdCopy" data-t="chrome://extensions">Copy</button>, click <b>↻ Reload</b> on <b>CA Desk Suite</b>, then reload this page. Next updates restart by themselves.<br>Still v${esc(v)} after that? Then the linked folder is not the one Chrome loads: click <a href="#" data-act="gdUpdate" data-pick="1">Change extension folder</a> and choose the folder shown in chrome://extensions → CA Desk Suite → Details → <i>Source</i>.</div>` : '';
     const tag = !v ? '<span class="tag">Not installed in this Chrome</span>' : upd ? `<span class="tag amber">Update available · v${esc(l.version)} (you have v${esc(v)})</span>` : `<span class="tag green">Installed · v${esc(v)}</span>`;
     if (S.gdBridge) return bridgeBox() + (S.gdDup ? '<p class="warn small">Two copies of the portal helper are running: remove the old <b>CA Desk Helper</b> in chrome://extensions (keep CA Desk Suite).</p>' : '') + (v ? '' : '<p class="warn small">CA Desk Bridge is running, but the extension is not loaded in this Chrome yet: chrome://extensions → Developer mode → Load unpacked → choose the folder shown in the Bridge (right-click its tray icon → Open extension folder).</p>');
-    return bridgeBox() + `${S.gdDup ? '<p class="warn small">Two copies of the portal helper are running: the old <b>CA Desk Helper</b> is still installed next to CA Desk Suite. Open chrome://extensions and click <b>Remove</b> on <b>CA Desk Helper</b> (keep CA Desk Suite), so portal logins don’t open twice.</p>' : ''}
+    // No Bridge: the Bridge is the way to install; the manual extension set-up stays available, folded away
+    const manualOpen = !!(S.gdErr || stuck || S.gdManual);
+    return bridgeBox() + `<details class="gd-manual" ${manualOpen ? 'open' : ''}><summary class="small">Without the Bridge: set up / update the browser extension by hand</summary>${S.gdDup ? '<p class="warn small">Two copies of the portal helper are running: the old <b>CA Desk Helper</b> is still installed next to CA Desk Suite. Open chrome://extensions and click <b>Remove</b> on <b>CA Desk Helper</b> (keep CA Desk Suite), so portal logins don’t open twice.</p>' : ''}
     <div class="row-between wrap"><p class="muted small" style="margin:0"><b>CA Desk Suite</b> = GST Desk + CA Desk portal helper, in one Chrome extension.${l ? ` Latest version v${esc(l.version)}.` : ''}</p><div>${tag}</div></div>
     ${stuck}${S.gdErr ? `<div class="warn small" style="margin:.6rem 0">${esc(S.gdErr)}</div>` : ''}
       <div class="btns mt">
@@ -362,7 +364,7 @@ export function initGstDesk(ctx) {
         <li>In Chrome open <b>chrome://extensions</b> <button class="sm" data-act="gdCopy" data-t="chrome://extensions">Copy</button> and turn on <b>Developer mode</b> (top right).</li>
         <li>Click <b>Load unpacked</b> and choose that <b>GST Desk</b> folder.</li>
         <li>Reload this page (Ctrl + F5). From then on CA Desk keeps it updated.${document.documentElement.dataset.capmExt === '1' ? ' Then remove the old <b>CA Desk Helper</b> from chrome://extensions.' : ''}</li></ol>`
-        : !S.gdLinked ? '<p class="muted small mt">Link the GST Desk folder once (the folder you chose in chrome://extensions) and CA Desk updates GST Desk for you. Choose “Allow on every visit” and updates happen on their own.</p>' : '<p class="muted small mt">GST Desk folder linked – CA Desk keeps it up to date.</p>'}`;
+        : !S.gdLinked ? '<p class="muted small mt">Link the GST Desk folder once (the folder you chose in chrome://extensions) and CA Desk updates GST Desk for you. Choose “Allow on every visit” and updates happen on their own.</p>' : '<p class="muted small mt">GST Desk folder linked – CA Desk keeps it up to date.</p>'}</details>`;
   };
 
   G.view = () => {
@@ -388,7 +390,7 @@ export function initGstDesk(ctx) {
       <div class="btns mt">
         ${v ? `<button class="primary" data-act="gdOpen" data-h="#clients">Open GST Desk</button><button data-act="gdOpen" data-h="#downloads">Download returns</button><button data-act="gdOpen" data-h="#work">Tally &amp; GST work</button>` : ''}
       </div>
-      ${!v ? '<p class="mt">GST Desk is not installed in this Chrome yet. <button class="primary sm" data-act="gdToSettings">Install it from Settings</button></p>'
+      ${!v ? '<p class="mt">GST Desk is not set up on this computer yet. <button class="primary sm" data-act="gdToSettings">Install CA Desk Bridge (Settings)</button></p>'
         : upd ? `<p class="small mt">A new version (v${esc(l.version)}) is ready. <a href="#" data-act="gdToSettings">Update it in Settings</a></p>` : ''}
       <div class="gd-feats">${FEATURES.map(([h, t]) => `<div><b>${esc(h)}</b><span>${esc(t)}</span></div>`).join('')}</div>
     </section>
