@@ -3,7 +3,7 @@ rem CA Desk DSC reader — installs a small read-only helper so CA Desk can see 
 rem Installs for the current Windows user only (no admin rights needed). Uninstall: run this file with  /uninstall
 setlocal
 set "EXTID=__EXTID__"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:EXTID='%EXTID%'; $env:MODE='%~1'; $s=(Get-Content -Raw -LiteralPath '%~f0') -split '#PSBEGIN#',2; iex $s[1]"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:EXTID='%EXTID%'; $env:MODE='%~1'; $t=Get-Content -Raw -LiteralPath '%~f0'; iex $t.Substring($t.LastIndexOf('#PS'+'BEGIN#')+9)"
 echo.
 pause
 exit /b
