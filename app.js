@@ -1143,7 +1143,7 @@ const extCard = (compact = false) => {
     <div class="btns"><button class="sm ${suite ? '' : 'primary'}" data-act="gdToSettings">${suite ? 'Details' : v ? 'Replace in Settings' : 'Install in Settings'}</button></div></div></div>`;
   return `${v && !suite ? `<p class="warn small">You have the older, separate <b>CA Desk Helper</b> (v${esc(v)}). Its features are now inside <b>CA Desk Suite</b>. Set up CA Desk Suite below, then remove <b>CA Desk Helper</b> in chrome://extensions.</p>` : ''}
     ${GD.installCard()}
-    <p class="muted small mt">CA Desk Bridge installs and updates everything this computer needs. Inside Chrome it keeps a small browser part (CA Desk Suite) that the Bridge manages for you – Chrome only lets something inside the browser type logins and click Upload on government portals. What it covers: <b>GST Desk</b> (client master linked with your Masters, GST registration filling, bulk GSTR-1/2B/3B downloads, import from GST portal, Tally GST work) and the <b>portal helper</b> – fills the user ID and password on GST, Income Tax, TRACES, MCA, EPFO and ESIC when you click Login (you type the CAPTCHA/OTP), lets CA Desk read from Tally, runs the GSTR-1 autopilot and checks filing frequency. It only runs on CA Desk and those portals and never changes Tally data unless you approve entries in CA Desk.</p>`;
+    <p class="muted small mt">One Chrome extension for everything – nothing to install on the computer. <b>GST Desk</b> (client master linked with your Masters, GST registration filling, bulk GSTR-1/2B/3B downloads, import from GST portal, Tally &amp; GST work, GSTR-1 upload) and the <b>portal helper</b> – fills the user ID and password on GST, Income Tax, TRACES, MCA, EPFO and ESIC when you click Login (you type the CAPTCHA/OTP), lets CA Desk read from Tally and checks filing frequency. It only runs on CA Desk and those portals and never changes Tally data unless you approve entries in CA Desk.</p>`;
 };
 function vSettings() {
   return `
@@ -1153,7 +1153,7 @@ function vSettings() {
       <div class="span2"><button class="primary">Save</button></div></form>
   </section>
   <section class="card" id="gdext">
-    <h2>CA Desk Bridge — desktop app</h2>
+    <h2>CA Desk Suite — Chrome extension</h2>
     ${extCard()}
   </section>
   <section class="card">
