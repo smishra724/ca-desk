@@ -252,17 +252,31 @@ export function initGstDesk(ctx) {
     ['Bulk return downloads', 'GSTR-1 (PDF/JSON), GSTR-2B (Excel/JSON) and GSTR-3B (PDF) for many clients and months, saved as Downloads/GST Desk/<Client>/<FY>/.'],
     ['Tally & GST work', 'Reads TallyPrime over port 9000: registers, GSTR-1 JSON, 3B working, 2B and GSTR-1 reconciliation in Excel.'],
   ];
+  // Settings → "GST Desk extension": install / download / update / link folder
+  G.installCard = () => {
+    if (S.gdLatest === undefined && !S.gdLatestLoading) { S.gdLatestLoading = true; Promise.all([latest(), idbGet()]).then(([, h]) => { S.gdLinked = !!h; S.gdLatestLoading = false; if (S.view === 'settings') render(); }); }
+    const v = ver(), l = S.gdLatest, upd = v && l && newer(l.version, v), done = S.gdSetupDone;
+    const tag = !v ? '<span class="tag">Not installed in this Chrome</span>' : upd ? `<span class="tag amber">Update available · v${esc(l.version)} (you have v${esc(v)})</span>` : `<span class="tag green">Installed · v${esc(v)}</span>`;
+    return `<div class="row-between wrap"><p class="muted small" style="margin:0">Chrome extension for the GST portal: returns download, import from GST portal, registration filling and Tally GST work. Linked with your Masters.${l ? ` Latest version v${esc(l.version)}.` : ''}</p><div>${tag}</div></div>
+      <div class="btns mt">
+        ${!v ? `<button class="primary" data-act="gdSetup">Set up GST Desk</button>` : ''}
+        ${upd ? `<button class="primary" data-act="gdUpdate">Update GST Desk now</button>` : ''}
+        <a class="btn" href="${GD_BASE}docs/gst-desk.zip" download>Download GST Desk (zip)</a>
+        ${v ? `<button data-act="gdUpdate" data-pick="1">${S.gdLinked ? 'Change GST Desk folder' : 'Link GST Desk folder for one-click updates'}</button><button data-act="gdOpen" data-h="#clients">Open GST Desk</button>` : ''}
+      </div>
+      ${!v ? `<ol class="ext-steps small">
+        <li>${done ? `Files saved in <b>${done.parent ? esc(done.parent) + '\\' : ''}${esc(done.folder)}</b>.` : 'Click <b>Set up GST Desk</b> and choose a folder you will keep, e.g. <b>Documents</b> – CA Desk creates a <b>GST Desk</b> folder in it. (Or download the zip and unzip it.)'}</li>
+        <li>In Chrome open <b>chrome://extensions</b> <button class="sm" data-act="gdCopy" data-t="chrome://extensions">Copy</button> and turn on <b>Developer mode</b> (top right).</li>
+        <li>Click <b>Load unpacked</b> and choose that <b>GST Desk</b> folder.</li>
+        <li>Reload this page (Ctrl + F5). From then on CA Desk keeps GST Desk updated.</li></ol>`
+        : !S.gdLinked ? '<p class="muted small mt">Link the GST Desk folder once (the folder you chose in chrome://extensions) and CA Desk updates GST Desk for you. Choose “Allow on every visit” and updates happen on their own.</p>' : '<p class="muted small mt">GST Desk folder linked – CA Desk keeps it up to date.</p>'}`;
+  };
+
   G.view = () => {
     if (!S.gdLoaded) { G.refresh(); return '<section class="card"><p class="muted">Checking GST Desk…</p></section>'; }
     const v = ver(), l = S.gdLatest, upd = v && l && newer(l.version, v), sum = S.gdSum && !S.gdSum.error ? S.gdSum : null;
     const inGd = new Set((sum?.clients || []).map(x => x.gstin));
     const tag = !v ? '<span class="tag">Not installed in this Chrome</span>' : upd ? `<span class="tag amber">Update available · v${esc(l.version)} (you have v${esc(v)})</span>` : `<span class="tag green">Installed · v${esc(v)}</span>`;
-    const done = S.gdSetupDone;
-    const steps = `<ol class="ext-steps small">
-      <li>${done ? `Files saved in <b>${done.parent ? esc(done.parent) + '\\' : ''}${esc(done.folder)}</b>.` : 'Click <b>Set up GST Desk</b> and choose a folder you will keep, e.g. <b>Documents</b>. CA Desk creates a <b>GST Desk</b> folder in it.'}</li>
-      <li>In Chrome open <b>chrome://extensions</b> <button class="sm" data-act="gdCopy" data-t="chrome://extensions">Copy</button> and turn on <b>Developer mode</b> (top right).</li>
-      <li>Click <b>Load unpacked</b> and choose that <b>GST Desk</b> folder.</li>
-      <li>Reload this page (Ctrl + F5). From then on CA Desk keeps GST Desk updated.</li></ol>`;
     // clients
     if (!S.gdCreds && !S.gdCredsLoading) { S.gdCredsLoading = true; gstCreds().then(cr => { S.gdCreds = {}; for (const [k, v] of Object.entries(cr)) S.gdCreds[k] = v.length; S.gdCredsLoading = false; if (S.view === 'gstdesk') render(); }); }
     const creds = S.gdCreds || {};
@@ -280,11 +294,9 @@ export function initGstDesk(ctx) {
         <div>${tag}</div></div>
       <div class="btns mt">
         ${v ? `<button class="primary" data-act="gdOpen" data-h="#clients">Open GST Desk</button><button data-act="gdOpen" data-h="#downloads">Download returns</button><button data-act="gdOpen" data-h="#work">Tally &amp; GST work</button>` : ''}
-        ${!v ? `<button class="primary" data-act="gdSetup">Set up GST Desk</button><a class="btn" href="${GD_BASE}docs/gst-desk.zip" download>Download zip instead</a>` : ''}
-        ${upd ? `<button class="primary" data-act="gdUpdate">Update GST Desk now</button>` : ''}
-        ${v ? `<a href="#" class="small" data-act="gdUpdate" data-pick="1">${S.gdLinked ? 'Change GST Desk folder' : 'Link GST Desk folder for one-click updates'}</a>` : ''}
       </div>
-      ${!v ? steps : !S.gdLinked ? '<p class="muted small mt">Link the GST Desk folder once (the folder you chose in chrome://extensions) and CA Desk will update GST Desk for you. Choose “Allow on every visit” and updates happen on their own.</p>' : ''}
+      ${!v ? '<p class="mt">GST Desk is not installed in this Chrome yet. <button class="primary sm" data-act="gdToSettings">Install it from Settings</button></p>'
+        : upd ? `<p class="small mt">A new version (v${esc(l.version)}) is ready. <a href="#" data-act="gdToSettings">Update it in Settings</a></p>` : ''}
       <div class="gd-feats">${FEATURES.map(([h, t]) => `<div><b>${esc(h)}</b><span>${esc(t)}</span></div>`).join('')}</div>
     </section>
     ${v ? `<section class="card">
@@ -340,6 +352,7 @@ export function initGstDesk(ctx) {
   /* ---------- actions ---------- */
   A.gdOpen = ({ h }) => G.open(h);
   A.gdReload = () => location.reload();
+  A.gdToSettings = () => { S.view = 'settings'; render(); setTimeout(() => document.getElementById('gdext')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); };
   A.gdAddMaster = ({ g }) => G.addMaster(g);
   A.gdLink = ({ g }) => G.linkMaster(g, document.getElementById('gdl-' + g)?.value || '');
   A.gdSync = () => G.sync({ quiet: false }).then(() => G.refresh());

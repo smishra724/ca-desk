@@ -1160,6 +1160,10 @@ function vSettings() {
     <h2>Browser extension</h2>
     ${extCard()}
   </section>
+  ${isAdmin() ? `<section class="card" id="gdext">
+    <h2>GST Desk extension</h2>
+    ${GD.installCard()}
+  </section>` : ''}
   <section class="card">
     <h2>Attach documents from your computer</h2>
     <p class="muted small">Choose your <b>DATA MANAGEMENT</b> folder. PAN, Aadhaar, incorporation certificates, MOA/AOA, GST registration certificates, TAN, Udyam and other certificates are attached to the right client's Documents tab. Files already attached are skipped, so it is safe to run again.</p>
