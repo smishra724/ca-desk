@@ -137,9 +137,18 @@ export function initGstDesk(ctx) {
     }
     S.gdHandle = h;
     if (!p0 && await perm(h, true) !== 'granted') { S.gdErr = 'Chrome did not allow CA Desk to write to the extension folder. Click Update now again and choose “Allow on every visit”.'; render(); return; }
+    try { await h.getFileHandle('manifest.json'); }
+    catch (e) { if (true) { await idbSet0(null); S.gdHandle = null; S.gdLinked = false; S.gdErr = 'The linked extension folder is no longer there (moved, renamed or deleted). Click “Update now” again and choose the folder Chrome uses: chrome://extensions → CA Desk Suite → Details → Source.'; render(); return; } }
     let v;
     try { v = await writeFiles(h, m => { S.gdProg = m; toast(m); }); }
-    catch (e) { S.gdErr = `Could not write the new files (${e.message}). Use “Download extension (zip)”, unzip it over your extension folder and click ↻ Reload in chrome://extensions.`; render(); return; }
+    catch (e) {
+      if (e && (e.name === 'NotFoundError' || e.name === 'NotAllowedError' || e.name === 'InvalidStateError')) {
+        // the linked folder was moved, renamed or deleted: forget it and let the next click choose the right one
+        await idbSet0(null); S.gdHandle = null; S.gdLinked = false;
+        S.gdErr = 'The linked extension folder is no longer there (moved, renamed or deleted). Click “Update now” again and choose the folder Chrome uses: chrome://extensions → CA Desk Suite → Details → Source.';
+      } else S.gdErr = `Could not write the new files (${e.message}). Use “Download extension (zip)”, unzip it over your extension folder and click ↻ Reload in chrome://extensions.`;
+      render(); return;
+    }
     const restarted = ver() ? await restartExt(v) : false;
     toast(restarted ? `Updated to v${v}. Restarting…` : `Files updated to v${v}. Reloading…`, 4000);
     setTimeout(() => location.reload(), 2500);
