@@ -147,6 +147,7 @@ export function initGstDesk(ctx) {
   // Quietly keep GST Desk current when its folder is linked with "Allow on every visit".
   G.autoUpdate = async () => {
     try {
+      if (await G.bridgeStatus()) return;   // CA Desk Bridge looks after updates
       const v = ver(); if (!v || !canWrite()) return;
       const l = await latest(); if (!l || !newer(l.version, v)) return;
       const h = await idbGet(); if (!h || await perm(h, false) !== 'granted') return;
@@ -286,13 +287,59 @@ export function initGstDesk(ctx) {
     ['Tally & GST work', 'Reads TallyPrime over port 9000: registers, GSTR-1 JSON, 3B working, 2B and GSTR-1 reconciliation in Excel.'],
   ];
   // Settings → "GST Desk extension": install / download / update / link folder
+  /* ---------- CA Desk Bridge (Windows desktop app, like a DSC utility) ---------- */
+  const BRIDGE = 'http://127.0.0.1:47731';
+  // through the extension when it is installed (no extra Chrome prompt); otherwise directly (Chrome may ask to allow access to this device once)
+  const viaExt = () => !!ver() && !S.gdStale;
+  const bridgeCall = async (path, method = 'GET') => {
+    if (viaExt()) { try { return await ask('bridge', { path, method }, 4000); } catch (e) { if (/not running/i.test(e.message)) return null; } }
+    const c = new AbortController(); const t = setTimeout(() => c.abort(), 1500);
+    try { const r = await fetch(BRIDGE + path, { method, cache: 'no-store', signal: c.signal }); return r.ok ? await r.json() : null; } finally { clearTimeout(t); }
+  };
+  G.bridgeStatus = async () => {
+    try { S.gdBridge = await bridgeCall('/status'); } catch { S.gdBridge = null; }
+    S.gdBridgeAt = Date.now();
+    return S.gdBridge;
+  };
+  let bridgePoll = null;
+  G.bridgeUpdate = () => guard(async () => {
+    await bridgeCall('/update', 'POST');
+    S.gdBridgeBusy = true; render();
+    clearInterval(bridgePoll);
+    bridgePoll = setInterval(async () => {
+      const b = await G.bridgeStatus();
+      if (!b || !b.updating) { clearInterval(bridgePoll); S.gdBridgeBusy = false; if (b && !b.lastError) toast('Updated – Chrome loads the new version within a minute', 6000); }
+      if (S.view === 'settings') render();
+    }, 2000);
+  }, '');
+  G.bridgeCheck = () => guard(async () => { await bridgeCall('/check', 'POST'); setTimeout(async () => { await G.bridgeStatus(); render(); }, 2500); }, 'Checking for updates…');
+  function bridgeBox() {
+    if (S.gdBridgeAt === undefined || Date.now() - S.gdBridgeAt > 15000) { S.gdBridgeAt = Date.now(); G.bridgeStatus().then(() => { if (S.view === 'settings') render(); }); }
+    const b = S.gdBridge;
+    if (!b) return `<div class="ext-card" style="margin-bottom:12px"><div class="row-between wrap"><div><b>CA Desk Bridge</b> — desktop app for Windows (like a DSC utility) <span class="tag">Not running on this computer</span></div>
+        <div class="btns"><a class="btn primary" href="${GD_BASE}bridge/CA-Desk-Bridge-Setup.zip" download>Download CA Desk Bridge</a></div></div>
+      <p class="muted small mt">Installs once, sits next to the clock and keeps CA Desk Suite up to date: click <b>Update now</b> (here or on its tray icon) and it updates in the background – no folders, no Reload. It also connects CA Desk to Tally and DSC tokens on this computer.</p>
+      <ol class="ext-steps small"><li>Download and unzip, then double-click <b>CA-Desk-Bridge-Setup.cmd</b> (Windows may ask “Run anyway” – it installs for you only, no admin needed).</li>
+        <li>When it asks whether GST Desk / CA Desk Suite is already in Chrome, click <b>Yes</b> and choose its folder (chrome://extensions → Details → Source) – your GST Desk data stays.</li>
+        <li>Reload this page. If Chrome asks to let this site reach apps on this device, click <b>Allow</b>.</li></ol></div>`;
+    const busy = b.updating || S.gdBridgeBusy;
+    const l = b.latest || {};
+    return `<div class="ext-card" style="margin-bottom:12px"><div class="row-between wrap"><div><b>CA Desk Bridge</b> v${esc(b.version)} — running on this computer
+        ${busy ? `<span class="tag amber">Updating… ${esc(b.progress || '')}</span>` : b.updateAvailable ? `<span class="tag amber">Update available · v${esc(l.extensionVersion || '')}</span>` : '<span class="tag green">Up to date</span>'}</div>
+      <div class="btns">${b.updateAvailable && !busy ? '<button class="primary" data-act="gdBridgeUpdate">Update now</button>' : ''}<button data-act="gdBridgeCheck" ${busy ? 'disabled' : ''}>Check for updates</button></div></div>
+      <p class="small mt">Extension in its folder: <b>v${esc(b.extensionVersion || '–')}</b>${b.extensionRunning ? ` · Chrome is running <b>v${esc(b.extensionRunning)}</b>${b.extensionRunning !== b.extensionVersion ? ' (switches within a minute)' : ''}` : ''}${b.lastCheck ? ` · checked ${esc(b.lastCheck)}` : ''}</p>
+      ${b.lastError ? `<p class="warn small">${esc(b.lastError)}</p>` : b.message ? `<p class="muted small">${esc(b.message)}</p>` : ''}
+      ${b.extensionRunning && ver() && b.extensionRunning !== b.extensionVersion && !busy && b.extensionSeen ? '' : ''}</div>`;
+  }
+
   G.installCard = () => {
     if (S.gdLatest === undefined && !S.gdLatestLoading) { S.gdLatestLoading = true; Promise.all([latest(), idbGet()]).then(([, h]) => { S.gdLinked = !!h; S.gdHandle = h; S.gdLatestLoading = false; if (S.view === 'settings') render(); }); }
     const v = ver(), l = S.gdLatest, upd = v && l && newer(l.version, v), done = S.gdSetupDone;
     const exp = G.expected();
     const stuck = exp && v && newer(exp, v) ? `<div class="warn small" style="margin:.6rem 0">The new files (v${esc(exp)}) are in the extension folder, but Chrome is still running v${esc(v)}. One click finishes it: open <b>chrome://extensions</b> <button class="sm" data-act="gdCopy" data-t="chrome://extensions">Copy</button>, click <b>↻ Reload</b> on <b>CA Desk Suite</b>, then reload this page. Next updates restart by themselves.<br>Still v${esc(v)} after that? Then the linked folder is not the one Chrome loads: click <a href="#" data-act="gdUpdate" data-pick="1">Change extension folder</a> and choose the folder shown in chrome://extensions → CA Desk Suite → Details → <i>Source</i>.</div>` : '';
     const tag = !v ? '<span class="tag">Not installed in this Chrome</span>' : upd ? `<span class="tag amber">Update available · v${esc(l.version)} (you have v${esc(v)})</span>` : `<span class="tag green">Installed · v${esc(v)}</span>`;
-    return `${S.gdDup ? '<p class="warn small">Two copies of the portal helper are running: the old <b>CA Desk Helper</b> is still installed next to CA Desk Suite. Open chrome://extensions and click <b>Remove</b> on <b>CA Desk Helper</b> (keep CA Desk Suite), so portal logins don’t open twice.</p>' : ''}
+    if (S.gdBridge) return bridgeBox() + (S.gdDup ? '<p class="warn small">Two copies of the portal helper are running: remove the old <b>CA Desk Helper</b> in chrome://extensions (keep CA Desk Suite).</p>' : '') + (v ? '' : '<p class="warn small">CA Desk Bridge is running, but the extension is not loaded in this Chrome yet: chrome://extensions → Developer mode → Load unpacked → choose the folder shown in the Bridge (right-click its tray icon → Open extension folder).</p>');
+    return bridgeBox() + `${S.gdDup ? '<p class="warn small">Two copies of the portal helper are running: the old <b>CA Desk Helper</b> is still installed next to CA Desk Suite. Open chrome://extensions and click <b>Remove</b> on <b>CA Desk Helper</b> (keep CA Desk Suite), so portal logins don’t open twice.</p>' : ''}
     <div class="row-between wrap"><p class="muted small" style="margin:0"><b>CA Desk Suite</b> = GST Desk + CA Desk portal helper, in one Chrome extension.${l ? ` Latest version v${esc(l.version)}.` : ''}</p><div>${tag}</div></div>
     ${stuck}${S.gdErr ? `<div class="warn small" style="margin:.6rem 0">${esc(S.gdErr)}</div>` : ''}
       <div class="btns mt">
@@ -389,6 +436,8 @@ export function initGstDesk(ctx) {
   /* ---------- actions ---------- */
   A.gdOpen = ({ h }) => G.open(h);
   A.gdReload = () => location.reload();
+  A.gdBridgeUpdate = () => G.bridgeUpdate();
+  A.gdBridgeCheck = () => G.bridgeCheck();
   A.gdToSettings = () => { S.view = 'settings'; render(); setTimeout(() => document.getElementById('gdext')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); };
   A.gdAddMaster = ({ g }) => G.addMaster(g);
   A.gdLink = ({ g }) => G.linkMaster(g, document.getElementById('gdl-' + g)?.value || '');
