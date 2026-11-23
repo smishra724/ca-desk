@@ -1153,7 +1153,7 @@ function vSettings() {
       <div class="span2"><button class="primary">Save</button></div></form>
   </section>
   <section class="card" id="gdext">
-    <h2>CA Desk Connector — desktop app</h2>
+    <h2>CA Desk Bridge — desktop app</h2>
     ${extCard()}
   </section>
   <section class="card">

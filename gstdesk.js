@@ -325,15 +325,15 @@ export function initGstDesk(ctx) {
   function bridgeBox() {
     if (S.gdBridgeAt === undefined || Date.now() - S.gdBridgeAt > 15000) { S.gdBridgeAt = Date.now(); G.bridgeStatus().then(() => { if (S.view === 'settings') render(); }); }
     const b = S.gdBridge;
-    if (!b) return `<div class="ext-card" style="margin-bottom:12px"><div class="row-between wrap"><div><b>CA Desk Connector</b> — desktop app for Windows (like a DSC utility) <span class="tag">Not running on this computer</span></div>
-        <div class="btns"><a class="btn primary" href="${GD_BASE}bridge/CA-Desk-Connector.exe" download>Download CA-Desk-Connector.exe</a></div></div>
-      <p class="muted small mt">Connects CA Desk to Tally and DSC tokens on this computer. Sits next to the clock, starts with Windows, and updates itself from <b>Update now</b> (here or on its tray icon).</p>
-      <ol class="ext-steps small"><li>Download and double-click <b>CA-Desk-Connector.exe</b>. If Windows shows “Windows protected your PC”, click <b>More info → Run anyway</b> (if Chrome warns about the download, choose <b>Keep</b>). No admin rights needed.</li>
-        <li>Reload this page. If Chrome asks to let this site reach apps on this device, click <b>Allow</b>.</li></ol>
-      <p class="muted small">Also want the GST Desk browser extension kept up to date? Use <a href="${GD_BASE}bridge/CA-Desk-Bridge-Setup.exe">CA-Desk-Bridge-Setup.exe</a> instead.</p></div>`;
+    if (!b) return `<div class="ext-card" style="margin-bottom:12px"><div class="row-between wrap"><div><b>CA Desk Bridge</b> — desktop app for Windows (like a DSC utility) <span class="tag">Not running on this computer</span></div>
+        <div class="btns"><a class="btn primary" href="${GD_BASE}bridge/CA-Desk-Bridge.exe" download>Download CA-Desk-Bridge.exe</a></div></div>
+      <p class="muted small mt">One installer for everything on this computer: connects CA Desk to Tally and DSC tokens, and installs the GST Desk browser extension and keeps it up to date. Sits next to the clock, starts with Windows, updates from <b>Update now</b> (here or on its tray icon).</p>
+      <ol class="ext-steps small"><li>Download and double-click <b>CA-Desk-Bridge.exe</b>. If Windows shows “Windows protected your PC”, click <b>More info → Run anyway</b> (if Chrome warns about the download, choose <b>Keep</b>). No admin rights needed.</li>
+        <li>If GST Desk is not in Chrome yet, it opens chrome://extensions and copies the folder path: turn on <b>Developer mode</b> → <b>Load unpacked</b> → Ctrl+V → <b>Select Folder</b> (only this once).</li>
+        <li>Reload this page. If Chrome asks to let this site reach apps on this device, click <b>Allow</b>.</li></ol></div>`;
     const busy = b.updating || S.gdBridgeBusy;
     const l = b.latest || {};
-    return `<div class="ext-card" style="margin-bottom:12px"><div class="row-between wrap"><div><b>${b.connectorOnly ? 'CA Desk Connector' : 'CA Desk Bridge'}</b> v${esc(b.version)} — running on this computer
+    return `<div class="ext-card" style="margin-bottom:12px"><div class="row-between wrap"><div><b>CA Desk Bridge</b> v${esc(b.version)} — running on this computer
         ${busy ? `<span class="tag amber">Updating… ${esc(b.progress || '')}</span>` : b.updateAvailable ? `<span class="tag amber">Update available · v${esc((b.connectorOnly ? l.version : l.extensionVersion) || '')}</span>` : '<span class="tag green">Up to date</span>'}</div>
       <div class="btns">${b.updateAvailable && !busy ? '<button class="primary" data-act="gdBridgeUpdate">Update now</button>' : ''}<button data-act="gdBridgeCheck" ${busy ? 'disabled' : ''}>Check for updates</button></div></div>
       ${b.connectorOnly ? `<p class="small mt">Tally and DSC tokens on this computer are available to CA Desk${b.lastCheck ? ` · checked ${esc(b.lastCheck)}` : ''}</p>` : ''}
@@ -396,7 +396,7 @@ export function initGstDesk(ctx) {
             <li><b>Was it there before?</b> Open <b>chrome://extensions</b> <button class="sm" data-act="gdCopy" data-t="chrome://extensions">Copy</button> and switch <b>CA Desk Suite</b> (or GST Desk) <b>on</b>, then reload this page (Ctrl + F5).</li>
             <li><b>Removed or never added?</b> <button class="sm primary" data-act="gdSetup">Set up CA Desk Suite</button> or <a href="${GD_BASE}docs/gst-desk.zip" download="ca-desk-suite.zip">download the zip</a> and unzip it → chrome://extensions → turn on <b>Developer mode</b> → <b>Load unpacked</b> → choose that folder → reload this page. Your clients and GST logins come back from Masters automatically.</li>
           </ol>
-          <p class="muted small" style="margin:.4rem 0 0">CA Desk Connector (the desktop app) is only for Tally and DSC — the GST portal work needs this extension.</p></div>`
+          <p class="small" style="margin:.4rem 0 0">Easiest: <a href="${GD_BASE}bridge/CA-Desk-Bridge.exe" download>download CA-Desk-Bridge.exe</a> and run it — it installs the extension files (or finds the ones Chrome already has), copies the folder path and opens chrome://extensions for the Load unpacked step, and keeps GST Desk up to date afterwards. If you already ran CA-Desk-Connector.exe, just run CA-Desk-Bridge.exe once.</p></div>`
         : upd ? `<p class="small mt">A new version (v${esc(l.version)}) is ready. <a href="#" data-act="gdToSettings">Update it in Settings</a></p>` : ''}
       <div class="gd-feats">${FEATURES.map(([h, t]) => `<div><b>${esc(h)}</b><span>${esc(t)}</span></div>`).join('')}</div>
     </section>
