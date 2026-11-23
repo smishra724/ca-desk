@@ -6,7 +6,10 @@ const GD_BASE = 'https://smishra724.github.io/gst-desk/';
 const IDB = 'cadesk-gstdesk', STORE = 'h', KEY = 'folder';
 const idb = () => new Promise((ok, bad) => { const r = indexedDB.open(IDB, 1); r.onupgradeneeded = () => r.result.createObjectStore(STORE); r.onsuccess = () => ok(r.result); r.onerror = () => bad(r.error); });
 const idbGet = async () => { try { const d = await idb(); return await new Promise(ok => { const q = d.transaction(STORE).objectStore(STORE).get(KEY); q.onsuccess = () => ok(q.result || null); q.onerror = () => ok(null); }); } catch { return null; } };
-const idbSet = async v => { try { const d = await idb(); await new Promise(ok => { const t = d.transaction(STORE, 'readwrite'); t.objectStore(STORE).put(v, KEY); t.oncomplete = ok; t.onerror = ok; }); } catch { /* private mode */ } };
+const idbSetKey = async (k, v) => { try { const d = await idb(); await new Promise(ok => { const t = d.transaction(STORE, 'readwrite'); t.objectStore(STORE).put(v, k); t.oncomplete = ok; t.onerror = ok; }); } catch { /* private mode */ } };
+const idbGetKey = async (k) => { try { const d = await idb(); return await new Promise(ok => { const q = d.transaction(STORE).objectStore(STORE).get(k); q.onsuccess = () => ok(q.result || null); q.onerror = () => ok(null); }); } catch { return null; } };
+const idbSet = async v => { await idbSetKey('folderId', document.documentElement.getAttribute('data-gstdesk-id') || ''); return idbSet0(v); };
+const idbSet0 = async v => { try { const d = await idb(); await new Promise(ok => { const t = d.transaction(STORE, 'readwrite'); t.objectStore(STORE).put(v, KEY); t.oncomplete = ok; t.onerror = ok; }); } catch { /* private mode */ } };
 const newer = (a, b) => { const x = String(a || '0').split('.').map(Number), y = String(b || '0').split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
 
 export function initGstDesk(ctx) {
@@ -105,19 +108,40 @@ export function initGstDesk(ctx) {
     render();
   }, 'GST Desk files saved');
   // Update: write the new files into the linked folder and restart the extension.
+  // Restart the extension after new files were written. Two routes (GST Desk bridge and the helper bridge);
+  // if neither answers (page opened before the last restart), remember what we expect and ask for one click.
+  async function restartExt(v) {
+    try { sessionStorage.setItem('gdExpect', v); } catch { /* ignore */ }
+    let ok = false;
+    try { await ask('reload', {}, 3000); ok = true; } catch { /* try the helper route */ }
+    window.postMessage({ type: 'CAPM_RELOAD' }, location.origin);
+    return ok;
+  }
+  G.expected = () => { try { const e = sessionStorage.getItem('gdExpect'); if (e && ver() && !newer(e, ver())) { sessionStorage.removeItem('gdExpect'); return ''; } return e || ''; } catch { return ''; } };
   G.update = ({ pick } = {}) => guard(async () => {
+    S.gdErr = '';
     if (!canWrite()) throw new Error('Use Chrome or Edge on a computer to update GST Desk.');
-    let h = pick ? null : await idbGet();
+    // ask Chrome for write access first, while the click still counts as your action
+    // linked folder belongs to another copy of the extension (e.g. it was loaded again from a new folder) → choose the right one
+    const fid = await idbGetKey('folderId');
+    if (!pick && fid && document.documentElement.getAttribute('data-gstdesk-id') && fid !== document.documentElement.getAttribute('data-gstdesk-id')) pick = true;
+    const h0 = pick ? null : S.gdHandle;
+    const p0 = h0 && typeof h0.requestPermission === 'function' ? h0.requestPermission({ mode: 'readwrite' }).catch(() => 'denied') : null;
+    let h = pick ? null : (h0 || await idbGet());
+    if (p0 && await p0 !== 'granted') { S.gdErr = 'Chrome did not allow CA Desk to write to the extension folder. Click Update now again and choose “Allow on every visit” (or “Allow”).'; render(); return; }
     if (!h) {
       const d = await window.showDirectoryPicker({ id: 'gstdesk-folder', mode: 'readwrite', startIn: 'documents' });
       h = await gdFolder(d);
       if (!h) throw new Error('That folder does not contain GST Desk. Choose the folder you picked in chrome://extensions → Load unpacked (it has manifest.json inside).');
       await idbSet(h); S.gdLinked = true;
     }
-    if (await perm(h, true) !== 'granted') throw new Error('Chrome did not allow CA Desk to update the GST Desk folder. Click Update again and choose “Allow on every visit”.');
-    const v = await writeFiles(h, m => toast(m));
-    if (ver()) { try { await ask('reload', {}, 4000); } catch { /* older GST Desk – reload it in chrome://extensions */ } }
-    toast(`GST Desk updated to v${v}. Reloading…`, 4000);
+    S.gdHandle = h;
+    if (!p0 && await perm(h, true) !== 'granted') { S.gdErr = 'Chrome did not allow CA Desk to write to the extension folder. Click Update now again and choose “Allow on every visit”.'; render(); return; }
+    let v;
+    try { v = await writeFiles(h, m => { S.gdProg = m; toast(m); }); }
+    catch (e) { S.gdErr = `Could not write the new files (${e.message}). Use “Download extension (zip)”, unzip it over your extension folder and click ↻ Reload in chrome://extensions.`; render(); return; }
+    const restarted = ver() ? await restartExt(v) : false;
+    toast(restarted ? `Updated to v${v}. Restarting…` : `Files updated to v${v}. Reloading…`, 4000);
     setTimeout(() => location.reload(), 2500);
   }, '');
   // Quietly keep GST Desk current when its folder is linked with "Allow on every visit".
@@ -127,7 +151,7 @@ export function initGstDesk(ctx) {
       const l = await latest(); if (!l || !newer(l.version, v)) return;
       const h = await idbGet(); if (!h || await perm(h, false) !== 'granted') return;
       await writeFiles(h, () => {});
-      try { await ask('reload', {}, 4000); } catch { /* ignore */ }
+      await restartExt(l.version);
       toast(`GST Desk updated to v${l.version}`, 5000);
       setTimeout(() => { S.gdSum = null; if (S.view === 'gstdesk') G.refresh(); }, 2500);
     } catch { /* try again next time */ }
@@ -263,14 +287,17 @@ export function initGstDesk(ctx) {
   ];
   // Settings → "GST Desk extension": install / download / update / link folder
   G.installCard = () => {
-    if (S.gdLatest === undefined && !S.gdLatestLoading) { S.gdLatestLoading = true; Promise.all([latest(), idbGet()]).then(([, h]) => { S.gdLinked = !!h; S.gdLatestLoading = false; if (S.view === 'settings') render(); }); }
+    if (S.gdLatest === undefined && !S.gdLatestLoading) { S.gdLatestLoading = true; Promise.all([latest(), idbGet()]).then(([, h]) => { S.gdLinked = !!h; S.gdHandle = h; S.gdLatestLoading = false; if (S.view === 'settings') render(); }); }
     const v = ver(), l = S.gdLatest, upd = v && l && newer(l.version, v), done = S.gdSetupDone;
+    const exp = G.expected();
+    const stuck = exp && v && newer(exp, v) ? `<div class="warn small" style="margin:.6rem 0">The new files (v${esc(exp)}) are in the extension folder, but Chrome is still running v${esc(v)}. One click finishes it: open <b>chrome://extensions</b> <button class="sm" data-act="gdCopy" data-t="chrome://extensions">Copy</button>, click <b>↻ Reload</b> on <b>CA Desk Suite</b>, then reload this page. Next updates restart by themselves.<br>Still v${esc(v)} after that? Then the linked folder is not the one Chrome loads: click <a href="#" data-act="gdUpdate" data-pick="1">Change extension folder</a> and choose the folder shown in chrome://extensions → CA Desk Suite → Details → <i>Source</i>.</div>` : '';
     const tag = !v ? '<span class="tag">Not installed in this Chrome</span>' : upd ? `<span class="tag amber">Update available · v${esc(l.version)} (you have v${esc(v)})</span>` : `<span class="tag green">Installed · v${esc(v)}</span>`;
     return `${S.gdDup ? '<p class="warn small">Two copies of the portal helper are running: the old <b>CA Desk Helper</b> is still installed next to CA Desk Suite. Open chrome://extensions and click <b>Remove</b> on <b>CA Desk Helper</b> (keep CA Desk Suite), so portal logins don’t open twice.</p>' : ''}
     <div class="row-between wrap"><p class="muted small" style="margin:0"><b>CA Desk Suite</b> = GST Desk + CA Desk portal helper, in one Chrome extension.${l ? ` Latest version v${esc(l.version)}.` : ''}</p><div>${tag}</div></div>
+    ${stuck}${S.gdErr ? `<div class="warn small" style="margin:.6rem 0">${esc(S.gdErr)}</div>` : ''}
       <div class="btns mt">
         ${!v ? `<button class="primary" data-act="gdSetup">Set up CA Desk Suite</button>` : ''}
-        ${upd ? `<button class="primary" data-act="gdUpdate">Update now</button>` : ''}
+        ${upd && !stuck ? `<button class="primary" data-act="gdUpdate">Update now</button>` : ''}
         <a class="btn" href="${GD_BASE}docs/gst-desk.zip" download="ca-desk-suite.zip">Download extension (zip)</a>
         ${v ? `<button data-act="gdUpdate" data-pick="1">${S.gdLinked ? 'Change extension folder' : 'Link extension folder for one-click updates'}</button><button data-act="gdOpen" data-h="#clients">Open GST Desk</button>` : ''}
       </div>
