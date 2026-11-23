@@ -60,7 +60,7 @@ export function initGstDesk(ctx) {
     if (id) { const w = window.open(`chrome-extension://${id}/manager.html${hash}`, '_blank'); if (w) return Promise.resolve(); }
     return ask('open', { hash }, 6000);
   };
-  G.open = (hash = '#clients') => !ver() ? G.openWindow('#gstdesk') : openTab(hash).catch(e => toast(e.message, 8000));
+  G.open = (hash = '#clients') => !ver() ? (S.view = 'gstdesk', render(), toast('Add GST Desk to this Chrome first – steps on this page', 6000)) : openTab(hash).catch(e => toast(e.message, 8000));
 
   /* ---------- latest version + one-click install / update ---------- */
   async function latest() {
@@ -273,7 +273,7 @@ export function initGstDesk(ctx) {
     return r;
   };
   // From a client's page: send it, then open GST Desk on that GSTIN
-  G.openClient = (cid, gstin) => !ver() ? G.openWindow('#gstdesk=' + encodeURIComponent((S.clients.find(c => c.id === cid) || {}).name || '')) : guard(async () => {
+  G.openClient = (cid, gstin) => !ver() ? G.open() : guard(async () => {
     await G.send([cid], { quiet: true });
     await openTab('#gstin=' + encodeURIComponent(gstin || ''));
   }, '');
@@ -327,15 +327,15 @@ export function initGstDesk(ctx) {
     const b = S.gdBridge;
     if (!b) return `<div class="ext-card" style="margin-bottom:12px"><div class="row-between wrap"><div><b>CA Desk Bridge</b> — desktop app for Windows (like emBridge / a DSC utility) <span class="tag">Not running on this computer</span></div>
         <div class="btns"><a class="btn primary" href="${GD_BASE}bridge/CA-Desk-Bridge.exe" download>Download CA-Desk-Bridge.exe</a></div></div>
-      <p class="muted small mt">One install for everything on this computer, nothing to add to Chrome: opens CA Desk in its own window with GST Desk built in (GST portal import, return downloads, GSTR-1 upload), and connects Tally and DSC tokens. Sits next to the clock, starts with Windows, updates from <b>Update now</b>.</p>
+      <p class="muted small mt">One install for this computer: puts GST Desk (GST portal import, return downloads, GSTR-1 upload) in place and keeps it up to date, and connects Tally and DSC tokens. Sits next to the clock, starts with Windows, updates from <b>Update now</b>.</p>
       <ol class="ext-steps small"><li>Double-click <b>CA-Desk-Bridge.exe</b>. If Windows shows “Windows protected your PC”, click <b>More info → Run anyway</b> (if Chrome warns about the download, choose <b>Keep</b>). No admin rights needed.</li>
-        <li>CA Desk opens in its own window (first time it downloads about 150 MB). Sign in once; from then on use the <b>CA Desk</b> icon on your desktop.</li></ol></div>`;
+        <li>It opens chrome://extensions and copies the GST Desk folder: <b>Developer mode</b> → <b>Load unpacked</b> → Ctrl+V → <b>Select Folder</b> (only once). Then GST Desk opens in a new tab here.</li></ol></div>`;
     const busy = b.updating || S.gdBridgeBusy;
     const l = b.latest || {};
     return `<div class="ext-card" style="margin-bottom:12px"><div class="row-between wrap"><div><b>CA Desk Bridge</b> v${esc(b.version)} — running on this computer
         ${busy ? `<span class="tag amber">Updating… ${esc(b.progress || '')}</span>` : b.updateAvailable ? `<span class="tag amber">Update available · v${esc((b.connectorOnly ? l.version : l.extensionVersion) || '')}</span>` : '<span class="tag green">Up to date</span>'}</div>
       <div class="btns">${b.updateAvailable && !busy ? '<button class="primary" data-act="gdBridgeUpdate">Update now</button>' : ''}<button data-act="gdBridgeCheck" ${busy ? 'disabled' : ''}>Check for updates</button></div></div>
-      <p class="small mt">CA Desk window: ${b.browserBusy ? `<b>setting up… ${esc(b.browserProgress || '')}</b>` : b.browser?.installed ? `ready (v${esc(b.browser.version)}) ${ver() ? '' : '<button class="sm" data-act="gdWindow" data-h="#gstdesk">Open GST Desk</button>'}` : '<b>not set up yet</b> <button class="sm" data-act="gdWindow" data-h="">Set it up</button>'} · Tally and DSC tokens on this computer are available to CA Desk</p>
+      <p class="small mt">GST Desk in this Chrome: ${ver() ? `<b>on</b> (v${esc(ver())})` : '<b>not added yet</b> – <a href="#" data-act="gdOpen">see the steps</a>'} · Tally and DSC tokens on this computer are available to CA Desk</p>
       ${b.browserError ? `<p class="warn small">${esc(b.browserError)}</p>` : ''}
       <p class="small mt" ${b.connectorOnly ? 'hidden' : ''}>Extension in its folder: <b>v${esc(b.extensionVersion || '–')}</b>${b.extensionRunning ? ` · Chrome is running <b>v${esc(b.extensionRunning)}</b>${b.extensionRunning !== b.extensionVersion ? ' (switches within a minute)' : ''}` : ''}${b.lastCheck ? ` · checked ${esc(b.lastCheck)}` : ''}</p>
       ${b.lastError ? `<p class="warn small">${esc(b.lastError)}</p>` : b.message ? `<p class="muted small">${esc(b.message)}</p>` : ''}
@@ -348,7 +348,7 @@ export function initGstDesk(ctx) {
     const exp = G.expected();
     const stuck = exp && v && newer(exp, v) ? `<div class="warn small" style="margin:.6rem 0">The new files (v${esc(exp)}) are in the extension folder, but Chrome is still running v${esc(v)}. One click finishes it: open <b>chrome://extensions</b> <button class="sm" data-act="gdCopy" data-t="chrome://extensions">Copy</button>, click <b>↻ Reload</b> on <b>CA Desk Suite</b>, then reload this page. Next updates restart by themselves.<br>Still v${esc(v)} after that? Then the linked folder is not the one Chrome loads: click <a href="#" data-act="gdUpdate" data-pick="1">Change extension folder</a> and choose the folder shown in chrome://extensions → CA Desk Suite → Details → <i>Source</i>.</div>` : '';
     const tag = !v ? '<span class="tag">Not installed in this Chrome</span>' : upd ? `<span class="tag amber">Update available · v${esc(l.version)} (you have v${esc(v)})</span>` : `<span class="tag green">Installed · v${esc(v)}</span>`;
-    if (S.gdBridge) return bridgeBox() + (S.gdDup ? '<p class="warn small">Two copies of the portal helper are running: remove the old <b>CA Desk Helper</b> in chrome://extensions (keep CA Desk Suite).</p>' : '') + (v ? '' : '<p class="muted small">GST Desk works inside the CA Desk window (nothing to add to this Chrome) – use <b>Open GST Desk</b> above or the <b>CA Desk</b> icon on your desktop.</p>');
+    if (S.gdBridge) return bridgeBox() + (S.gdDup ? '<p class="warn small">Two copies of the portal helper are running: remove the old <b>CA Desk Helper</b> in chrome://extensions (keep CA Desk Suite).</p>' : '') + '';
     // No Bridge: the Bridge is the way to install; the manual extension set-up stays available, folded away
     const manualOpen = !!(S.gdErr || stuck || S.gdManual || (!v && S.gdBridge));
     return bridgeBox() + `<details class="gd-manual" ${manualOpen ? 'open' : ''}><summary class="small">${S.gdBridge ? 'GST Desk browser extension (for the GST portal): set up / update' : 'Without the Bridge: set up / update the browser extension by hand'}</summary>${S.gdDup ? '<p class="warn small">Two copies of the portal helper are running: the old <b>CA Desk Helper</b> is still installed next to CA Desk Suite. Open chrome://extensions and click <b>Remove</b> on <b>CA Desk Helper</b> (keep CA Desk Suite), so portal logins don’t open twice.</p>' : ''}
@@ -380,17 +380,19 @@ export function initGstDesk(ctx) {
     if (S.gdBridgeAt === undefined || Date.now() - S.gdBridgeAt > 15000) { S.gdBridgeAt = Date.now(); G.bridgeStatus().then(() => { if (S.view === 'gstdesk') render(); }); }
     const b = S.gdBridge;
     if (b) {
-      const busy = b.browserBusy;
-      return `<div class="ext-card mt"><div class="row-between wrap"><div><b>GST Desk opens in the CA Desk window</b> — CA Desk Bridge runs it with GST Desk built in, so nothing is added to Chrome.</div>
-        <div class="btns"><button class="primary" data-act="gdWindow" data-h="#gstdesk" ${busy ? 'disabled' : ''}>${busy ? `Setting up… ${esc(b.browserProgress || '')}` : 'Open GST Desk'}</button></div></div>
-        <p class="muted small mt">${b.browser?.installed ? 'The window opens CA Desk with the GST Desk options (Send clients, Download returns, Tally &amp; GST work, portal import). Sign in to CA Desk there once.' : 'First time: the Bridge downloads the window (about 150 MB) and opens it by itself. Sign in to CA Desk there once.'} Tip: the <b>CA Desk</b> icon on your desktop opens it directly.</p>
-        ${b.browserError ? `<p class="warn small">${esc(b.browserError)}</p>` : ''}</div>`;
+      const folder = b.extensionFolder || '';
+      return `<div class="ext-card mt"><div><b>Last step, only once: add GST Desk to this Chrome</b> — then it opens in a new tab here, already signed in, and CA Desk Bridge keeps it up to date by itself.</div>
+        <ol class="ext-steps small" style="margin-top:.6rem">
+          <li>Open <b>chrome://extensions</b> <button class="sm" data-act="gdCopy" data-t="chrome://extensions">Copy</button> (paste it in the address bar) and turn on <b>Developer mode</b> (top right).</li>
+          <li>Click <b>Load unpacked</b>, paste this folder and click <b>Select Folder</b>: <code>${esc(folder)}</code> <button class="sm primary" data-act="gdCopy" data-t="${esc(folder)}">Copy folder path</button></li>
+          <li>Come back here and press <b>Ctrl + F5</b>. The GST Desk options appear on this page; your clients and GST logins come in from Masters.</li></ol>
+        <p class="muted small">Chrome allows adding an extension only this way (by hand, once) unless it is on the Chrome Web Store. Already added before? Just switch <b>CA Desk Suite</b> on in chrome://extensions.</p></div>`;
     }
-    return `<div class="ext-card mt"><div class="row-between wrap"><div><b>Install CA Desk Bridge</b> — one desktop app (like emBridge / a DSC utility): GST Desk, GST portal, Tally and DSC. Nothing to add to Chrome.</div>
+    return `<div class="ext-card mt"><div class="row-between wrap"><div><b>Install CA Desk Bridge</b> — one desktop app (like emBridge / a DSC utility): sets up GST Desk, keeps it updated, connects Tally and DSC.</div>
         <div class="btns"><a class="btn primary" href="${GD_BASE}bridge/CA-Desk-Bridge.exe" download>Download CA-Desk-Bridge.exe</a></div></div>
       <ol class="ext-steps small"><li>Double-click <b>CA-Desk-Bridge.exe</b> (if Windows says “Windows protected your PC”: <b>More info → Run anyway</b>).</li>
-        <li>CA Desk opens in its own window with GST Desk built in (first time it downloads about 150 MB). Sign in once.</li>
-        <li>From then on open the <b>CA Desk</b> icon on your desktop. Updates: <b>Update now</b> on the Bridge icon near the clock.</li></ol>
+        <li>It opens chrome://extensions and copies the GST Desk folder: <b>Developer mode</b> → <b>Load unpacked</b> → Ctrl+V → <b>Select Folder</b> (only once).</li>
+        <li>Press Ctrl + F5 here – GST Desk opens in a new tab, already signed in. Updates come through the Bridge.</li></ol>
       <p class="muted small">Already running it? Reload this page; if Chrome asks to let this site reach apps on this device, click <b>Allow</b>.</p></div>`;
   }
 
@@ -398,7 +400,7 @@ export function initGstDesk(ctx) {
     if (!S.gdLoaded) { G.refresh(); return '<section class="card"><p class="muted">Checking GST Desk…</p></section>'; }
     const v = ver(), l = S.gdLatest, upd = v && l && newer(l.version, v), sum = S.gdSum && !S.gdSum.error ? S.gdSum : null;
     const inGd = new Set((sum?.clients || []).map(x => x.gstin));
-    const tag = !v ? '<span class="tag">Opens in the CA Desk window</span>' : upd ? `<span class="tag amber">Update available · v${esc(l.version)} (you have v${esc(v)})</span>` : `<span class="tag green">Installed · v${esc(v)}</span>`;
+    const tag = !v ? '<span class="tag">Not added to this Chrome yet</span>' : upd ? `<span class="tag amber">Update available · v${esc(l.version)} (you have v${esc(v)})</span>` : `<span class="tag green">Installed · v${esc(v)}</span>`;
     // clients
     if (!S.gdCreds && !S.gdCredsLoading) { S.gdCredsLoading = true; gstCreds().then(cr => { S.gdCreds = {}; for (const [k, v] of Object.entries(cr)) S.gdCreds[k] = v.length; S.gdCredsLoading = false; if (S.view === 'gstdesk') render(); }); }
     const creds = S.gdCreds || {};
