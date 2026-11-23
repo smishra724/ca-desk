@@ -497,8 +497,15 @@ function vDashboard() {
 }
 
 /* ---------- due dates page ---------- */
+// Due dates period: "This month" by default; the last relative choice sticks and "This month" rolls over to the new month by itself.
+const thisMonthKey = () => { const d = new Date(); return `m:${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+function dueDefault() {
+  let v = 'this'; try { v = localStorage.getItem('cad-due-range') || 'this'; } catch { /* private mode */ }
+  return ['overdue', '7', '30', '90'].includes(v) ? v : thisMonthKey();
+}
+function rememberDueRange(v) { try { localStorage.setItem('cad-due-range', ['overdue', '7', '30', '90'].includes(v) ? v : 'this'); } catch { /* ignore */ } }
 function vDue() {
-  const f = S.dueF ||= { range: '30', form: '', q: '', history: false };
+  const f = S.dueF ||= { range: dueDefault(), form: '', q: '', history: false };
   const open = S.dueOpen ||= new Set();
   if (f.form) { open.add(f.form); f.form = ''; } // links from the dashboard open that compliance
   // calendar month ("m:2026-11"): everything falling due inside that month
@@ -560,7 +567,7 @@ function vDue() {
         const o = ([v, l]) => `<option value="${v}" ${v === f.range ? 'selected' : ''}>${l}</option>`;
         return `<optgroup label="From today">${[['overdue', 'Overdue only'], ['7', 'Next 7 days'], ['30', 'Next 30 days'], ['90', 'Next 90 days']].map(o).join('')}</optgroup>
           <optgroup label="Calendar month">${months.map(o).join('')}<option value="pick">Choose a month…</option></optgroup>`; })()}</select>
-      ${mm || f.pick ? `<input type="month" class="mpick" data-change="dueMonth" value="${mm || isoLocalD(t0).slice(0, 7)}" aria-label="Month">` : ''}
+      ${f.pick || (mm && ![0, 1, -1].some(k => { const d = new Date(t0.getFullYear(), t0.getMonth() + k, 1); return mm === `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })) ? `<input type="month" class="mpick" data-change="dueMonth" value="${mm || isoLocalD(t0).slice(0, 7)}" aria-label="Month">` : ''}
       <input id="dueQ" placeholder="Search client or GSTIN…" value="${esc(f.q)}">
       <select data-change="dueF" data-k="ctype"><option value="">All clients</option><option value="business" ${f.ctype === 'business' ? 'selected' : ''}>Business clients</option><option value="itr" ${f.ctype === 'itr' ? 'selected' : ''}>Individual – ITR only</option></select>
       <select data-change="dueF" data-k="cons"><option value="">All constitutions</option>${consList.map(k => `<option ${k === f.cons ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>
@@ -1310,17 +1317,17 @@ const A = {
     const catId = cp.type === 'flag' ? ({ tds: 'TDSRET', epf: 'EPF', esic: 'ESIC', pt: 'PT', lwf: 'LWF', audit: '3CD', advTax: 'ADV' })[cp.id] : cp.type === 'service' ? (cp.id.startsWith('svc:') ? 'GEN' : cp.id) : cp.id;
     A.newTask({ multi: ids, cat: catId, title: cp.id.startsWith('svc:') ? cp.name : '' });
   },
-  dueOpenForm: ({ k }) => { S.dueF ||= { range: '30', form: '', q: '', history: false }; S.dueF.form = k; S.dueF.q = ''; S.view = 'due'; render(); },
+  dueOpenForm: ({ k }) => { S.dueF ||= { range: dueDefault(), form: '', q: '', history: false }; S.dueF.form = k; S.dueF.q = ''; S.view = 'due'; render(); },
   gqOpen: ({ id }) => { S.gq = ''; guard(async () => { await openClient(id, 'master'); render(); }); },
   gqLogin: ({ id }) => { S.gq = ''; guard(async () => { await openClient(id, 'logins'); render(); }); },
   gqTask: ({ id }) => { S.gq = ''; A.openTask({ id }); },
   gqComp: ({ id }) => { S.gq = ''; S.view = 'comps'; S.compSel = id; S.compPick = null; S.compQ = ''; S.compCons = []; render(); setTimeout(() => document.getElementById('compPanel')?.scrollIntoView({ behavior: 'smooth' }), 50); },
   gqDo: ({ a, v }) => { S.gq = ''; if (a === 'go') A.go({ v }); else if (a === 'newTask') { render(); A.newTask({}); } else A.fabGo({ to: v }); },
-  dueDay: ({ d }) => { S.dueDay = d; S.dueF ||= { range: '30', form: '', q: '', history: false }; if (new Date(d) < dayStart(new Date())) S.dueF.history = false; S.dueOpen = new Set(['*']); S.view = 'due'; render(); },
+  dueDay: ({ d }) => { S.dueDay = d; S.dueF ||= { range: dueDefault(), form: '', q: '', history: false }; if (new Date(d) < dayStart(new Date())) S.dueF.history = false; S.dueOpen = new Set(['*']); S.view = 'due'; render(); },
   dueDayClear: () => { S.dueDay = ''; S.dueOpen = new Set(); render(); },
   dscSoon: () => { S.dscF = { q: '', show: 'soon', cust: '' }; S.view = 'dsc'; render(); },
   remToday: () => { Object.assign(S.tf, { q: '', status: 'open', due: '', kind: 'reminder', mode: 'list' }); S.view = 'tasks'; render(); },
-  dueOverdue: () => { S.dueF ||= { range: '30', form: '', q: '', history: false }; S.dueF.range = 'overdue'; S.dueDay = ''; S.dueOpen = new Set(['*']); S.view = 'due'; render(); },
+  dueOverdue: () => { S.dueF ||= { range: dueDefault(), form: '', q: '', history: false }; S.dueF.range = 'overdue'; S.dueDay = ''; S.dueOpen = new Set(['*']); S.view = 'due'; render(); },
   remind: ({ cid, keys, via }) => openReminder(cid, keys.split(','), via),
   remindSend: ({ via }) => guard(() => remindSend(via), 'Reminder logged'),
   remindCopy: () => { navigator.clipboard?.writeText($('#rMsg').value); toast('Message copied'); },
@@ -1792,7 +1799,7 @@ const C = {
     if (el.value === '__all') cur = []; else cur = el.checked ? [...cur, el.value] : cur.filter(x => x !== el.value);
     S.compCons = cur; S.compConsOpen = true; render();
   },
-  dueRange: el => { if (el.value === 'pick') { S.dueF.pick = true; render(); document.querySelector('.mpick')?.showPicker?.(); return; } S.dueF.pick = false; S.dueF.range = el.value; S.dueDay = ''; render(); },
+  dueRange: el => { if (el.value === 'pick') { S.dueF.pick = true; render(); document.querySelector('.mpick')?.showPicker?.(); return; } S.dueF.pick = false; S.dueF.range = el.value; if (el.value === thisMonthKey() || ['overdue', '7', '30', '90'].includes(el.value)) rememberDueRange(el.value); S.dueDay = ''; render(); },
   dueMonth: el => { if (el.value) { S.dueF.range = 'm:' + el.value; S.dueDay = ''; render(); } },
   dueColF: el => {
     const k = el.dataset.k, boxes = [...el.closest('.hmenu').querySelectorAll('input[type=checkbox]')];
