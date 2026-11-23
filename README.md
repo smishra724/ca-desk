@@ -49,6 +49,9 @@ Open the site in Chrome / Edge → address bar **Install** icon (or ⋮ → Cast
 - Excel import: one row per GSTIN; rows with the same PAN are combined into one client. Export writes one row per GSTIN.
 - Clients created before this change keep working: their single GSTIN becomes the first registration and existing filed records and GST login stay linked to it.
 
+## Browser extension — CA Desk Suite
+CA Desk Helper and GST Desk are now **one Chrome extension, CA Desk Suite** (source: repo `smishra724/gst-desk`, folder `extension/`). Install, download and update it from **Settings → Browser extension — CA Desk Suite**. It contains the portal helper (login autofill, Tally link, GSTR-1 autopilot, filing-frequency check, DSC reader link) and GST Desk. The old `extension/` folder in this repo (CA Desk Helper 1.x) is kept only for reference and is no longer offered; if both are installed, CA Desk asks you to remove the old one. The DSC reader must be reinstalled once, because the extension ID changed.
+
 ## GST Desk (GST portal extension)
 Menu → **GST Desk**. GST Desk is a separate Chrome extension for the GST portal: bulk GSTR-1 / 2B / 3B downloads, import of a client's details from the GST portal, new-registration filling and Tally GST work.
 - **Set up GST Desk** writes the extension into a *GST Desk* folder you choose; then load it once in chrome://extensions (Developer mode → Load unpacked).

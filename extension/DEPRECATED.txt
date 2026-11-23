@@ -1,0 +1,1 @@
+This folder is the old CA Desk Helper (1.x). It has been merged into CA Desk Suite – see smishra724/gst-desk/extension. Not offered any more.

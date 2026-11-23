@@ -41,6 +41,15 @@ export function initGstDesk(ctx) {
     window.postMessage({ gstdesk: 'page', id, action, ...extra }, location.origin);
   });
   G.installed = ver;
+  // Old "CA Desk Helper" still installed next to CA Desk Suite? Both answer a harmless Tally probe → two replies.
+  G.checkDup = () => {
+    if (document.documentElement.dataset.capmSuite !== '1') return;
+    const id = 'dup' + Date.now(); let n = 0;
+    const on = e => { if (e.source === window && e.data && e.data.type === 'CAPM_TALLY_RES' && e.data.id === id) n++; };
+    window.addEventListener('message', on);
+    window.postMessage({ type: 'CAPM_TALLY', id, url: 'http://127.0.0.1:9000', xml: '<ENVELOPE><HEADER><TALLYREQUEST>Probe</TALLYREQUEST></HEADER></ENVELOPE>' }, location.origin);
+    setTimeout(() => { window.removeEventListener('message', on); const d = n > 1; if (d !== !!S.gdDup) { S.gdDup = d; render(); } }, 2000);
+  };
   // Newer GST Desk lets this page open it with a plain link (works even right after GST Desk was updated)
   const extId = () => document.documentElement.getAttribute('data-gstdesk-id') || '';
   const openTab = (hash) => {
@@ -57,7 +66,7 @@ export function initGstDesk(ctx) {
     return S.gdLatest;
   }
   async function gdFolder(dir) {
-    const isGd = async d => { try { const m = JSON.parse(await (await (await d.getFileHandle('manifest.json')).getFile()).text()); return /^GST Desk/i.test(m.name || ''); } catch { return false; } };
+    const isGd = async d => { try { const m = JSON.parse(await (await (await d.getFileHandle('manifest.json')).getFile()).text()); return /^GST Desk|CA Desk Suite/i.test(m.name || ''); } catch { return false; } };
     if (await isGd(dir)) return dir;
     for await (const [, h] of dir.entries()) if (h.kind === 'directory' && await isGd(h)) return h;
     return null;
@@ -257,18 +266,19 @@ export function initGstDesk(ctx) {
     if (S.gdLatest === undefined && !S.gdLatestLoading) { S.gdLatestLoading = true; Promise.all([latest(), idbGet()]).then(([, h]) => { S.gdLinked = !!h; S.gdLatestLoading = false; if (S.view === 'settings') render(); }); }
     const v = ver(), l = S.gdLatest, upd = v && l && newer(l.version, v), done = S.gdSetupDone;
     const tag = !v ? '<span class="tag">Not installed in this Chrome</span>' : upd ? `<span class="tag amber">Update available · v${esc(l.version)} (you have v${esc(v)})</span>` : `<span class="tag green">Installed · v${esc(v)}</span>`;
-    return `<div class="row-between wrap"><p class="muted small" style="margin:0">Chrome extension for the GST portal: returns download, import from GST portal, registration filling and Tally GST work. Linked with your Masters.${l ? ` Latest version v${esc(l.version)}.` : ''}</p><div>${tag}</div></div>
+    return `${S.gdDup ? '<p class="warn small">Two copies of the portal helper are running: the old <b>CA Desk Helper</b> is still installed next to CA Desk Suite. Open chrome://extensions and click <b>Remove</b> on <b>CA Desk Helper</b> (keep CA Desk Suite), so portal logins don’t open twice.</p>' : ''}
+    <div class="row-between wrap"><p class="muted small" style="margin:0"><b>CA Desk Suite</b> = GST Desk + CA Desk portal helper, in one Chrome extension.${l ? ` Latest version v${esc(l.version)}.` : ''}</p><div>${tag}</div></div>
       <div class="btns mt">
-        ${!v ? `<button class="primary" data-act="gdSetup">Set up GST Desk</button>` : ''}
-        ${upd ? `<button class="primary" data-act="gdUpdate">Update GST Desk now</button>` : ''}
-        <a class="btn" href="${GD_BASE}docs/gst-desk.zip" download>Download GST Desk (zip)</a>
-        ${v ? `<button data-act="gdUpdate" data-pick="1">${S.gdLinked ? 'Change GST Desk folder' : 'Link GST Desk folder for one-click updates'}</button><button data-act="gdOpen" data-h="#clients">Open GST Desk</button>` : ''}
+        ${!v ? `<button class="primary" data-act="gdSetup">Set up CA Desk Suite</button>` : ''}
+        ${upd ? `<button class="primary" data-act="gdUpdate">Update now</button>` : ''}
+        <a class="btn" href="${GD_BASE}docs/gst-desk.zip" download="ca-desk-suite.zip">Download extension (zip)</a>
+        ${v ? `<button data-act="gdUpdate" data-pick="1">${S.gdLinked ? 'Change extension folder' : 'Link extension folder for one-click updates'}</button><button data-act="gdOpen" data-h="#clients">Open GST Desk</button>` : ''}
       </div>
       ${!v ? `<ol class="ext-steps small">
-        <li>${done ? `Files saved in <b>${done.parent ? esc(done.parent) + '\\' : ''}${esc(done.folder)}</b>.` : 'Click <b>Set up GST Desk</b> and choose a folder you will keep, e.g. <b>Documents</b> – CA Desk creates a <b>GST Desk</b> folder in it. (Or download the zip and unzip it.)'}</li>
+        <li>${done ? `Files saved in <b>${done.parent ? esc(done.parent) + '\\' : ''}${esc(done.folder)}</b>.` : 'Click <b>Set up CA Desk Suite</b> and choose a folder you will keep, e.g. <b>Documents</b> – CA Desk creates a <b>GST Desk</b> folder in it. (Or download the zip and unzip it.)'}</li>
         <li>In Chrome open <b>chrome://extensions</b> <button class="sm" data-act="gdCopy" data-t="chrome://extensions">Copy</button> and turn on <b>Developer mode</b> (top right).</li>
         <li>Click <b>Load unpacked</b> and choose that <b>GST Desk</b> folder.</li>
-        <li>Reload this page (Ctrl + F5). From then on CA Desk keeps GST Desk updated.</li></ol>`
+        <li>Reload this page (Ctrl + F5). From then on CA Desk keeps it updated.${document.documentElement.dataset.capmExt === '1' ? ' Then remove the old <b>CA Desk Helper</b> from chrome://extensions.' : ''}</li></ol>`
         : !S.gdLinked ? '<p class="muted small mt">Link the GST Desk folder once (the folder you chose in chrome://extensions) and CA Desk updates GST Desk for you. Choose “Allow on every visit” and updates happen on their own.</p>' : '<p class="muted small mt">GST Desk folder linked – CA Desk keeps it up to date.</p>'}`;
   };
 

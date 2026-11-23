@@ -132,6 +132,7 @@ onAuthStateChanged(auth, async u => { if (!settingUp) await boot(u); });
 
 // check the linked extension folder; update silently when Chrome already allows editing it
 async function extAutoUpdate() {
+  return; // the old separate CA Desk Helper is no longer updated: CA Desk Suite (GST Desk) is kept up to date by GD.autoUpdate
   try {
     const h = await linkedFolder(); S.extLinked = !!h;
     if (!h) return;
@@ -166,7 +167,7 @@ async function boot(u) {
   S.profile = { uid: u.uid, email: u.email, ...p.data() };
   if (isAdmin()) {
     if (!S.trackFrom) { S.trackFrom = todayISO(); updateDoc(doc(db, 'meta', 'setup'), { trackFrom: S.trackFrom }).catch(() => {}); }
-    await loadCustomComps(); await loadClients(); await loadAllFilings(); await T.load(); loadGstLoginFlags(); S.view = 'dashboard'; if (isAdmin()) GD.fromHash(); autoTasks(); setTimeout(extAutoUpdate, 3000); setTimeout(() => GD.autoUpdate(), 5000); setTimeout(() => GD.sync(), 4000);
+    await loadCustomComps(); await loadClients(); await loadAllFilings(); await T.load(); loadGstLoginFlags(); S.view = 'dashboard'; if (isAdmin()) GD.fromHash(); autoTasks(); setTimeout(extAutoUpdate, 3000); setTimeout(() => GD.autoUpdate(), 5000); setTimeout(() => GD.sync(), 4000); setTimeout(() => GD.checkDup(), 2500);
   }
   else { await openClient(S.profile.clientId, 'master'); await T.loadForClient(S.profile.clientId).catch(() => {}); }
   render();
@@ -464,7 +465,8 @@ function vDashboard() {
     : nextDue ? `Next up: ${baseForm(nextDue.form)} on ${dTxt(nextDue.due.getDate())} for ${new Set(week.filter(r => +r.due === +nextDue.due).map(r => r.c.id)).size} client(s).`
     : 'Nothing falls due in the next seven days.';
 
-  const extNote = isAdmin() && extVer() && !extAtLeast(EXT_VER) ? `<div class="extnote"><span>A new version of the CA Desk Helper extension (v${EXT_VER}) is available.</span>${canUpdate() ? '<button class="sm primary" data-act="extUpdate">Update now</button>' : ''}<a href="#" data-act="go" data-v="settings">Details</a></div>` : '';
+  const extNote = isAdmin() && extVer() && document.documentElement.dataset.capmSuite !== '1' ? `<div class="extnote"><span>CA Desk Helper and GST Desk are now one extension — <b>CA Desk Suite</b>.</span><button class="sm primary" data-act="gdToSettings">Set it up</button></div>`
+    : isAdmin() && S.gdDup ? `<div class="extnote"><span>Two copies of the portal helper are installed. Remove the old <b>CA Desk Helper</b> in chrome://extensions (keep CA Desk Suite).</span><a href="#" data-act="gdToSettings">Details</a></div>` : '';
   return `${extNote}
   <section class="hero2">
     <div class="h2-top">
@@ -1134,20 +1136,14 @@ const EXT_VER = '1.7.0';
 const extAtLeast = v => { const x = extVer(); return !!x && !newer(v, x); };
 const extVer = () => document.documentElement.dataset.capmVer || (document.documentElement.dataset.capmTally === '1' ? '1.1.0' : extOn() ? '1.0.0' : '');
 const extCard = (compact = false) => {
-  const v = extVer(), ok = extAtLeast(EXT_VER);
-  const status = ok ? `<span class="tag green">Installed · v${esc(v)}</span>` : v ? `<span class="tag amber">Update available · you have v${esc(v)}</span>` : '<span class="tag">Not installed</span>';
-  const steps = `<ol class="ext-steps small">
-      <li>Download the file and unzip it into a folder you will keep, e.g. <b>Documents\\CA Desk Helper</b>${v ? ' (replace the old files)' : ''}.</li>
-      <li>In Chrome open <b>chrome://extensions</b> and turn on <b>Developer mode</b> (top right).</li>
-      <li>${v ? 'Click <b>Reload</b> (↻) on CA Desk Helper.' : 'Click <b>Load unpacked</b> and choose that folder.'}</li>
-      <li>Reload this page (Ctrl + F5). The status here changes to <b>Installed</b>.</li></ol>`;
-  return `<div class="ext-card ${compact ? 'compact' : ''}">
-    <div class="row-between wrap"><div><b>CA Desk Helper</b> — Chrome extension ${status}</div>
-      <div class="btns">${v && !ok && canUpdate() ? `<button class="primary" data-act="extUpdate">Update extension now</button>` : ''}
-        ${ok && compact ? '' : `<a class="btn ${ok || v ? '' : 'primary'}" href="ca-desk-helper.zip" download="ca-desk-helper-${EXT_VER}.zip">Download extension (v${EXT_VER})</a>`}</div></div>
-    ${v && !compact ? `<p class="small mt">${S.extLinked ? `Updates go straight into the linked extension folder${S.extAuto ? ' automatically when you open CA Desk' : ' — click Update when a new version is out'}. <a href="#" data-act="extUpdate" data-pick="1">Change folder</a>` : `<b>One-click updates:</b> click <a href="#" data-act="extUpdate" data-pick="1">Link extension folder</a> once and choose the folder you loaded in chrome://extensions. From then on CA Desk updates the extension itself${canUpdate() ? '' : ' (needs Chrome or Edge on a computer)'}.`}</p>` : ''}
-    ${compact ? '' : `<p class="muted small">Fills the user ID and password on GST, Income Tax, TRACES, MCA, EPFO and ESIC portals when you click Login (you type the CAPTCHA/OTP), and lets CA Desk read from Tally on this computer, and runs the GSTR-1 autopilot: uploads the JSON and generates the summary, and after you file, saves the ARN and the filed PDF here. It also checks each GSTIN's return filing frequency on the portal (you type the CAPTCHA). It only runs on CA Desk and those portals, keeps a login in memory for 5 minutes, and only reads from Tally — it never changes Tally data.</p>`}
-    ${ok || (v && canUpdate()) ? '' : steps}</div>`;
+  // One combined extension now: "CA Desk Suite" = GST Desk + the CA Desk portal helper (login autofill, Tally link, GSTR-1 autopilot, filing frequency)
+  const v = extVer(), suite = document.documentElement.dataset.capmSuite === '1';
+  const status = suite ? `<span class="tag green">Installed · v${esc(v)}</span>` : v ? `<span class="tag amber">Old CA Desk Helper v${esc(v)} – replace with CA Desk Suite</span>` : '<span class="tag">Not installed</span>';
+  if (compact) return `<div class="ext-card compact"><div class="row-between wrap"><div><b>CA Desk Suite</b> — Chrome extension ${status}</div>
+    <div class="btns"><button class="sm ${suite ? '' : 'primary'}" data-act="gdToSettings">${suite ? 'Details' : v ? 'Replace in Settings' : 'Install in Settings'}</button></div></div></div>`;
+  return `${v && !suite ? `<p class="warn small">You have the older, separate <b>CA Desk Helper</b> (v${esc(v)}). Its features are now inside <b>CA Desk Suite</b>. Set up CA Desk Suite below, then remove <b>CA Desk Helper</b> in chrome://extensions.</p>` : ''}
+    ${GD.installCard()}
+    <p class="muted small mt">One extension for everything: <b>GST Desk</b> (client master linked with your Masters, GST registration filling, bulk GSTR-1/2B/3B downloads, import from GST portal, Tally GST work) and the <b>portal helper</b> – fills the user ID and password on GST, Income Tax, TRACES, MCA, EPFO and ESIC when you click Login (you type the CAPTCHA/OTP), lets CA Desk read from Tally, runs the GSTR-1 autopilot and checks filing frequency. It only runs on CA Desk and those portals and never changes Tally data unless you approve entries in CA Desk.</p>`;
 };
 function vSettings() {
   return `
@@ -1156,14 +1152,10 @@ function vSettings() {
     <form data-form="firm" class="grid narrow"><label>Firm name<input name="firm" value="${esc(S.firm)}" required></label>
       <div class="span2"><button class="primary">Save</button></div></form>
   </section>
-  <section class="card" id="ext">
-    <h2>Browser extension</h2>
+  <section class="card" id="gdext">
+    <h2>Browser extension — CA Desk Suite</h2>
     ${extCard()}
   </section>
-  ${isAdmin() ? `<section class="card" id="gdext">
-    <h2>GST Desk extension</h2>
-    ${GD.installCard()}
-  </section>` : ''}
   <section class="card">
     <h2>Attach documents from your computer</h2>
     <p class="muted small">Choose your <b>DATA MANAGEMENT</b> folder. PAN, Aadhaar, incorporation certificates, MOA/AOA, GST registration certificates, TAN, Udyam and other certificates are attached to the right client's Documents tab. Files already attached are skipped, so it is safe to run again.</p>
@@ -1195,12 +1187,7 @@ function vSettings() {
       <label>Temporary password<input name="pw" required minlength="8" value="${genPw()}"></label>
       <div class="span2"><button class="primary">Create staff login</button></div>
     </form>
-  </section>`}
-  <section class="card">
-    <h2>Autofill extension</h2>
-    <p>${extOn() ? '<span class="tag green">Installed and active</span>' : '<span class="tag">Not detected</span>'}</p>
-    <p class="muted small">Load the <code>extension</code> folder in Chrome (chrome://extensions → Developer mode → Load unpacked). Clients can install it too.</p>
-  </section>`;
+  </section>`}`;
 }
 async function loadStaff() {
   const el = $('#staffList'); if (!el || LOCAL) return;
@@ -1246,15 +1233,7 @@ const A = {
   go: ({ v }) => { S.fab = false; if (v === 'due') { S.dueDay = ''; if (S.dueOpen?.has('*')) S.dueOpen = new Set(); } S.view = v; window.scrollTo(0, 0); S.importRows = v === 'import' ? S.importRows : null; render(); if (v === 'settings') loadStaff(); },
   open: ({ id, tab }) => guard(async () => { await openClient(id, tab || 'master'); render(); }),
   tab: ({ t }) => { S.tab = t; render(); },
-  extUpdate: ({ pick }) => guard(async () => {
-    const before = extVer();
-    const ver = await updateExtension({ pick: !!pick, onStep: m => busy(true, m) });
-    S.extLinked = true;
-    busy(true, 'Restarting the extension…');
-    await new Promise(r => setTimeout(r, 2500));
-    if (before && newer('1.5.0', before)) { busy(false); return modal(`<h2>Extension files updated to v${esc(ver)}</h2><p>This one time, open <b>chrome://extensions</b> and click <b>Reload</b> (↻) on CA Desk Helper, then reload this page. From version 1.5 on, updates restart the extension by themselves.</p><div class="btns mt"><button class="primary" data-act="reloadPage">Reload CA Desk</button><button data-act="closeModal">Close</button></div>`); }
-    location.reload();
-  }, 'Extension updated'),
+  extUpdate: ({ pick }) => GD.update({ pick: !!pick }),   // CA Desk Suite (one extension)
   reloadPage: () => location.reload(),
   freqCheck: (d) => {
     let items = [];
