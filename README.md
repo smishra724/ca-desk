@@ -53,7 +53,8 @@ Open the site in Chrome / Edge → address bar **Install** icon (or ⋮ → Cast
 Menu → **GST Desk**. GST Desk is a separate Chrome extension for the GST portal: bulk GSTR-1 / 2B / 3B downloads, import of a client's details from the GST portal, new-registration filling and Tally GST work.
 - **Set up GST Desk** writes the extension into a *GST Desk* folder you choose; then load it once in chrome://extensions (Developer mode → Load unpacked).
 - **Update GST Desk now** writes new versions into that folder and restarts it; with "Allow on every visit" CA Desk keeps it updated on its own.
-- **Send clients to GST Desk**: every active GSTIN becomes a GST Desk client with its GST portal user ID and password (stored encrypted inside GST Desk). Sending again only fills blanks; tick *Replace GST Desk passwords that differ* to overwrite.
+- **Masters ↔ GST Desk are linked**: on opening CA Desk, after saving a client / GST registration / login, and when GST Desk changes something, both sides are brought in step — clients with a GSTIN go to GST Desk with their GST login, and a GST ID/password changed in GST Desk (or captured on the GST portal) is saved back on the master (the newer one wins). Clients that exist only in GST Desk are listed to *Add to Masters* or *Link* to an existing master.
+- **Send clients to GST Desk** (manual): every active GSTIN becomes a GST Desk client with its GST portal user ID and password (stored encrypted inside GST Desk). Sending again only fills blanks; tick *Replace GST Desk passwords that differ* to overwrite.
 - **Open in GST Desk** (GST registrations tab or the GST Desk page) sends that client and opens it in GST Desk.
 - The page also shows how many clients GST Desk has, the download queue and recent files.
 

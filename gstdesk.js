@@ -10,18 +10,25 @@ const idbSet = async v => { try { const d = await idb(); await new Promise(ok =>
 const newer = (a, b) => { const x = String(a || '0').split('.').map(Number), y = String(b || '0').split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
 
 export function initGstDesk(ctx) {
-  const { S, A, C, esc, toast, guard, render, regsOf, dispName, isoToDisp, db, fs } = ctx;
-  const { getDocs, collectionGroup } = fs;
+  const { S, A, C, esc, toast, guard, render, regsOf, dispName, isoToDisp, db, fs, isAdmin, loadClients, newRegId, stateOf } = ctx;
+  const { getDocs, collectionGroup, collection, doc, addDoc, setDoc, updateDoc, serverTimestamp } = fs;
+  const ms = (t) => (t && (typeof t.toMillis === 'function' ? t.toMillis() : t.__ts || (t.seconds ? t.seconds * 1000 : Date.parse(t)))) || 0;
   const G = {};
   const ver = () => document.documentElement.getAttribute('data-gstdesk-extension') || '';
   const canWrite = () => 'showDirectoryPicker' in window;
 
   /* ---------- talking to the extension ---------- */
-  let seq = 0;
+  let seq = 0, pullT = null;
   const waiting = new Map();
   window.addEventListener('message', e => {
     if (e.source !== window || e.origin !== location.origin || !e.data || e.data.gstdesk !== 'ext') return;
-    if (e.data.event) { if (e.data.event === 'changed' || e.data.event === 'ready') { S.gdSum = null; if (S.view === 'gstdesk') G.refresh(); } return; }
+    if (e.data.event) {
+      if (e.data.event === 'changed' || e.data.event === 'ready') {
+        S.gdSum = null; if (S.view === 'gstdesk') G.refresh();
+        clearTimeout(pullT); pullT = setTimeout(() => G.pull({ quiet: true }).catch(() => {}), 2500);   // GST Desk changed something → bring it into the masters
+      }
+      return;
+    }
     const w = waiting.get(e.data.id); if (!w) return;
     waiting.delete(e.data.id); clearTimeout(w.t);
     if (e.data.stale) { S.gdStale = true; if (S.view === 'gstdesk') render(); }
@@ -122,7 +129,7 @@ export function initGstDesk(ctx) {
     const by = {};
     try {
       const snap = await getDocs(collectionGroup(db, 'credentials'));
-      snap.forEach(d => { const x = d.data(); if (x.portal !== 'gst') return; (by[d.ref.parent.parent.id] ||= []).push(x); });
+      snap.forEach(d => { const x = d.data(); if (x.portal !== 'gst') return; (by[d.ref.parent.parent.id] ||= []).push({ ...x, _id: d.id }); });
     } catch { /* no logins yet */ }
     return by;
   }
@@ -130,12 +137,89 @@ export function initGstDesk(ctx) {
     const regs = regsOf(c).filter(r => r.gstin && r.status !== 'Cancelled');
     const list = creds[c.id] || [];
     return regs.map(r => {
-      const cr = list.find(x => x.gstin === r.gstin) || (regs.length === 1 ? list.find(x => !x.gstin) || list[0] : list.find(x => !x.gstin && list.length === 1));
+      const cr = credFor(list, r.gstin, regs.length);
       return { cid: c.id, name: regs.length > 1 ? `${dispName(c)} (${r.state || r.gstin.slice(0, 2)})` : dispName(c), legalName: c.name || '', tradeName: r.tradeName || c.tradeName || '',
         constitution: c.constitution || '', gstin: r.gstin, state: r.state || '', email: c.email || '', mobile: c.mobile || '', tallyCompany: c.tallyCompany || '',
-        username: cr?.username || '', password: cr?.password || '' };
+        username: cr?.username || '', password: cr?.password || '', credAt: ms(cr?.updatedAt) };
     });
   };
+  const credFor = (list, gstin, nRegs) => list.find(x => x.gstin === gstin) || (nRegs === 1 ? list.find(x => !x.gstin) || list[0] : list.find(x => !x.gstin && list.length === 1));
+  const clientOfGstin = (g) => S.clients.find(c => regsOf(c).some(r => r.gstin === g));
+
+  /* ---------- keeping CA Desk masters and GST Desk clients in step ----------
+     CA Desk → GST Desk: every client with an active GSTIN (names, GSTIN, GST login, Tally company); blanks filled, a login saved later wins.
+     GST Desk → CA Desk: a GST login changed in GST Desk (typed there or on the GST portal) and the Tally company it was linked to.
+     Clients that exist only in GST Desk are listed on the GST Desk page to add to Masters or link. */
+  G.pull = async ({ quiet = false } = {}) => {
+    if (!ver() || !isAdmin()) return { saved: 0 };
+    const r = await ask('export-clients', {}, 15000);
+    const creds = await gstCreds();
+    let saved = 0;
+    const only = [];
+    for (const x of r.clients || []) {
+      if (!x.gstin) continue;
+      const c = clientOfGstin(x.gstin);
+      if (!c) { only.push(x); continue; }
+      const nRegs = regsOf(c).filter(g => g.gstin && g.status !== 'Cancelled').length || 1;
+      const cr = credFor(creds[c.id] || [], x.gstin, nRegs);
+      const gdAt = Date.parse(x.changedAt || '') || 0;
+      const differs = (x.username && x.username !== (cr?.username || '')) || (x.password && x.password !== (cr?.password || ''));
+      if (differs && gdAt > ms(cr?.updatedAt) + 1000) {
+        const data = { username: x.username || cr?.username || '', ...(x.password ? { password: x.password } : {}), updatedAt: serverTimestamp(), updatedBy: 'GST Desk' };
+        if (cr) await setDoc(doc(db, 'clients', c.id, 'credentials', cr._id), data, { merge: true });
+        else await addDoc(collection(db, 'clients', c.id, 'credentials'), { portal: 'gst', label: nRegs > 1 ? `GST ${stateOf(x.gstin)}` : 'GST portal', url: '', notes: 'Saved from GST Desk', gstin: nRegs > 1 ? x.gstin : '', ...data });
+        saved++;
+      }
+      if (x.tallyCompany && !c.tallyCompany) { await updateDoc(doc(db, 'clients', c.id), { tallyCompany: x.tallyCompany }); c.tallyCompany = x.tallyCompany; }
+    }
+    S.gdOnly = only;
+    if (saved) { S.gdCreds = null; if (!quiet) toast(`${saved} GST login${saved > 1 ? 's' : ''} updated from GST Desk`); }
+    if (S.view === 'gstdesk') render();
+    return { saved, only: only.length };
+  };
+  G.push = async (cids) => {
+    if (!ver() || !isAdmin()) return null;
+    const creds = await gstCreds();
+    const clients = S.clients.filter(c => !c.exClient && (!cids || cids.includes(c.id))).flatMap(c => rowsFor(c, creds));
+    return clients.length ? ask('sync-clients', { clients }, 60000) : null;
+  };
+  let syncing = null;
+  G.sync = ({ quiet = true } = {}) => syncing || (syncing = (async () => {
+    try { await G.pull({ quiet }); const r = await G.push(); S.gdSyncAt = Date.now(); S.gdSum = null; if (!quiet && r) toast(`In step with GST Desk · ${r.added} added, ${r.updated} updated`); return r; }
+    catch (e) { if (!quiet) toast(e.message, 6000); return null; }
+    finally { syncing = null; }
+  })());
+  // after a client is saved in CA Desk
+  G.pushSoon = (cid) => { if (ver() && cid) setTimeout(() => G.push([cid]).catch(() => {}), 300); };
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && ver() && Date.now() - (S.gdSyncAt || 0) > 120000) G.sync(); });
+
+  // Client that is only in GST Desk → new master (with its GSTIN and GST login), or link it to an existing master
+  const CONS_MAP = [[/llp/i, 'LLP'], [/public/i, 'Public Ltd'], [/private|pvt/i, 'Private Ltd'], [/partner/i, 'Partnership Firm'], [/propriet/i, 'Proprietorship']];
+  G.addMaster = (gstin) => guard(async () => {
+    const x = (S.gdOnly || []).find(y => y.gstin === gstin); if (!x) return;
+    const reg = { id: newRegId(), gstin, state: stateOf(gstin), tradeName: x.tradeName || '', gstFreq: 'Monthly', status: 'Active' };
+    const cons = (CONS_MAP.find(([rx]) => rx.test(x.constitution || '')) || [])[1] || '';
+    const cid = (await addDoc(collection(db, 'clients'), { name: (x.legalName || x.name || '').toUpperCase(), tradeName: x.tradeName || '', pan: x.pan || gstin.slice(2, 12), constitution: cons,
+      email: x.email || '', mobile: x.mobile || '', tallyCompany: x.tallyCompany || '', gstRegs: [reg], gstins: [gstin], gstin, portalUsers: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp() })).id;
+    if (x.username) await addDoc(collection(db, 'clients', cid, 'credentials'), { portal: 'gst', label: 'GST portal', url: '', notes: 'Saved from GST Desk', gstin: '', username: x.username, password: x.password || '', updatedAt: serverTimestamp(), updatedBy: 'GST Desk' });
+    await loadClients();
+    await G.push([cid]);
+    S.gdOnly = S.gdOnly.filter(y => y.gstin !== gstin); S.gdCreds = null;
+    render();
+  }, 'Added to Masters and linked');
+  G.linkMaster = (gstin, cid) => guard(async () => {
+    const x = (S.gdOnly || []).find(y => y.gstin === gstin); const c = S.clients.find(y => y.id === cid);
+    if (!x || !c) throw new Error('Choose the client to link to');
+    const regs = regsOf(c).slice();
+    if (!regs.some(r => r.gstin === gstin)) regs.push({ id: newRegId(), gstin, state: stateOf(gstin), tradeName: x.tradeName || '', gstFreq: 'Monthly', status: 'Active' });
+    const act = regs.filter(r => r.gstin && r.status !== 'Cancelled');
+    await updateDoc(doc(db, 'clients', cid), { gstRegs: regs, gstins: regs.map(r => r.gstin).filter(Boolean), gstin: (act[0] || regs[0]).gstin, ...(x.tallyCompany && !c.tallyCompany ? { tallyCompany: x.tallyCompany } : {}), updatedAt: serverTimestamp() });
+    if (x.username && !(await gstCreds())[cid]?.some(k => k.gstin === gstin || !k.gstin)) await addDoc(collection(db, 'clients', cid, 'credentials'), { portal: 'gst', label: `GST ${stateOf(gstin)}`, url: '', notes: 'Saved from GST Desk', gstin, username: x.username, password: x.password || '', updatedAt: serverTimestamp(), updatedBy: 'GST Desk' });
+    await loadClients();
+    await G.push([cid]);
+    S.gdOnly = S.gdOnly.filter(y => y.gstin !== gstin); S.gdCreds = null;
+    render();
+  }, 'Linked – the GSTIN is now on that master');
   G.send = async (cids, { replacePasswords = false, quiet = false } = {}) => {
     const creds = await gstCreds();
     const clients = S.clients.filter(c => cids.includes(c.id)).flatMap(c => rowsFor(c, creds));
@@ -155,7 +239,7 @@ export function initGstDesk(ctx) {
   G.refresh = async () => {
     const [l, h] = await Promise.all([latest(), idbGet()]);
     S.gdLinked = !!h;
-    if (ver()) { try { S.gdSum = await ask('summary', {}, 6000); } catch { S.gdSum = { error: true }; } }
+    if (ver()) { try { S.gdSum = await ask('summary', {}, 6000); } catch { S.gdSum = { error: true }; } if (!S.gdOnly) await G.pull({ quiet: true }).catch(() => {}); }
     if (!S.gdCreds) { const cr = await gstCreds(); S.gdCreds = {}; for (const [k, v] of Object.entries(cr)) S.gdCreds[k] = v.length; }
     S.gdLoaded = true;
     if (S.view === 'gstdesk') render();
@@ -180,6 +264,7 @@ export function initGstDesk(ctx) {
       <li>Click <b>Load unpacked</b> and choose that <b>GST Desk</b> folder.</li>
       <li>Reload this page (Ctrl + F5). From then on CA Desk keeps GST Desk updated.</li></ol>`;
     // clients
+    if (!S.gdCreds && !S.gdCredsLoading) { S.gdCredsLoading = true; gstCreds().then(cr => { S.gdCreds = {}; for (const [k, v] of Object.entries(cr)) S.gdCreds[k] = v.length; S.gdCredsLoading = false; if (S.view === 'gstdesk') render(); }); }
     const creds = S.gdCreds || {};
     const q = (S.gdQ || '').toLowerCase();
     const rows = S.clients.filter(c => !c.exClient).flatMap(c => regsOf(c).filter(r => r.gstin && r.status !== 'Cancelled').map(r => ({ c, r })))
@@ -207,6 +292,7 @@ export function initGstDesk(ctx) {
         <div class="btns"><input id="gdQ" placeholder="Search client, PAN, GSTIN" value="${esc(S.gdQ || '')}" autocomplete="off">
           <button data-act="gdPick" data-w="new">Select not in GST Desk</button>
           <button class="primary" data-act="gdSend" ${sel.size ? '' : 'disabled'}>Send ${sel.size || ''} to GST Desk</button></div></div>
+      <p class="small" style="margin:.2rem 0 .4rem">🔗 <b>Masters and GST Desk are linked</b> — clients with a GSTIN go to GST Desk automatically, and GST logins changed in GST Desk come back here. ${S.gdSyncAt ? `Last synced ${new Date(S.gdSyncAt).toLocaleTimeString()}.` : ''} <a href="#" data-act="gdSync">Sync now</a></p>
       <p class="muted small">Each GSTIN becomes a GST Desk client with its GST portal user ID and password, so returns download and the portal import work without typing them again. Details already in GST Desk are kept.
         <label class="small" style="display:inline-flex;gap:.3rem;align-items:center;margin-left:.6rem"><input type="checkbox" style="width:auto;margin:0" data-change="gdReplace" ${S.gdReplace ? 'checked' : ''}> Replace GST Desk passwords that differ</label></p>
       <table class="tbl"><thead><tr><th><input type="checkbox" data-change="gdAll" ${rows.length && rows.every(({ c }) => sel.has(c.id)) ? 'checked' : ''} aria-label="Select all"></th><th>Client</th><th>GSTIN</th><th>State</th><th>GST login in CA Desk</th><th>In GST Desk</th><th></th></tr></thead><tbody>
@@ -218,6 +304,14 @@ export function initGstDesk(ctx) {
         || '<tr><td colspan="7" class="muted empty">No client with an active GSTIN.</td></tr>'}
       </tbody></table>
     </section>
+    ${(S.gdOnly || []).length ? `<section class="card">
+      <h2>In GST Desk but not in Masters <span class="muted">(${S.gdOnly.length})</span></h2>
+      <p class="muted small">Add each one as a new master (with its GSTIN and GST login), or link it to the master it belongs to (the GSTIN is added to that client).</p>
+      <table class="tbl"><thead><tr><th>GST Desk client</th><th>GSTIN</th><th>GST ID</th><th>Link to master</th><th></th></tr></thead><tbody>
+      ${S.gdOnly.map(x => { const pan = x.gstin.slice(2, 12); const sug = S.clients.filter(c => c.pan === pan); return `<tr><td><b>${esc(x.name)}</b>${x.legalName && x.legalName !== x.name ? `<div class="muted tiny">${esc(x.legalName)}</div>` : ''}</td><td class="mono nowrap">${esc(x.gstin)}</td><td>${esc(x.username || '—')}</td>
+        <td><select id="gdl-${esc(x.gstin)}" style="max-width:260px"><option value="">— Choose master —</option>${sug.map(c => `<option value="${c.id}" selected>${esc(dispName(c))} (same PAN)</option>`).join('')}${S.clients.filter(c => !sug.includes(c)).map(c => `<option value="${c.id}">${esc(dispName(c))}</option>`).join('')}</select> <button class="sm" data-act="gdLink" data-g="${esc(x.gstin)}">Link</button></td>
+        <td class="nowrap"><button class="sm primary" data-act="gdAddMaster" data-g="${esc(x.gstin)}">Add to Masters</button></td></tr>`; }).join('')}
+      </tbody></table></section>` : ''}
     <section class="card">
       <h2>In GST Desk now</h2>
       ${sum ? `<div class="gd-stats"><div><b>${sum.clients.length}</b><span>clients</span></div><div><b>${sum.clients.filter(x => x.passwordSaved).length}</b><span>with GST password</span></div>
@@ -246,6 +340,9 @@ export function initGstDesk(ctx) {
   /* ---------- actions ---------- */
   A.gdOpen = ({ h }) => G.open(h);
   A.gdReload = () => location.reload();
+  A.gdAddMaster = ({ g }) => G.addMaster(g);
+  A.gdLink = ({ g }) => G.linkMaster(g, document.getElementById('gdl-' + g)?.value || '');
+  A.gdSync = () => G.sync({ quiet: false }).then(() => G.refresh());
   A.gdSetup = () => G.setup();
   A.gdUpdate = ({ pick }) => G.update({ pick: !!pick });
   A.gdCopy = ({ t }) => navigator.clipboard.writeText(t).then(() => toast('Copied — paste it in the Chrome address bar'));

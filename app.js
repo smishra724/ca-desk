@@ -166,7 +166,7 @@ async function boot(u) {
   S.profile = { uid: u.uid, email: u.email, ...p.data() };
   if (isAdmin()) {
     if (!S.trackFrom) { S.trackFrom = todayISO(); updateDoc(doc(db, 'meta', 'setup'), { trackFrom: S.trackFrom }).catch(() => {}); }
-    await loadCustomComps(); await loadClients(); await loadAllFilings(); await T.load(); loadGstLoginFlags(); S.view = 'dashboard'; if (isAdmin()) GD.fromHash(); autoTasks(); setTimeout(extAutoUpdate, 3000); setTimeout(() => GD.autoUpdate(), 5000);
+    await loadCustomComps(); await loadClients(); await loadAllFilings(); await T.load(); loadGstLoginFlags(); S.view = 'dashboard'; if (isAdmin()) GD.fromHash(); autoTasks(); setTimeout(extAutoUpdate, 3000); setTimeout(() => GD.autoUpdate(), 5000); setTimeout(() => GD.sync(), 4000);
   }
   else { await openClient(S.profile.clientId, 'master'); await T.loadForClient(S.profile.clientId).catch(() => {}); }
   render();
@@ -1624,7 +1624,7 @@ const F = {
     data.updatedAt = serverTimestamp();
     if (S.cid) await updateDoc(doc(db, 'clients', S.cid), data);
     else { const itr = S.client?.category === 'itr'; S.cid = (await addDoc(collection(db, 'clients'), { ...data, ...regMirror([]), ...(S.client?.category ? { category: S.client.category } : {}), portalUsers: [], createdAt: serverTimestamp() })).id; S.tab = itr ? 'master' : 'gst'; }
-    await loadClients(); await openClient(S.cid); render(); autoTasks();
+    await loadClients(); await openClient(S.cid); render(); autoTasks(); GD.pushSoon(S.cid);
   }, 'Saved'),
   cred: (fd, form) => guard(async () => {
     if (!S.cid) throw new Error('Save the client master data first.');
@@ -1634,7 +1634,7 @@ const F = {
     const id = form.dataset.id;
     if (id) await setDoc(doc(db, 'clients', S.cid, 'credentials', id), data, { merge: true });
     else await addDoc(collection(db, 'clients', S.cid, 'credentials'), data);
-    closeModal(); await openClient(S.cid); render();
+    closeModal(); await openClient(S.cid); render(); GD.pushSoon(S.cid);
   }, 'Login saved'),
   saveReg: (fd, form) => guard(async () => {
     const id = form.dataset.id;
@@ -1646,7 +1646,7 @@ const F = {
     const regs = regsOf(S.client).map(x => ({ ...x }));
     if (regs.some(x => x.gstin === r.gstin && x.id !== id)) throw new Error('This GSTIN is already added for this client.');
     if (id) Object.assign(regs.find(x => x.id === id), r); else regs.push({ id: newRegId(), ...r });
-    closeModal(); await saveRegs(regs);
+    closeModal(); await saveRegs(regs); GD.pushSoon(S.cid);
   }, 'GST registration saved'),
   trackFrom: fd => guard(async () => {
     S.trackFrom = fd.get('d'); await updateDoc(doc(db, 'meta', 'setup'), { trackFrom: S.trackFrom }); closeModal(); render();
@@ -2043,7 +2043,7 @@ const G1 = initGstr1({ STATE_CODES, extCard, extVer, extAtLeast, EXT_VER, S, A, 
   portalLogin: gstLogin, gstCred, fs: { doc, setDoc, getDocs, collection, serverTimestamp, query, where } });
 const DSC = initDsc({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, todayISO, db, saveBlob, WA_ICON, MAIL_ICON,
   fs: { doc, getDocs, setDoc, deleteDoc, collection } });
-const GD = initGstDesk({ S, A, C, esc, toast, guard, render: () => render(), regsOf, dispName, isoToDisp, db, fs: { getDocs, collectionGroup } });
+const GD = initGstDesk({ S, A, C, esc, toast, guard, render: () => render(), regsOf, dispName, isoToDisp, db, isAdmin, loadClients, newRegId, stateOf, fs: { getDocs, collectionGroup, collection, doc, addDoc, setDoc, updateDoc, serverTimestamp } });
 const PS = initPayslips({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, db, saveBlob, busy, WA_ICON, MAIL_ICON,
   fs: { doc, getDocs, setDoc, updateDoc, deleteDoc, collection, writeBatch, arrayUnion } });
 
