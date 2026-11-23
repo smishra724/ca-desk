@@ -326,9 +326,9 @@ export function initGstDesk(ctx) {
     if (S.gdBridgeAt === undefined || Date.now() - S.gdBridgeAt > 15000) { S.gdBridgeAt = Date.now(); G.bridgeStatus().then(() => { if (S.view === 'settings') render(); }); }
     const b = S.gdBridge;
     if (!b) return `<div class="ext-card" style="margin-bottom:12px"><div class="row-between wrap"><div><b>CA Desk Bridge</b> — desktop app for Windows (like a DSC utility) <span class="tag">Not running on this computer</span></div>
-        <div class="btns"><a class="btn primary" href="${GD_BASE}bridge/CA-Desk-Bridge-Setup.zip" download>Download CA Desk Bridge</a></div></div>
+        <div class="btns"><a class="btn primary" href="${GD_BASE}bridge/CA-Desk-Bridge-Setup.exe" download>Download CA Desk Bridge (.exe)</a></div></div>
       <p class="muted small mt">Installs once, sits next to the clock and keeps CA Desk Suite up to date: click <b>Update now</b> (here or on its tray icon) and it updates in the background – no folders, no Reload. It also connects CA Desk to Tally and DSC tokens on this computer.</p>
-      <ol class="ext-steps small"><li>Download and unzip, then double-click <b>CA-Desk-Bridge-Setup.cmd</b> (Windows may ask “Run anyway” – it installs for you only, no admin needed).</li>
+      <ol class="ext-steps small"><li>Download and double-click <b>CA-Desk-Bridge-Setup.exe</b>. If Windows shows “Windows protected your PC”, click <b>More info → Run anyway</b> (if Chrome warns about the download, choose <b>Keep</b>). It installs for you only – no admin needed. <a href="${GD_BASE}bridge/CA-Desk-Bridge-Setup.zip" class="muted">Older .cmd version</a></li>
         <li>When it asks whether GST Desk / CA Desk Suite is already in Chrome, click <b>Yes</b> and choose its folder (chrome://extensions → Details → Source) – your GST Desk data stays.</li>
         <li>Reload this page. If Chrome asks to let this site reach apps on this device, click <b>Allow</b>.</li></ol></div>`;
     const busy = b.updating || S.gdBridgeBusy;
