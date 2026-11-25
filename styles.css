@@ -750,3 +750,15 @@ body.dragging-gst .dropbar{display:flex}
 
 .prog-done{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line,#e3e7ee);line-height:1.9}
 .prog-done .ok{font-weight:600;margin-right:4px}
+
+/* books status */
+.tbl.bs td{vertical-align:top}
+.bs-c{background:none;border:0;padding:2px 4px;margin:0;cursor:pointer;text-align:left;display:block;border-radius:6px;font:inherit}
+.bs-c:hover{background:#f1f4f9}
+.bs-banks .bs-c{white-space:nowrap}
+.bs-n{font-size:12px;color:var(--muted,#667085);margin-right:4px}
+.bs-d{display:inline-block;padding:1px 7px;border-radius:999px;font-size:12px;font-weight:600;background:#eef1f5;color:#475467}
+.bs-d.ok{background:#e3f4ea;color:#0b7a43}.bs-d.amber{background:#fff4dc;color:#9a6200}.bs-d.red{background:#fde8e7;color:#b42318}.bs-d.none{background:#f2f4f7;color:#98a2b3}
+.bs-row{display:flex;gap:8px;margin:6px 0}.bs-row input:first-child{flex:1}
+.bs-line{flex-wrap:wrap;gap:6px 10px;align-items:center}.bs-i{font-size:13px;white-space:nowrap}
+.citem.todo .chead{cursor:default}

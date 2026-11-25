@@ -10,6 +10,7 @@ import { initTaskFiles } from './taskfiles.js';
 import { initGstr1 } from './gstr1.js';
 import { initDirectors, COMPANYISH } from './directors.js';
 import { initBooks } from './books.js';
+import { initBooksStatus } from './booksstatus.js';
 import { updateExtension, newer, canUpdate, linkedFolder, permission } from './extupdate.js';
 import { initDsc } from './dsc.js';
 import { initDriveImport } from './drive-import.js';
@@ -246,6 +247,7 @@ async function openClient(cid, tab) {
 /* ================= rendering ================= */
 const NAV_ICON = {
   dashboard: '<path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 4v4h6V4z"/>',
+  bstat: '<path d="M4 5h7a2 2 0 0 1 2 2v12a2 2 0 0 0-2-2H4zM20 5h-7a2 2 0 0 0-2 2v12a2 2 0 0 1 2-2h7z"/><path d="M15 11l1.5 1.5L19 10"/>',
   due: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
   tasks: '<path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>',
   clients: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6M16 4.5a3.5 3.5 0 0 1 0 7M18 14c2.2.6 3.5 2.7 3.5 6"/>',
@@ -256,10 +258,10 @@ const NAV_ICON = {
   gstdesk: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h6M15 15.5l1.5 1.5 3-3"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
 };
-const PAGE_TITLE = { dashboard: 'Dashboard', due: 'Due dates', tasks: 'Tasks', task: 'Task', workflow: 'Work categories', clients: 'Masters', client: 'Master', books: 'Clients — bookkeeping', comps: 'Compliances', dsc: 'DSC register', gstdesk: 'GST Desk', import: 'Excel import', settings: 'Settings' };
+const PAGE_TITLE = { dashboard: 'Dashboard', due: 'To-do list', tasks: 'Tasks', task: 'Task', workflow: 'Work categories', clients: 'Masters', client: 'Master', books: 'Clients — bookkeeping', bstat: 'Books status', comps: 'Compliances', dsc: 'DSC register', gstdesk: 'GST Desk', import: 'Excel import', settings: 'Settings' };
 function render() {
   if (!S.profile) return;
-  const items = isAdmin() ? [['dashboard', 'Dashboard'], ['clients', 'Masters'], ['books', 'Clients'], ['due', 'Due dates'], ['tasks', 'Tasks'], ['comps', 'Compliances'], ['dsc', 'DSC register'], ['gstdesk', 'GST Desk'], ['import', 'Excel import'], ['settings', 'Settings']] : [];
+  const items = isAdmin() ? [['dashboard', 'Dashboard'], ['clients', 'Masters'], ['books', 'Clients'], ['bstat', 'Books status'], ['due', 'To-do list'], ['tasks', 'Tasks'], ['comps', 'Compliances'], ['dsc', 'DSC register'], ['gstdesk', 'GST Desk'], ['import', 'Excel import'], ['settings', 'Settings']] : [];
   const active = v => S.view === v || (v === 'tasks' && ['task', 'workflow'].includes(S.view)) || (v === 'clients' && S.view === 'client');
   const nav = items.map(([v, l]) => `<button class="nav ${active(v) ? 'on' : ''}" data-act="go" data-v="${v}"><svg viewBox="0 0 24 24" aria-hidden="true">${NAV_ICON[v]}</svg><span>${l}</span></button>`).join('');
   const who = S.profile.name || S.profile.email || '';
@@ -295,8 +297,9 @@ function render() {
 }
 // "Search anything": pages & actions, compliances, clients, portal logins (usernames only) and tasks
 const GO = [
-  ['Dashboard', 'go', 'dashboard', 'home overview'], ['Due dates', 'go', 'due', 'pending returns calendar'], ['Tasks', 'go', 'tasks', 'register board work'],
+  ['Dashboard', 'go', 'dashboard', 'home overview'], ['To-do list', 'go', 'due', 'due dates pending returns calendar to-do todo adhoc work'], ['Tasks', 'go', 'tasks', 'register board work'],
   ['Masters', 'go', 'clients', 'clients list business itr masters'], ['Compliances — tick clients for each compliance or work', 'go', 'comps', 'compliances applicable assign multiple clients select tick applicability work'],
+  ['Books status — bank, sales, purchase, journal updated till (sync from Tally)', 'go', 'bstat', 'books updated till last entry bank statement sales purchase journal pending data tally sync request data'],
   ['Clients — bookkeeping: upload bills, review, post to Tally', 'go', 'books', 'bookkeeping tally bills invoices receipts bank statement post vouchers handwritten'],
   ['DSC register — digital signatures', 'go', 'dsc', 'dsc digital signature token expiry class 3'],
   ['GST Desk — GST portal extension: download GSTR-1 / 2B / 3B, import from GST portal, registration, Tally', 'go', 'gstdesk', 'gst desk extension returns download gstr1 gstr2b gstr3b portal import registration reconciliation'],
@@ -336,6 +339,7 @@ function body() {
     case 'dsc': return DSC.view();
     case 'gstdesk': return GD.view();
     case 'books': return BK.view();
+    case 'bstat': return BS.view();
     case 'tasks': return T.vTasks();
     case 'task': return T.vTask();
     case 'workflow': return T.vWorkflow();
@@ -378,6 +382,9 @@ function doneRows({ back = 0, ahead = 45, history = false } = {}) {
   }
   return rows.sort((a, b) => a.due - b.due || (a.c.name || '').localeCompare(b.c.name || ''));
 }
+// GST returns worked in GST Desk (Tally & GST work): a click on them opens GST Desk, not the client list
+const isGstForm = k => /^(GSTR|IFF|PMT-06|CMP-08)/i.test(k || '');
+const perYm = p => { const m = /^([A-Z][a-z]{2})[a-z]* (\d{4})$/.exec(String(p || '').trim()); if (!m) return ''; const i = MONS.indexOf(m[1]); return i < 0 ? '' : `${m[2]}-${String(i + 1).padStart(2, '0')}`; };
 const dashRows = () => dueRows({ back: 365, ahead: 0, history: true }); // used by bulk "mark filed"
 const DONE_ST = { filed: 1, na: 1 }; // a due date is closed when filed / paid, or marked not required
 const isoLocalD = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -420,7 +427,8 @@ function vDashboard() {
   const progHtml = Object.entries(prog).sort((a, b) => a[1].due - b[1].due).filter(([, p]) => p.total && p.filed < p.total).map(([k, p]) => {
     const pct = Math.round(p.filed / p.total * 100), late = p.due < today && p.filed < p.total;
     const left = p.total - p.filed;
-    return `<div class="prog click" data-act="dueOpenForm" data-k="${esc(k)}" title="Show pending ${esc(k)}"><div class="prog-h"><b>${esc(k)}</b><span class="muted small">${p.periods.size > 1 ? p.periods.size + ' periods' : esc(p.period)} · due ${p.due.getDate()} ${MONS[p.due.getMonth()]}${p.due.getFullYear() !== today.getFullYear() ? ' ' + p.due.getFullYear() : ''}</span>
+    const gst = isGstForm(k), ym = perYm(p.period);
+    return `<div class="prog click" ${gst ? `data-act="gstWork" data-k="${esc(k)}" data-m="${ym}" title="Open GST Desk – Tally &amp; GST work${ym ? ' for ' + esc(p.period) : ''}"` : `data-act="dueOpenForm" data-k="${esc(k)}" title="Show pending ${esc(k)}"`}><div class="prog-h"><b>${esc(k)}</b><span class="muted small">${p.periods.size > 1 ? p.periods.size + ' periods' : esc(p.period)} · due ${p.due.getDate()} ${MONS[p.due.getMonth()]}${p.due.getFullYear() !== today.getFullYear() ? ' ' + p.due.getFullYear() : ''}</span>
       <span class="prog-n ${late ? 'red' : ''}">${left ? `<span class="${late ? 'red' : ''}">${left} pending</span>` : '<span class="ok">All filed</span>'}<small class="muted"> ${p.filed}/${p.total}</small></span></div>
       <div class="bar big"><i style="width:${pct}%" class="${pct === 100 ? 'done' : late ? 'late' : ''}"></i></div></div>`;
   }).join('') + doneHtml || '<p class="muted small">Nothing due this month. 🎉</p>';
@@ -542,6 +550,24 @@ function vDue() {
   const consList = [...new Set(rows.map(r => r.c.constitution || 'Not set'))].sort();
   if (f.ctype) rows = rows.filter(r => f.ctype === 'itr' ? isItrOnly(r.c) : !isItrOnly(r.c));
   if (f.cons) rows = rows.filter(r => (r.c.constitution || 'Not set') === f.cons);
+  // ad-hoc work (not a return): open tasks without a filing behind them – to-dos, reminders, one-off jobs
+  const CLOSED_T = ['Completed', 'Not required', 'Cancelled'];
+  const winEnd = mm ? isoLocalD(mE) : (() => { const d = new Date(t0); d.setDate(d.getDate() + (S.dueDay ? 62 : ahead)); return isoLocalD(d); })();
+  const winStart = mm ? isoLocalD(mS) : '';
+  let todo = (S.tasks || []).filter(x => !x.filingKey && (f.done ? CLOSED_T.includes(x.status) && x.status !== 'Cancelled' : !CLOSED_T.includes(x.status)));
+  todo = todo.filter(x => S.dueDay ? x.due === S.dueDay : f.done ? (!winStart || (x.due || '') >= winStart) && (x.due || '') <= winEnd && x.due : f.range === 'overdue' ? x.due && x.due < isoLocalD(t0) : !x.due || (x.due <= winEnd && (!winStart || x.due >= winStart || x.due < isoLocalD(t0))));
+  if (q) todo = todo.filter(x => [x.title, x.clientName, (S.clients.find(c => c.id === x.clientId) || {}).name].some(v => (v || '').toLowerCase().includes(q)));
+  if (f.ctype || f.cons) todo = todo.filter(x => { const c = S.clients.find(c => c.id === x.clientId); return c && (!f.ctype || (f.ctype === 'itr' ? isItrOnly(c) : !isItrOnly(c))) && (!f.cons || (c.constitution || 'Not set') === f.cons); });
+  todo.sort((a, b) => (a.due || '9').localeCompare(b.due || '9'));
+  const todoHtml = !todo.length ? '' : `<div class="citem open todo"><div class="chead"><span class="cname">To-do</span><span class="ccount"><b>${todo.length}</b> ${f.done ? 'done' : 'open'} — ad-hoc work, reminders, one-off jobs</span><span class="cdue">${todo.some(x => x.due && x.due < isoLocalD(t0)) && !f.done ? `<span class="tag red">${todo.filter(x => x.due && x.due < isoLocalD(t0)).length} overdue</span>` : ''}</span></div>
+    <div class="cpanel"><table class="tbl"><thead><tr><th></th><th>Work</th><th>Client</th><th>Due</th><th>For</th><th></th></tr></thead><tbody>
+    ${todo.map(x => { const c = S.clients.find(c => c.id === x.clientId), late = !f.done && x.due && x.due < isoLocalD(t0); return `<tr class="${late ? 'od' : ''}">
+      <td>${isAdmin() && !f.done ? `<input type="checkbox" class="todo-chk" data-change="todoDone" data-id="${x.id}" title="Mark done">` : f.done ? '✓' : ''}</td>
+      <td><a href="#" data-act="openTask" data-id="${x.id}">${esc(x.title || '')}</a>${x.kind === 'reminder' ? ' <span class="tag">Reminder</span>' : ''}${x.priority && x.priority !== 'Normal' ? ` <span class="tag ${/Urgent|High/.test(x.priority) ? 'red' : ''}">${esc(x.priority)}</span>` : ''}</td>
+      <td>${c ? `<a href="#" data-act="open" data-id="${c.id}">${esc(dispName(c))}</a>` : '<span class="muted">—</span>'}</td>
+      <td class="nowrap">${x.due ? isoToDisp(x.due) : '<span class="muted">No date</span>'}${x.remindTime ? ` <span class="muted tiny">${esc(x.remindTime)}</span>` : ''}${late ? '<div class="tiny red">overdue</div>' : ''}</td>
+      <td class="small">${esc(x.assignee || 'Me')}</td><td class="nowrap small muted">${f.done ? esc(x.status) : esc(x.status === 'Not started' ? '' : x.status || '')}</td></tr>`; }).join('')}
+    </tbody></table></div></div>`;
   // one button per compliance, ordered by its earliest due date
   const groups = new Map();
   for (const r of rows) { const k = baseForm(r.form); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
@@ -584,9 +610,9 @@ function vDue() {
       <div class="btns"><button class="sm" data-act="dueColAll" data-k="${k}">Select all</button><button class="sm" data-act="dueMenuClose">Done</button></div></div>`; })() : '';
   return `${menu}
   <section class="card">
-    <div class="row-between wrap"><h2>Due dates <span class="muted">(${rows.length} ${f.done ? 'done' : 'pending'} · ${list.length} compliance${list.length === 1 ? '' : 's'})</span></h2>
+    <div class="row-between wrap"><h2>To-do list <span class="muted">(${rows.length + todo.length} ${f.done ? 'done' : 'pending'} · ${list.length} compliance${list.length === 1 ? '' : 's'}${todo.length ? ` · ${todo.length} to-do` : ''})</span></h2>
       <div class="tabs seg" style="margin:0"><button class="${f.done ? '' : 'on'}" data-act="dueMode" data-v="">Pending</button><button class="${f.done ? 'on' : ''}" data-act="dueMode" data-v="1">✓ Work done</button></div>
-      <div class="btns"><button class="sm" data-act="dueRefresh" title="Reload clients, filings and tasks">⟳ Refresh</button>${list.length ? `<button class="sm" data-act="dueAll" data-v="${open.size ? '' : '1'}">${open.size ? 'Collapse all' : 'Expand all'}</button>` : ''}${isAdmin() ? '<button class="sm" data-act="bulkFiled">Mark past returns as filed…</button>' : ''}</div></div>
+      <div class="btns">${isAdmin() ? '<button class="sm primary" data-act="todoAdd">+ Add to-do</button>' : ''}<button class="sm" data-act="dueRefresh" title="Reload clients, filings and tasks">⟳ Refresh</button>${list.length ? `<button class="sm" data-act="dueAll" data-v="${open.size ? '' : '1'}">${open.size ? 'Collapse all' : 'Expand all'}</button>` : ''}${isAdmin() ? '<button class="sm" data-act="bulkFiled">Mark past returns as filed…</button>' : ''}</div></div>
     <div class="filters">
       <select data-change="dueRange">${(() => {
         const mo = k => { const d = new Date(t0.getFullYear(), t0.getMonth() + k, 1); return [`m:${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, `${MONS[d.getMonth()]} ${d.getFullYear()}`]; };
@@ -605,7 +631,7 @@ function vDue() {
     <div class="dropbar" id="dropbar"><div class="dz" data-drop="QRMP"><b>QRMP</b> — IFF in months 1–2, quarterly GSTR-1</div><div class="dz" data-drop="Monthly"><b>Monthly</b> — GSTR-1 every month</div></div>
     <div class="clist">
     ${S.dueDay ? `<div class="fchip">Showing returns due on <b>${isoToDisp(S.dueDay)}</b> <a href="#" data-act="dueDayClear">✕ show all</a></div>` : ''}
-    ${list.map(g => `<div class="citem ${open.has(g.name) || allOpen ? 'open' : ''} ${g.od ? 'has-od' : ''}">
+    ${todoHtml}${list.map(g => `<div class="citem ${open.has(g.name) || allOpen ? 'open' : ''} ${g.od ? 'has-od' : ''}">
       <button class="chead" data-act="dueToggle" data-k="${esc(g.name)}">
         <span class="cname">${esc(g.name)}</span>
         <span class="ccount"><b>${g.clients}</b> client${g.clients === 1 ? '' : 's'} ${f.done ? 'done' : 'pending'}${g.rs.length > g.clients ? ` <span class="muted">(${g.rs.length} returns)</span>` : ''}</span>
@@ -613,7 +639,7 @@ function vDue() {
         <span class="chev">▾</span>
       </button>
       ${open.has(g.name) || allOpen ? panel(g) : ''}
-    </div>`).join('') || (f.done ? '<p class="muted empty">Nothing filed in this period yet.</p>' : '<p class="muted empty">Nothing pending. 🎉</p>')}
+    </div>`).join('') || (todo.length ? '' : f.done ? '<p class="muted empty">Nothing done in this period yet.</p>' : '<p class="muted empty">Nothing pending. 🎉</p>')}
     </div>
     <p class="muted small">Statutory due dates. Check CBIC / CBDT / MCA notifications for extensions.</p>
   </section>`;
@@ -748,6 +774,7 @@ function vClient() {
     </div>
     ${S.creds.length ? `<div class="quick"><span class="muted small">Quick login:</span>
       ${S.creds.map(cr => `<button class="sm pill" data-act="login" data-id="${cr.id}">${esc(portalByKey(cr.portal).short)}${cr.gstin && regsOf(c).length > 1 ? ' ' + esc(stateOf(cr.gstin) || cr.gstin.slice(0, 2)) : ''} ↗</button>`).join('')}</div>` : ''}
+    ${S.cid ? BS.clientLine(S.clients.find(x => x.id === S.cid) || c) : ''}
   </section>
   <div class="tabs">${tabs.map(([t, l]) => `<button class="${S.tab === t ? 'on' : ''}" data-act="tab" data-t="${t}">${l}</button>`).join('')}</div>
   <section class="card">${({ master: tMaster, logins: tLogins, docs: tDocs, compliance: tCompliance, access: tAccess, tasks: T.tClientTasks, gst: tGst, dsc: () => DSC.clientTab() })[S.tab]?.() || ''}</section>`;
@@ -980,8 +1007,10 @@ function pendingFor(cid, keys) {
   const c = S.clients.find(x => x.id === cid); const y = new Date().getFullYear();
   return dueItems(c, new Date(y - 2, 0, 1), new Date(y + 1, 11, 31)).filter(it => keys.includes(it.key) || (it.altKey && keys.includes(it.altKey)));
 }
-function reminderText(c, items) {
-  const L = [`Dear ${c.name || 'Sir/Madam'},`, '', !items.length ? 'Gentle reminder from our side regarding your pending work.' : items.length > 1 ? 'Gentle reminder — the following are due:' : 'Gentle reminder — the following is due:', ''];
+function reminderText(c, items, dataReq) {
+  const need = BS.dataLines(c);
+  const L = [`Dear ${c.name || 'Sir/Madam'},`, '', dataReq && need.length ? 'To keep your accounts and returns up to date, please share the following:' : !items.length ? 'Gentle reminder from our side regarding your pending work.' : items.length > 1 ? 'Gentle reminder — the following are due:' : 'Gentle reminder — the following is due:', ''];
+  if (dataReq && need.length) { for (const n of need) L.push(`• ${n}`); if (items.length) L.push('', items.length > 1 ? 'Also due:' : 'Also due:'); }
   const docs = new Set();
   for (const it of items) {
     const late = it.due < dayStart(new Date());
@@ -989,18 +1018,19 @@ function reminderText(c, items) {
     for (const d of T.docsFor(c.id, it.key)) docs.add(d);
   }
   if (docs.size) { L.push('', 'Please share the following at the earliest:'); for (const d of docs) L.push(`  – ${d}`); }
+  if (!dataReq && need.length) { L.push('', 'Data pending for your books:'); for (const n of need) L.push(`  – ${n}`); }
   L.push('', 'If already shared, kindly ignore this message.', '', 'Regards,', S.firm || '', S.profile?.name && S.profile.name !== S.firm ? S.profile.name : '');
   return L.filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n').trim();
 }
-function openReminder(cid, keys, via) {
+function openReminder(cid, keys, via, dataReq) {
   const c = S.clients.find(x => x.id === cid); const items = pendingFor(cid, keys);
   S.remind = { cid, keys };
-  modal(`<h2>Send reminder — ${esc(c.name)}</h2>
+  modal(`<h2>${dataReq ? 'Request data' : 'Send reminder'} — ${esc(c.name)}</h2>${(() => { const r = lastReminder(c); return r ? `<p class="muted small">Last reminder: ${isoToDisp(r.at.slice(0, 10))} on ${r.via === 'wa' ? 'WhatsApp' : 'email'}${r.to ? ' to ' + esc(r.to) : ''}</p>` : '<p class="muted small">No reminder sent to this client yet.</p>'; })()}
     <div class="grid">
       <label>WhatsApp number<input id="rPhone" value="${esc(c.mobile || '')}" placeholder="10-digit mobile"></label>
       <label>Email<input id="rEmail" type="email" value="${esc(c.email || '')}" placeholder="client@example.com"></label>
       ${!c.mobile || !c.email ? '<label class="chk span2"><input type="checkbox" id="rSave" checked> Save the number / email to this client</label>' : ''}
-      <label class="span2">Message<textarea id="rMsg" rows="12">${esc(reminderText(c, items))}</textarea></label>
+      <label class="span2">Message<textarea id="rMsg" rows="12">${esc(reminderText(c, items, dataReq))}</textarea></label>
     </div>
     <div class="btns mt"><button class="primary wa" data-act="remindSend" data-via="wa">${WA_ICON} Send on WhatsApp</button>
       <button data-act="remindSend" data-via="gmail">${MAIL_ICON} Send with Gmail</button><button data-act="remindSend" data-via="mail">Email app</button>
@@ -1036,6 +1066,18 @@ function openBulkRemind(name) {
 }
 
 // personal reminders ("call X about pending bills on 10 Nov 4 pm") are kept as tasks of kind 'reminder'
+function todoForm() {
+  modal(`<h2>Add a to-do</h2><form data-form="todoSave" class="grid">
+    <label class="span2">Work<input name="title" required placeholder="e.g. Collect October bank statement, file ROC change, prepare CMA data"></label>
+    <label class="span2">Client (optional)<input name="c" list="todoClients" placeholder="Type a name, PAN or GSTIN" autocomplete="off"></label>
+    <datalist id="todoClients">${S.clients.map(c => `<option value="${esc(c.name)}${c.pan ? ' · ' + esc(c.pan) : ''}">`).join('')}</datalist>
+    <label>Due date<input type="date" name="due" value="${todayISO()}"></label>
+    <label>For<select name="assignee"><option value="">Me</option>${(S.wf?.staff || []).map(x => `<option>${esc(x)}</option>`).join('')}</select></label>
+    <label>Priority<select name="priority"><option>Normal</option><option>High</option><option>Urgent</option><option>Low</option></select></label>
+    <label class="span2">Note<textarea name="note" rows="2" placeholder="Details (optional)"></textarea></label>
+    <div class="span2 btns"><button class="primary">Save to-do</button><button type="button" data-act="closeModal">Cancel</button></div></form>`);
+  setTimeout(() => document.querySelector('[name=title]')?.focus(), 50);
+}
 function reminderForm() {
   const tm = new Date(); tm.setDate(tm.getDate() + 1);
   modal(`<h2>Add a reminder</h2><form data-form="fabReminder" class="grid">
@@ -1281,6 +1323,8 @@ const A = {
   dueColClear: () => { S.dueCol = { sort: S.dueCol?.sort || null, f: {} }; render(); },
   dueToggle: ({ k }) => { const o = S.dueOpen ||= new Set(); if (o.has('*')) { o.delete('*'); for (const b of document.querySelectorAll('[data-act=dueToggle]')) o.add(b.dataset.k); } o.has(k) ? o.delete(k) : o.add(k); render(); },
   dueDone: ({ k }) => { S.dueF ||= { range: dueDefault(), form: '', q: '', history: false }; S.dueF.done = true; S.dueF.range = thisMonthKey(); S.dueF.pick = false; S.dueDay = ''; S.dueOpen = new Set(k ? [k] : []); S.view = 'due'; render(); },
+  gstWork: ({ k, m }) => { if (GD.installed()) GD.open('#work' + (m ? '=' + m : '')); else { toast(`${k}: GST Desk is not added to this Chrome yet – set it up here, or see the pending list in To-do list`, 7000); S.view = 'gstdesk'; render(); } },
+  todoAdd: () => todoForm(),
   dueMode: ({ v }) => { S.dueF ||= { range: dueDefault(), form: '', q: '', history: false }; S.dueF.done = !!v; S.dueOpen = new Set(); S.dueDay = ''; render(); },
   dueAll: ({ v }) => { S.dueOpen = new Set(); if (v) for (const b of document.querySelectorAll('[data-act=dueToggle]')) S.dueOpen.add(b.dataset.k); render(); },
   mixOpen: ({ k }) => { S.consF = k; S.search = ''; S.sel = new Set(); S.view = 'clients'; render(); },
@@ -1675,6 +1719,13 @@ const F = {
     }
     await b.commit(); closeModal(); render(); toast(`${n} return(s) marked as filed`);
   }),
+  todoSave: fd => guard(async () => {
+    const cv = fd.get('c'), c = pickClient(cv);
+    if (cv.trim() && !c) throw new Error(`No client matches "${cv}". Pick one from the list or leave it blank.`);
+    const id = await T.create({ clientId: c?.id || '', catId: 'GEN', title: fd.get('title').trim(), due: fd.get('due') || '', priority: fd.get('priority'), assignee: fd.get('assignee') || '', extra: { kind: 'todo' } });
+    const note = fd.get('note').trim(); if (note) { const t = S.tasks.find(x => x.id === id); t.notes = [{ at: new Date().toISOString(), by: S.profile?.name || S.profile?.email || 'Owner', text: note }]; await updateDoc(doc(db, 'tasks', id), { notes: t.notes }); }
+    closeModal(); render();
+  }, 'To-do added'),
   fabReminder: fd => guard(async () => {
     const cv = fd.get('c'), c = pickClient(cv);
     if (cv.trim() && !c) throw new Error(`No client matches "${cv}". Pick one from the list or leave it blank.`);
@@ -1819,6 +1870,7 @@ const C = {
     render();
   },
   dueF: el => { S.dueF[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; render(); },
+  todoDone: el => guard(async () => { const x = S.tasks.find(t => t.id === el.dataset.id); if (!x) return; await T.patch(x.id, { status: 'Completed' }, `Status: ${x.status || 'Not started'} → Completed`); render(); }, 'Done ✓'),
   portalPick: el => { const u = el.form.elements.url; u.value = portalByKey(el.value).url; },
   uploadDocs: el => guard(async () => {
     const cat = $('#docCat').value;
@@ -2047,6 +2099,11 @@ const PAY = initPayments({ S, A, C, F, esc, toast, modal, closeModal, guard, ren
   fs: { doc, getDocs, setDoc, collection } });
 const TF = initTaskFiles({ S, A, C, esc, toast, modal, closeModal, guard, render: () => render(), isAdmin, isoToDisp, db, saveFile, saveBlob, T, WA_ICON, MAIL_ICON, busy,
   fs: { doc, getDocs, deleteDoc, collection, query, where } });
+const lastReminder = c => (c.reminders || []).slice().sort((a, b) => (a.at || '').localeCompare(b.at || '')).pop() || null;
+// "Request data": the client's pending returns (next 30 days) + the books data still missing, ready for WhatsApp / email
+const openDataRequest = cid => { const keys = dueRows({ back: 365, ahead: 30 }).filter(r => r.c.id === cid).map(r => r.key); openReminder(cid, keys, 'wa', true); };
+const BS = initBooksStatus({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, db, busy, dispName, isAdmin, isItrOnly: c => isItrOnly(c), openDataRequest, lastReminder,
+  fs: { doc, getDoc, setDoc, updateDoc } });
 const BK = initBooks({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, todayISO, db, saveFile, busy, dispName, regsOf, isAdmin,
   fs: { doc, getDoc, setDoc, getDocs, addDoc, updateDoc, deleteDoc, collection, serverTimestamp, writeBatch } });
 const DR = initDirectors({ S, A, C, F, esc, toast, modal, closeModal, guard, render: () => render(), isoToDisp, isAdmin, db, fs: { doc, updateDoc, serverTimestamp }, saveFile, openClient: (...a) => openClient(...a), loadClients: () => loadClients(), busy });
@@ -2078,6 +2135,7 @@ document.addEventListener('input', e => {
   if (e.target.id === 'gq') { S.gq = e.target.value; gqResults(); return; }
   if (e.target.id === 'gdQ') { S.gdQ = e.target.value; const p = e.target.selectionStart; render(); const s = $('#gdQ'); s.focus(); s.setSelectionRange(p, p); return; }
   if (e.target.id === 'dscQ') { S.dscF.q = e.target.value; const p = e.target.selectionStart; render(); const s = $('#dscQ'); s.focus(); s.setSelectionRange(p, p); return; }
+  if (BS.onInput(e.target)) return;
   if (e.target.id === 'dueQ') {
     S.dueF.q = e.target.value; const pos = e.target.selectionStart; render();
     const s = $('#dueQ'); s.focus(); s.setSelectionRange(pos, pos); return;
