@@ -747,3 +747,6 @@ body.dragging-gst .dropbar{display:flex}
 .gd-stats b { font-size: 1.4rem; }
 .gd-stats span { font-size: .8rem; color: var(--muted, #667085); }
 #gdQ { min-width: 220px; width: auto; margin-top: 0; }
+
+.prog-done{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line,#e3e7ee);line-height:1.9}
+.prog-done .ok{font-weight:600;margin-right:4px}

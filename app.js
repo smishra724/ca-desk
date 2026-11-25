@@ -363,6 +363,21 @@ function dueRows({ back = 0, ahead = 45, history = false } = {}) {
   }
   return rows.sort((a, b) => a.due - b.due || (a.c.name || '').localeCompare(b.c.name || ''));
 }
+// returns already filed / paid / marked not required in a window (the "Work done" view)
+function doneRows({ back = 0, ahead = 45, history = false } = {}) {
+  const today = dayStart(new Date());
+  const from = new Date(today); from.setDate(from.getDate() - back);
+  const tf = trackFrom(); const start = history ? from : (from > tf ? from : tf);
+  const to = new Date(today); to.setDate(to.getDate() + ahead);
+  const rows = [];
+  if (start > to) return rows;
+  for (const c of S.clients) for (const it of dueItems(c, start, to)) {
+    const f = filingFor(S.allFilings, it, `${c.id}|`);
+    if (!(f?.status in DONE_ST)) continue;
+    rows.push({ ...it, c, f, overdue: false });
+  }
+  return rows.sort((a, b) => a.due - b.due || (a.c.name || '').localeCompare(b.c.name || ''));
+}
 const dashRows = () => dueRows({ back: 365, ahead: 0, history: true }); // used by bulk "mark filed"
 const DONE_ST = { filed: 1, na: 1 }; // a due date is closed when filed / paid, or marked not required
 const isoLocalD = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -400,13 +415,15 @@ function vDashboard() {
     const k = baseForm(it.form); const p = prog[k] ||= { total: 0, filed: 0, due: it.due, period: it.period, periods: new Set() };
     p.total++; if (filed) p.filed++; p.periods.add(it.period); if (it.due < p.due) p.due = it.due;
   }
-  const progHtml = Object.entries(prog).sort((a, b) => a[1].due - b[1].due).filter(([, p]) => p.total).map(([k, p]) => {
+  const doneAll = Object.entries(prog).filter(([, p]) => p.total && p.filed === p.total).sort((a, b) => a[1].due - b[1].due);
+  const doneHtml = doneAll.length ? `<div class="prog-done small"><span class="ok">✓ All done:</span> ${doneAll.map(([k, p]) => `<a href="#" data-act="dueDone" data-k="${esc(k)}">${esc(k)}</a> <span class="muted">${p.filed}/${p.total}</span>`).join(' · ')} <a href="#" data-act="dueDone" data-k="" class="muted">— see work done</a></div>` : '';
+  const progHtml = Object.entries(prog).sort((a, b) => a[1].due - b[1].due).filter(([, p]) => p.total && p.filed < p.total).map(([k, p]) => {
     const pct = Math.round(p.filed / p.total * 100), late = p.due < today && p.filed < p.total;
     const left = p.total - p.filed;
     return `<div class="prog click" data-act="dueOpenForm" data-k="${esc(k)}" title="Show pending ${esc(k)}"><div class="prog-h"><b>${esc(k)}</b><span class="muted small">${p.periods.size > 1 ? p.periods.size + ' periods' : esc(p.period)} · due ${p.due.getDate()} ${MONS[p.due.getMonth()]}${p.due.getFullYear() !== today.getFullYear() ? ' ' + p.due.getFullYear() : ''}</span>
       <span class="prog-n ${late ? 'red' : ''}">${left ? `<span class="${late ? 'red' : ''}">${left} pending</span>` : '<span class="ok">All filed</span>'}<small class="muted"> ${p.filed}/${p.total}</small></span></div>
       <div class="bar big"><i style="width:${pct}%" class="${pct === 100 ? 'done' : late ? 'late' : ''}"></i></div></div>`;
-  }).join('') || '<p class="muted small">Nothing due this month. 🎉</p>';
+  }).join('') + doneHtml || '<p class="muted small">Nothing due this month. 🎉</p>';
 
   // next 7 days grouped by date
   const byDay = {};
@@ -487,7 +504,7 @@ function vDashboard() {
   </div>
   <div class="dash-grid">
     <div>
-      <section class="card"><div class="row-between"><h2>Due this month</h2><button class="sm" data-act="go" data-v="due">Open due dates</button></div>${progHtml}</section>
+      <section class="card"><div class="row-between"><h2>Due this month</h2><div class="btns"><button class="sm" data-act="dueDone" data-k="">✓ Work done</button><button class="sm" data-act="go" data-v="due">Open due dates</button></div></div>${progHtml}</section>
       <section class="card"><div class="row-between"><h2>Next 7 days</h2></div><div class="days">${weekHtml}</div></section>
     </div>
     <div>
@@ -515,10 +532,11 @@ function vDue() {
   const mS = mm ? new Date(+mm.slice(0, 4), +mm.slice(5, 7) - 1, 1) : null, mE = mm ? new Date(+mm.slice(0, 4), +mm.slice(5, 7), 0) : null;
   const t0 = dayStart(new Date()), dd = (a, b) => Math.ceil((a - b) / 864e5);
   const ahead = mm ? Math.max(0, dd(mE, t0)) : f.range === 'overdue' ? 0 : +f.range;
-  let rows = dueRows({ back: mm ? Math.max(0, dd(t0, mS)) : 365, ahead: S.dueDay ? 62 : ahead, history: f.history });
+  const W = f.done ? doneRows : dueRows;
+  let rows = W({ back: mm ? Math.max(0, dd(t0, mS)) : f.done ? 90 : 365, ahead: S.dueDay ? 62 : f.done && f.range === 'overdue' ? 0 : ahead, history: f.history });
   if (mm) rows = rows.filter(r => r.due >= mS && r.due <= mE);
   if (S.dueDay) rows = rows.filter(r => isoLocalD(r.due) === S.dueDay);
-  else if (f.range === 'overdue') rows = rows.filter(r => r.overdue);
+  else if (f.range === 'overdue' && !f.done) rows = rows.filter(r => r.overdue);
   const allOpen = open.has('*');
   const q = f.q.toLowerCase(); if (q) rows = rows.filter(r => [r.c.name, r.c.tradeName, r.gstin, r.form].some(v => (v || '').toLowerCase().includes(q)));
   const consList = [...new Set(rows.map(r => r.c.constitution || 'Not set'))].sort();
@@ -541,7 +559,14 @@ function vDue() {
   };
   const hcell = (k, label) => { const on = dc.f[k] || dc.sort?.k === k; return `<th><button class="hbtn ${on ? 'on' : ''}" data-act="dueHead" data-k="${k}">${label}${dc.sort?.k === k ? (dc.sort.dir === 'desc' ? ' ↓' : ' ↑') : ''}${dc.f[k] ? ' ⏷' : ' ▾'}</button></th>`; };
   const dragOk = g => isAdmin() && /^(GSTR-1|IFF)$/.test(g.name);
-  const panel = g => { const rs = colRows(g.rs); return `<div class="cpanel">${isAdmin() ? `<div class="cp-bar">${dragOk(g) ? `<span class="muted tiny">Drag a client by ⠿ to switch between Monthly and QRMP (IFF), or <a href="#" data-act="freqCheck" data-group="${esc(g.name)}">check filing frequency on the portal</a>.</span>` : ''}<button class="sm" data-act="remindAll" data-k="${esc(g.name)}">${WA_ICON} Remind all ${g.clients} pending client${g.clients === 1 ? '' : 's'}</button></div>` : ''}
+  const fst = r => r.f.status === 'na' ? '<span class="tag">Not required</span>' : `<span class="tag green">${isPayKey(r.key) ? 'Paid' : 'Filed'}</span>`;
+  const donePanel = g => `<div class="cpanel"><table class="tbl"><thead><tr><th>Client</th><th>Period</th><th>Due</th><th>Done on</th><th>Ack / remarks</th><th>By</th></tr></thead><tbody>
+    ${g.rs.map(r => `<tr><td><a href="#" data-act="open" data-id="${r.c.id}" data-tab="compliance">${esc(dispName(r.c))}</a>${r.gstin ? `<div class="muted tiny"><span class="mono">${esc(r.gstin)}</span></div>` : ''}</td>
+      <td>${esc(r.period)}</td><td class="nowrap">${fmtDate(r.due)}</td>
+      <td class="nowrap">${fst(r)} ${r.f.filedOn ? isoToDisp(r.f.filedOn) : ''}${r.f.filedOn && r.f.filedOn > isoLocalD(r.due) && r.f.status !== 'na' ? ' <span class="tiny red">late</span>' : ''}</td>
+      <td class="small">${esc(r.f.ack || '')}${r.f.ack && r.f.remarks ? '<br>' : ''}<span class="muted">${esc(r.f.remarks || '')}</span></td><td class="small muted">${esc(r.f.by || '')}</td></tr>`).join('')}
+    </tbody></table></div>`;
+  const panel = g => { if (f.done) return donePanel(g); const rs = colRows(g.rs); return `<div class="cpanel">${isAdmin() ? `<div class="cp-bar">${dragOk(g) ? `<span class="muted tiny">Drag a client by ⠿ to switch between Monthly and QRMP (IFF), or <a href="#" data-act="freqCheck" data-group="${esc(g.name)}">check filing frequency on the portal</a>.</span>` : ''}<button class="sm" data-act="remindAll" data-k="${esc(g.name)}">${WA_ICON} Remind all ${g.clients} pending client${g.clients === 1 ? '' : 's'}</button></div>` : ''}
     ${rs.length < g.rs.length ? `<div class="fchip">Showing ${rs.length} of ${g.rs.length} — filtered by column <a href="#" data-act="dueColClear">✕ clear filters</a></div>` : ''}
     <table class="tbl"><thead><tr>${hcell('client', 'Client')}${hcell('period', 'Period')}${hcell('due', 'Due')}${isAdmin() ? hcell('status', 'Task status') : ''}<th></th></tr></thead><tbody>
     ${rs.map(r => `<tr class="${r.overdue ? 'od' : ''}" ${dragOk(g) && r.gstin ? `draggable="true" data-drag-cid="${r.c.id}" data-drag-gstin="${esc(r.gstin)}" data-drag-from="${esc(g.name)}"` : ''}>
@@ -559,7 +584,8 @@ function vDue() {
       <div class="btns"><button class="sm" data-act="dueColAll" data-k="${k}">Select all</button><button class="sm" data-act="dueMenuClose">Done</button></div></div>`; })() : '';
   return `${menu}
   <section class="card">
-    <div class="row-between wrap"><h2>Due dates <span class="muted">(${rows.length} pending · ${list.length} compliance${list.length === 1 ? '' : 's'})</span></h2>
+    <div class="row-between wrap"><h2>Due dates <span class="muted">(${rows.length} ${f.done ? 'done' : 'pending'} · ${list.length} compliance${list.length === 1 ? '' : 's'})</span></h2>
+      <div class="tabs seg" style="margin:0"><button class="${f.done ? '' : 'on'}" data-act="dueMode" data-v="">Pending</button><button class="${f.done ? 'on' : ''}" data-act="dueMode" data-v="1">✓ Work done</button></div>
       <div class="btns"><button class="sm" data-act="dueRefresh" title="Reload clients, filings and tasks">⟳ Refresh</button>${list.length ? `<button class="sm" data-act="dueAll" data-v="${open.size ? '' : '1'}">${open.size ? 'Collapse all' : 'Expand all'}</button>` : ''}${isAdmin() ? '<button class="sm" data-act="bulkFiled">Mark past returns as filed…</button>' : ''}</div></div>
     <div class="filters">
       <select data-change="dueRange">${(() => {
@@ -582,12 +608,12 @@ function vDue() {
     ${list.map(g => `<div class="citem ${open.has(g.name) || allOpen ? 'open' : ''} ${g.od ? 'has-od' : ''}">
       <button class="chead" data-act="dueToggle" data-k="${esc(g.name)}">
         <span class="cname">${esc(g.name)}</span>
-        <span class="ccount"><b>${g.clients}</b> client${g.clients === 1 ? '' : 's'} pending${g.rs.length > g.clients ? ` <span class="muted">(${g.rs.length} returns)</span>` : ''}</span>
-        <span class="cdue">${g.od ? `<span class="tag red">${g.od} overdue</span>` : `next ${fmtDate(g.first)}`}</span>
+        <span class="ccount"><b>${g.clients}</b> client${g.clients === 1 ? '' : 's'} ${f.done ? 'done' : 'pending'}${g.rs.length > g.clients ? ` <span class="muted">(${g.rs.length} returns)</span>` : ''}</span>
+        <span class="cdue">${f.done ? `due ${fmtDate(g.first)}` : g.od ? `<span class="tag red">${g.od} overdue</span>` : `next ${fmtDate(g.first)}`}</span>
         <span class="chev">▾</span>
       </button>
       ${open.has(g.name) || allOpen ? panel(g) : ''}
-    </div>`).join('') || '<p class="muted empty">Nothing pending. 🎉</p>'}
+    </div>`).join('') || (f.done ? '<p class="muted empty">Nothing filed in this period yet.</p>' : '<p class="muted empty">Nothing pending. 🎉</p>')}
     </div>
     <p class="muted small">Statutory due dates. Check CBIC / CBDT / MCA notifications for extensions.</p>
   </section>`;
@@ -1254,6 +1280,8 @@ const A = {
   dueColAll: ({ k }) => { delete S.dueCol.f[k]; render(); },
   dueColClear: () => { S.dueCol = { sort: S.dueCol?.sort || null, f: {} }; render(); },
   dueToggle: ({ k }) => { const o = S.dueOpen ||= new Set(); if (o.has('*')) { o.delete('*'); for (const b of document.querySelectorAll('[data-act=dueToggle]')) o.add(b.dataset.k); } o.has(k) ? o.delete(k) : o.add(k); render(); },
+  dueDone: ({ k }) => { S.dueF ||= { range: dueDefault(), form: '', q: '', history: false }; S.dueF.done = true; S.dueF.range = thisMonthKey(); S.dueF.pick = false; S.dueDay = ''; S.dueOpen = new Set(k ? [k] : []); S.view = 'due'; render(); },
+  dueMode: ({ v }) => { S.dueF ||= { range: dueDefault(), form: '', q: '', history: false }; S.dueF.done = !!v; S.dueOpen = new Set(); S.dueDay = ''; render(); },
   dueAll: ({ v }) => { S.dueOpen = new Set(); if (v) for (const b of document.querySelectorAll('[data-act=dueToggle]')) S.dueOpen.add(b.dataset.k); render(); },
   mixOpen: ({ k }) => { S.consF = k; S.search = ''; S.sel = new Set(); S.view = 'clients'; render(); },
   cliShow: ({ v }) => { S.showF = v; S.stateF = ''; S.consF = ''; S.view = 'clients'; render(); },
@@ -1300,7 +1328,7 @@ const A = {
     const catId = cp.type === 'flag' ? ({ tds: 'TDSRET', epf: 'EPF', esic: 'ESIC', pt: 'PT', lwf: 'LWF', audit: '3CD', advTax: 'ADV' })[cp.id] : cp.type === 'service' ? (cp.id.startsWith('svc:') ? 'GEN' : cp.id) : cp.id;
     A.newTask({ multi: ids, cat: catId, title: cp.id.startsWith('svc:') ? cp.name : '' });
   },
-  dueOpenForm: ({ k }) => { S.dueF ||= { range: dueDefault(), form: '', q: '', history: false }; S.dueF.form = k; S.dueF.q = ''; S.view = 'due'; render(); },
+  dueOpenForm: ({ k }) => { S.dueF ||= { range: dueDefault(), form: '', q: '', history: false }; S.dueF.form = k; S.dueF.q = ''; S.dueF.done = false; S.view = 'due'; render(); },
   gqOpen: ({ id }) => { S.gq = ''; guard(async () => { await openClient(id, 'master'); render(); }); },
   gqLogin: ({ id }) => { S.gq = ''; guard(async () => { await openClient(id, 'logins'); render(); }); },
   gqTask: ({ id }) => { S.gq = ''; A.openTask({ id }); },
