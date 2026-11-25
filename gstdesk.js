@@ -292,7 +292,7 @@ export function initGstDesk(ctx) {
     ['Import from GST portal', 'Logs in (you type the CAPTCHA), reads the client’s profile and fills names, address, partners/directors, activities, HSN/SAC and jurisdiction.'],
     ['GST registration', 'Fills the new-registration forms on reg.gst.gov.in tab by tab; you type every CAPTCHA/OTP and submit yourself.'],
     ['Bulk return downloads', 'GSTR-1 (PDF/JSON), GSTR-2B (Excel/JSON) and GSTR-3B (PDF) for many clients and months, saved as Downloads/GST Desk/<Client>/<FY>/.'],
-    ['Tally & GST work', 'Reads TallyPrime over port 9000: registers, GSTR-1 JSON, 3B working, 2B and GSTR-1 reconciliation in Excel.'],
+    ['Tally & GST work', 'Reads TallyPrime over port 9000: registers, GSTR-1 JSON, 3B working, 2B and GSTR-1 reconciliation, GSTR-9 / 9C annual working in Excel.'],
   ];
   // Settings → "GST Desk extension": install / download / update / link folder
   /* ---------- CA Desk Bridge (Windows desktop app, like a DSC utility) ---------- */
