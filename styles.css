@@ -763,3 +763,13 @@ body.dragging-gst .dropbar{display:flex}
 .bs-line{flex-wrap:wrap;gap:6px 10px;align-items:center}.bs-i{font-size:13px;white-space:nowrap}
 .citem.todo .chead{cursor:default}
 .pd{background:#E0F2FE;color:#0369A1}
+
+/* four verticals – one dropdown at the top of the menu */
+.side .vsel{position:relative;display:flex;align-items:center;margin:0 0 14px;border:1px solid var(--ink-800);border-radius:10px;background:var(--ink-800)}
+.side .vsel:hover{border-color:var(--saffron)}
+.side .vsel-ic{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:26px;height:26px;border-radius:7px;background:var(--saffron);color:var(--ink-900);display:grid;place-items:center;pointer-events:none}
+.side .vsel-ic svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.side .vsel select{appearance:none;-webkit-appearance:none;width:100%;background:transparent;border:0;color:#fff;font:inherit;font-weight:600;font-size:14px;padding:11px 30px 11px 46px;cursor:pointer;outline:none}
+.side .vsel select option{color:#111;background:#fff}
+.side .vsel-car{position:absolute;right:11px;color:var(--ink-300);pointer-events:none;font-size:12px}
+.side .nav-sp{flex:1}

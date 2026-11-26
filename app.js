@@ -247,6 +247,7 @@ async function openClient(cid, tab) {
 /* ================= rendering ================= */
 const NAV_ICON = {
   dashboard: '<path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 4v4h6V4z"/>',
+  payroll: '<rect x="3.5" y="6" width="17" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6.5 9v6M17.5 9v6"/>',
   bstat: '<path d="M4 5h7a2 2 0 0 1 2 2v12a2 2 0 0 0-2-2H4zM20 5h-7a2 2 0 0 0-2 2v12a2 2 0 0 1 2-2h7z"/><path d="M15 11l1.5 1.5L19 10"/>',
   due: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
   tasks: '<path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>',
@@ -258,12 +259,36 @@ const NAV_ICON = {
   gstdesk: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h6M15 15.5l1.5 1.5 3-3"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
 };
-const PAGE_TITLE = { dashboard: 'Dashboard', due: 'To-do list', tasks: 'Tasks', task: 'Task', workflow: 'Work categories', clients: 'Masters', client: 'Master', books: 'Clients — bookkeeping', bstat: 'Books status', comps: 'Compliances', dsc: 'DSC register', gstdesk: 'GST Desk', import: 'Excel import', settings: 'Settings' };
+// Four verticals: CA Desk (CRM) · GST Desk · Books · Vetan Payroll – each with its own menu
+const VERTS = [
+  ['crm', 'CA Desk (CRM)', '', ['dashboard', 'clients', 'due', 'tasks', 'comps', 'dsc', 'import'], 'dashboard'],
+  ['gst', 'GST Desk', '', ['gstdesk'], 'gstdesk'],
+  ['books', 'Books', '', ['books', 'bstat'], 'books'],
+  ['pay', 'Vetan Payroll', '', ['payroll'], 'payroll'],
+];
+const NAV_LABEL = { dashboard: 'Dashboard', clients: 'Masters', due: 'To-do list', tasks: 'Tasks', comps: 'Compliances', dsc: 'DSC register', import: 'Excel import', gstdesk: 'GST Desk', books: 'Bookkeeping', bstat: 'Books status', payroll: 'Vetan Payroll' };
+const VIEW_VERT = v => (VERTS.find(x => x[3].includes(v) || (v === 'client' && x[0] === 'crm') || (['task', 'workflow'].includes(v) && x[0] === 'crm')) || [])[0];
+const curVert = () => {
+  if (!S.vertInit) { S.vertInit = true; let sv = ''; try { sv = localStorage.getItem('cad-vert') || ''; } catch { /* private mode */ }
+    const x = VERTS.find(v => v[0] === sv); if (x && S.view === 'dashboard' && sv !== 'crm') S.view = x[4]; }
+  const v = VIEW_VERT(S.view); if (v) S.vert = v; if (!S.vert) { try { S.vert = localStorage.getItem('cad-vert') || 'crm'; } catch { S.vert = 'crm'; } } if (!VERTS.some(x => x[0] === S.vert)) S.vert = 'crm'; try { localStorage.setItem('cad-vert', S.vert); } catch { /* private mode */ } return S.vert; };
+const PAYROLL_URL = () => { try { return localStorage.getItem('cad-payroll-url') || 'https://smishra724.github.io/vetan-payroll/'; } catch { return 'https://smishra724.github.io/vetan-payroll/'; } };
+function vPayroll() {
+  return `<section class="card"><div class="row-between wrap"><div><h2>Vetan Payroll</h2><p class="muted">Payroll &amp; HR for your clients – salary processing, payslips, PF / ESIC / PT and Form 16. It opens in its own tab.</p></div>
+      <div class="btns"><a class="btn primary" href="${esc(PAYROLL_URL())}" target="_blank" rel="noopener">Open Vetan Payroll ↗</a></div></div>
+    <div class="grid mt" style="max-width:720px"><label class="span2">Vetan Payroll address<input id="payUrl" value="${esc(PAYROLL_URL())}" placeholder="https://…"></label>
+      <div class="span2 btns"><button class="sm" data-act="payUrlSave">Save address</button></div></div>
+    <p class="muted small mt">Payroll-related due dates (payslips, EPF, ESIC, PT, LWF) stay in CA Desk → To-do list.</p></section>`;
+}
+const PAGE_TITLE = { payroll: 'Vetan Payroll',  dashboard: 'Dashboard', due: 'To-do list', tasks: 'Tasks', task: 'Task', workflow: 'Work categories', clients: 'Masters', client: 'Master', books: 'Bookkeeping', bstat: 'Books status', comps: 'Compliances', dsc: 'DSC register', gstdesk: 'GST Desk', import: 'Excel import', settings: 'Settings' };
 function render() {
   if (!S.profile) return;
-  const items = isAdmin() ? [['dashboard', 'Dashboard'], ['clients', 'Masters'], ['books', 'Clients'], ['bstat', 'Books status'], ['due', 'To-do list'], ['tasks', 'Tasks'], ['comps', 'Compliances'], ['dsc', 'DSC register'], ['gstdesk', 'GST Desk'], ['import', 'Excel import'], ['settings', 'Settings']] : [];
+  const vert = curVert();
+  const items = isAdmin() ? VERTS.find(x => x[0] === vert)[3].map(v => [v, NAV_LABEL[v]]) : [];
   const active = v => S.view === v || (v === 'tasks' && ['task', 'workflow'].includes(S.view)) || (v === 'clients' && S.view === 'client');
-  const nav = items.map(([v, l]) => `<button class="nav ${active(v) ? 'on' : ''}" data-act="go" data-v="${v}"><svg viewBox="0 0 24 24" aria-hidden="true">${NAV_ICON[v]}</svg><span>${l}</span></button>`).join('');
+  const navBtn = ([v, l]) => `<button class="nav ${active(v) ? 'on' : ''}" data-act="go" data-v="${v}"><svg viewBox="0 0 24 24" aria-hidden="true">${NAV_ICON[v]}</svg><span>${l}</span></button>`;
+  const verts = `<label class="vsel"><span class="vsel-ic"><svg viewBox="0 0 24 24" aria-hidden="true">${NAV_ICON[VERTS.find(x => x[0] === vert)[4]]}</svg></span><select data-change="vertSel" aria-label="Switch app">${VERTS.map(([id, name, sub]) => `<option value="${id}" ${id === vert ? 'selected' : ''}>${esc(name)}${sub ? ' — ' + esc(sub) : ''}</option>`).join('')}</select><span class="vsel-car">▾</span></label>`;
+  const nav = verts + items.map(navBtn).join('') + `<div class="nav-sp"></div>` + (isAdmin() ? navBtn(['settings', 'Settings']) : '');
   const who = S.profile.name || S.profile.email || '';
   const ini = who.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
   $('#app').innerHTML = `
@@ -338,6 +363,7 @@ function body() {
     case 'comps': return vComps();
     case 'dsc': return DSC.view();
     case 'gstdesk': return GD.view();
+    case 'payroll': return vPayroll();
     case 'books': return BK.view();
     case 'bstat': return BS.view();
     case 'tasks': return T.vTasks();
@@ -1298,6 +1324,8 @@ const A = {
     const email = prompt('Enter your login email. A password reset link will be sent.');
     if (email) guard(() => sendPasswordResetEmail(auth, email.trim()), 'Reset link sent — check your inbox.');
   },
+  vert: ({ id }) => { const x = VERTS.find(v => v[0] === id); if (!x) return; S.vert = id; A.go({ v: x[4] }); },
+  payUrlSave: () => { const u = document.getElementById('payUrl')?.value.trim(); if (!/^https?:\/\//.test(u || '')) return toast('Enter the full address, starting with https://'); try { localStorage.setItem('cad-payroll-url', u); } catch { /* private mode */ } toast('Saved'); render(); },
   go: ({ v }) => { S.fab = false; if (v === 'due') { S.dueDay = ''; if (S.dueOpen?.has('*')) S.dueOpen = new Set(); } S.view = v; window.scrollTo(0, 0); S.importRows = v === 'import' ? S.importRows : null; render(); if (v === 'settings') loadStaff(); },
   open: ({ id, tab }) => guard(async () => { await openClient(id, tab || 'master'); render(); }),
   tab: ({ t }) => { S.tab = t; render(); },
@@ -1870,6 +1898,7 @@ const C = {
     render();
   },
   dueF: el => { S.dueF[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; render(); },
+  vertSel: el => A.vert({ id: el.value }),
   todoDone: el => guard(async () => { const x = S.tasks.find(t => t.id === el.dataset.id); if (!x) return; await T.patch(x.id, { status: 'Completed' }, `Status: ${x.status || 'Not started'} → Completed`); render(); }, 'Done ✓'),
   portalPick: el => { const u = el.form.elements.url; u.value = portalByKey(el.value).url; },
   uploadDocs: el => guard(async () => {
