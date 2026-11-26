@@ -762,3 +762,4 @@ body.dragging-gst .dropbar{display:flex}
 .bs-row{display:flex;gap:8px;margin:6px 0}.bs-row input:first-child{flex:1}
 .bs-line{flex-wrap:wrap;gap:6px 10px;align-items:center}.bs-i{font-size:13px;white-space:nowrap}
 .citem.todo .chead{cursor:default}
+.pd{background:#E0F2FE;color:#0369A1}

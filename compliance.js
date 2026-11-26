@@ -115,7 +115,7 @@ export function dueItems(c, from, to) {
           gstAdd(r, `GSTR3B-${id}`, 'GSTR-3B (QRMP)', qLabel, nx(QRMP_22.has(r.gstin.slice(0, 2)) ? 22 : 24));
         } else {
           gstAdd(r, `IFF-${id}`, 'IFF', per, nx(13), 'Optional');
-          gstAdd(r, `PMT06-${id}`, 'PMT-06 tax payment', per, nx(25));
+          // PMT-06 is not tracked separately: the tax payment is a status of the GSTR-3B task (Challan generated / Challan paid)
         }
       } else {
         gstAdd(r, `GSTR1-${id}`, 'GSTR-1', per, nx(11));

@@ -1099,7 +1099,7 @@ const pickClient = v => { const s = (v || '').trim().toLowerCase(); if (!s) retu
 // 'service' = work you do that has no statutory due date (stored in client.services)
 const COMPS = [
   { id: 'GSTR1', name: 'GSTR-1 / IFF', type: 'auto', codes: ['GSTR1', 'IFF'], grp: 'GST' },
-  { id: 'GSTR3B', name: 'GSTR-3B / PMT-06', type: 'auto', codes: ['GSTR3B', 'PMT06'], grp: 'GST' },
+  { id: 'GSTR3B', name: 'GSTR-3B (incl. tax payment)', type: 'auto', codes: ['GSTR3B', 'PMT06'], grp: 'GST' },
   { id: 'CMP08', name: 'CMP-08 (composition)', type: 'auto', codes: ['CMP08'], grp: 'GST' },
   { id: 'GSTR9', name: 'GSTR-9 annual return', type: 'auto', codes: ['GSTR9'], grp: 'GST' },
   { id: 'GSTR4', name: 'GSTR-4 annual return', type: 'auto', codes: ['GSTR4'], grp: 'GST' },
@@ -2206,7 +2206,7 @@ function setGstFreq(cid, gstin, freq) {
   const regs = regsOf(c).map(x => ({ ...x })), r = regs.find(x => x.gstin === gstin);
   if (!r) return toast('GSTIN not found on this client.');
   if ((r.gstFreq || 'Monthly') === freq) return toast(`${dispName(c)} (${gstin}) is already ${freq}.`);
-  if (!confirm(`Change GST filing of ${dispName(c)} — ${gstin}\nfrom ${r.gstFreq || 'Monthly'} to ${freq}?\n\n${freq === 'QRMP' ? 'IFF (optional) in the first two months of each quarter, GSTR-1 and GSTR-3B quarterly, PMT-06 monthly.' : 'GSTR-1 and GSTR-3B every month.'}`)) return;
+  if (!confirm(`Change GST filing of ${dispName(c)} — ${gstin}\nfrom ${r.gstFreq || 'Monthly'} to ${freq}?\n\n${freq === 'QRMP' ? 'IFF (optional) in the first two months of each quarter, GSTR-1 and GSTR-3B quarterly (monthly tax payment is tracked on the GSTR-3B task as Challan generated / Challan paid).' : 'GSTR-1 and GSTR-3B every month.'}`)) return;
   r.gstFreq = freq;
   guard(async () => {
     await tagLegacyCreds(cid, c);

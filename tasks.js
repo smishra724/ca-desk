@@ -3,7 +3,11 @@ import { dispName } from './compliance.js';
 // tasks with checklist progress, board & list views, reassign log, notes, timesheet, task-wise fees,
 // bulk generation from the compliance calendar, and a read-only view for clients.
 
-const STATUSES = ['Not started', 'In progress', 'Waiting on client', 'Under review', 'Completed', 'Not required', 'Cancelled'];
+const STATUSES = ['Not started', 'In progress', 'Waiting on client', 'Under review', 'Challan generated', 'Challan paid', 'Completed', 'Not required', 'Cancelled'];
+// GST payment steps – shown only on GSTR-3B (and CMP-08) tasks; PMT-06 is not a separate task any more
+const PAY_ONLY = ['Challan generated', 'Challan paid'];
+const isPayTask = x => /^(GSTR3B|CMP08)/i.test(String((x && (x.filingKey || x.key || x.catId)) || x || ''));
+const statusesFor = x => isPayTask(x) ? STATUSES : STATUSES.filter(s => !PAY_ONLY.includes(s));
 const CLOSED = ['Completed', 'Not required', 'Cancelled'];
 const DONE_ST = { filed: 1, na: 1 };
 const BOARD = STATUSES.filter(s => s !== 'Cancelled' && s !== 'Not required');
@@ -29,7 +33,6 @@ export const DEFAULT_WORKFLOW = {
         [['Collect sales data', 20], ['Reconcile with books', 20], ['Prepare & upload', 40], ['File with EVC/DSC', 20]], ['GSTR-1 ARN']),
       cat('GSTR3B', 'GSTR-3B', ['Purchase register', 'Expense bills'],
         [['Download GSTR-2B', 15], ['ITC reconciliation', 35], ['Compute liability', 20], ['Payment challan', 15], ['File return', 15]], ['GSTR-3B ARN', 'Payment challan']),
-      cat('PMT06', 'GST payment (PMT-06)', [], [['Compute liability', 50], ['Generate & pay challan', 50]], ['Challan']),
       cat('CMP08', 'CMP-08', ['Turnover for the quarter'], [['Compute tax', 50], ['File CMP-08', 50]], ['CMP-08 ARN']),
       cat('GSTR9', 'GSTR-9 annual return', ['Books of accounts', 'Monthly returns'], [['Reconcile returns with books', 50], ['Prepare GSTR-9', 30], ['File', 20]], ['GSTR-9 ARN']),
       cat('GSTR4', 'GSTR-4 annual return', ['Purchase details'], [['Prepare', 60], ['File', 40]], ['GSTR-4 ARN']),
@@ -122,7 +125,7 @@ export function initTasks(ctx) {
   T.statusSelect = (r) => {
     const t = T.taskFor(r.c.id, r.key, r.altKey), cur = t?.status || '';
     return `<select class="st-sel ${cur ? STC[cur] : 'ns'}" data-change="dueStatus" data-cid="${r.c.id}" data-key="${esc(r.key)}" data-alt="${esc(r.altKey || '')}" data-form="${esc(r.form)}" data-period="${esc(r.period)}" data-due="${isoLocal(r.due)}">
-      ${cur ? '' : '<option value="">No task yet</option>'}${STATUSES.map(x => `<option ${x === cur ? 'selected' : ''}>${x}</option>`).join('')}</select>
+      ${cur ? '' : '<option value="">No task yet</option>'}${statusesFor(t || r.key).map(x => `<option ${x === cur ? 'selected' : ''}>${x}</option>`).join('')}</select>
       ${t ? `<a href="#" class="tiny tlink" data-act="openTask" data-id="${t.id}">${tno(t)}${t.assignee ? ' · ' + esc(t.assignee) : ''}</a>` : ''}`;
   };
   T.docsFor = (cid, key) => { const t = T.taskFor(cid, key); if (t) return (t.list?.docs || []).filter((d, i) => !t.done?.docs?.[i]); return findCat(catForKey(key))?.c.docs || []; };
@@ -316,7 +319,7 @@ export function initTasks(ctx) {
 
   // client name as shown everywhere (proprietorships by firm name)
   const cn = t => { const c = S.clients.find(x => x.id === t.clientId) || S.exClients?.find(x => x.id === t.clientId); return c ? dispName(c) : (t.clientName || ''); };
-  const STC = { 'Not started': 'ns', 'In progress': 'ip', 'Waiting on client': 'wc', 'Under review': 'ur', 'Completed': 'cp', 'Not required': 'nr', 'Cancelled': 'cx' };
+  const STC = { 'Not started': 'ns', 'In progress': 'ip', 'Waiting on client': 'wc', 'Under review': 'ur', 'Challan generated': 'ur', 'Challan paid': 'pd', 'Completed': 'cp', 'Not required': 'nr', 'Cancelled': 'cx' };
   const daysTo = d => d ? Math.round((new Date(d + 'T00:00') - new Date(todayISO() + 'T00:00')) / 864e5) : null;
   const dueBadge = t => {
     if (!t.due || ['Completed', 'Not required', 'Cancelled'].includes(t.status)) return '';
@@ -336,6 +339,7 @@ export function initTasks(ctx) {
       ['In progress', '', 'In progress', open.filter(t => t.status === 'In progress').length, 'c-ip'],
       ['Waiting on client', '', 'Waiting on client', open.filter(t => t.status === 'Waiting on client').length, 'c-wc'],
       ['Under review', '', 'Under review', open.filter(t => t.status === 'Under review').length, 'c-ur'],
+      ...PAY_ONLY.filter(s => open.some(t => t.status === s)).map(s => [s, '', s, open.filter(t => t.status === s).length, 'c-ur']),
       ['Completed', '', 'Completed', sc.filter(t => t.status === 'Completed').length, 'c-cp'],
     ];
     const remN = S.tasks.filter(t => t.kind === 'reminder' && !['Completed', 'Not required', 'Cancelled'].includes(t.status)).length;
@@ -352,7 +356,7 @@ export function initTasks(ctx) {
     const stOpts = cur => STATUSES.map(x => `<option ${x === cur ? 'selected' : ''}>${x}</option>`).join('');
     let bodyHtml = '';
     if (f.mode === 'board') {
-      bodyHtml = `<div class="board">${BOARD.filter(s => f.status === 'open' ? s !== 'Completed' : true).map(s => {
+      bodyHtml = `<div class="board">${BOARD.filter(s => (f.status === 'open' ? s !== 'Completed' : true) && (!PAY_ONLY.includes(s) || list.some(x => x.status === s))).map(s => {
         const col = list.filter(t => t.status === s);
         return `<div class="col" data-status="${s}"><div class="col-h"><span class="st ${STC[s]}">${s}</span><span class="muted">${col.length}</span></div>${col.map(card).join('') || '<div class="muted tiny empty">Drop tasks here</div>'}</div>`;
       }).join('')}</div>`;
@@ -452,7 +456,7 @@ export function initTasks(ctx) {
         <div class="dmain"><a href="#" data-act="openTask" data-id="${t.id}"><b>${esc(cn(t) || t.title)}</b></a><div class="small">${esc(cn(t) ? t.title : '')}${t.period ? ` · ${esc(shortPer(t.period))}` : ''} <span class="mono tiny muted">${tno(t)}</span></div>
           ${carry ? `<div class="tiny amber-t">Carried over from ${isoToDisp(t.planOn)}</div>` : ''}</div>
         <div class="dside">${t.due ? `<span class="small">${isoToDisp(t.due)}</span> ${dueBadge(t)}` : ''}
-          ${isAdmin() ? `<select class="st-sel ${STC[t.status]}" data-change="tstat" data-id="${t.id}">${STATUSES.map(x => `<option ${x === t.status ? 'selected' : ''}>${x}</option>`).join('')}</select>` : ''}
+          ${isAdmin() ? `<select class="st-sel ${STC[t.status]}" data-change="tstat" data-id="${t.id}">${statusesFor(t).map(x => `<option ${x === t.status ? 'selected' : ''}>${x}</option>`).join('')}</select>` : ''}
           ${!CLOSED.includes(t.status) ? `<button class="sm" data-act="dayMove" data-id="${t.id}" data-to="next" title="Move to the next day">→ ${day === today ? 'Tomorrow' : 'Next day'}</button>` : ''}
           <button class="icon" data-act="dayDrop" data-id="${t.id}" title="Remove from this day">✕</button></div></div>`;
     // suggestions: not yet planned for any future day
@@ -551,7 +555,7 @@ export function initTasks(ctx) {
       </section>
       <section class="card">
         ${adm ? `<form data-form="taskEdit" class="grid">
-          <label>Status<select name="status">${STATUSES.map(s => `<option ${s === t.status ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
+          <label>Status<select name="status">${statusesFor(t).map(s => `<option ${s === t.status ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
           <label>Assigned to<select name="assignee">${staffOpts(t.assignee)}</select></label>
           <label>Due date<input type="date" name="due" value="${esc(t.due)}"></label>
           <label>Priority<select name="priority">${PRIORITIES.map(s => `<option ${s === t.priority ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
