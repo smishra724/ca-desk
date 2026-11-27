@@ -773,3 +773,5 @@ body.dragging-gst .dropbar{display:flex}
 .side .vsel select option{color:#111;background:#fff}
 .side .vsel-car{position:absolute;right:11px;color:var(--ink-300);pointer-events:none;font-size:12px}
 .side .nav-sp{flex:1}
+.bk-zoho{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:12px;padding:10px 12px;border:1px solid var(--line,#e3e7ee);border-radius:10px;background:#fafbfd}
+.bk-zoho input[type=date]{padding:4px 6px}

@@ -6,6 +6,7 @@
 // 3. Review every entry (document beside the voucher), approve, then post to Tally. Corrections are learnt.
 import { extractText, toISO } from './extract.js';
 import { tallyPost, tallyEnv, tallyParse, tallyEsc, tallyImport, tallyCompanies } from './tally.js';
+import { zohoReady, zohoExchange, zohoOrgs, zohoGet, zohoList } from './zoho.js';
 
 const KINDS = [['purchase', 'Purchase bill'], ['sales', 'Sales invoice'], ['expense', 'Expense / receipt'], ['bank', 'Bank statement'], ['contra', 'Contra (cash / bank transfer)']];
 const VTYPES = ['Purchase', 'Sales', 'Payment', 'Receipt', 'Contra', 'Journal', 'Credit Note', 'Debit Note'];
@@ -91,9 +92,10 @@ export function initBooks(ctx) {
 
   async function load(cid) {
     const s = st(); s.cid = cid; s.loading = true; s.sel = new Set(); render();
-    const [m, e] = await Promise.all([getDoc(doc(db, 'clients', cid, 'booksmeta', 'main')), getDocs(collection(db, 'clients', cid, 'books'))]);
+    const [m, e, z] = await Promise.all([getDoc(doc(db, 'clients', cid, 'booksmeta', 'main')), getDocs(collection(db, 'clients', cid, 'books')), getDoc(doc(db, 'clients', cid, 'booksmeta', 'zoho')).catch(() => null)]);
     if (s.cid !== cid) return;
     s.meta = m.exists() ? m.data() : {};
+    s.zoho = z && z.exists() ? z.data() : null;
     s.entries = e.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.v?.date || '').localeCompare(a.v?.date || '') || (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
     s.loading = false; render();
   }
@@ -273,7 +275,7 @@ export function initBooks(ctx) {
     } else {
       const taxes = [[g.cgst, v.cgst], [g.sgst, v.sgst], [g.igst, v.igst], [g.cess, v.cess]].filter(([n, a]) => n && +a);
       const sales = /sales|credit note/i.test(v.type) && e.kind === 'sales';
-      const s = sales ? 1 : -1; // purchase/expense: Dr expense & input tax, Cr party
+      const s = sales ? (/credit note/i.test(v.type) ? -1 : 1) : -1; // sales: Cr sales & output tax, Dr party (credit note: the other way); purchase/expense: Dr expense & input tax, Cr party
       const partyLed = v.party || v.newParty?.name;
       lines.push(E(partyLed, -s * v.total, /sundry/i.test((led(partyLed) || {}).r || v.newParty?.group || '') ? bill(v.no, -s * v.total) : ''));
       lines.push(E(v.ledger, s * v.taxable));
@@ -334,6 +336,80 @@ export function initBooks(ctx) {
     if (Object.keys(patch).length) await saveMeta(patch);
   }
 
+  /* ---------- Zoho Books → entries to review ---------- */
+  const zcfg = () => st().zoho;
+  const saveZoho = async patch => { const s = st(); s.zoho = { ...(s.zoho || {}), ...patch }; await setDoc(doc(db, 'clients', s.cid, 'booksmeta', 'zoho'), { ...patch, updatedAt: serverTimestamp() }, { merge: true }); };
+  function zTaxes(d) {
+    const o = { cgst: 0, sgst: 0, igst: 0, cess: 0 };
+    for (const x of d.taxes || []) { const n = String(x.tax_name || ''), a = +x.tax_amount || 0; if (/igst/i.test(n)) o.igst += a; else if (/cgst/i.test(n)) o.cgst += a; else if (/sgst|utgst/i.test(n)) o.sgst += a; else if (/cess/i.test(n)) o.cess += a; else if (/gst/i.test(n)) o.igst += a; }
+    for (const k in o) o[k] = r2(o[k]);
+    return o;
+  }
+  // a Zoho invoice / credit note in the same shape as a read bill, so the usual matching (party, sales ledger, GST ledgers) applies
+  function zDraft(d, kind) {
+    const c = client(), own = ownGstins(c), tx = zTaxes(d), round = r2(d.adjustment || 0), total = r2(d.total);
+    const taxable = r2(total - tx.cgst - tx.sgst - tx.igst - tx.cess - round);
+    const x = { doc_type: 'invoice', invoice_no: d.invoice_number || d.creditnote_number || '', invoice_date: d.date || '', buyer_name: d.customer_name || '', buyer_gstin: (d.gst_no || '').toUpperCase(), seller_gstin: own[0] || '', taxable, ...tx, round_off: round, total, lines: (d.line_items || []).map(l => ({ description: l.name || l.description || '', hsn: l.hsn_or_sac || '', amount: l.item_total })) };
+    const dr = draftFromInvoice(x, 'sales', c);
+    if (kind === 'credit') { dr.v.type = 'Credit Note'; dr.v.narration = `Credit note ${x.invoice_no} to ${x.buyer_name}${d.reference_number ? ` against ${d.reference_number}` : ''}`; }
+    // the income account used in Zoho, when a Tally ledger has the same name
+    const acc = [...new Set((d.line_items || []).map(l => l.account_name).filter(Boolean))];
+    if (acc.length === 1) { const m = L().find(l => norm(l.n) === norm(acc[0])); if (m) dr.v.ledger = m.n; }
+    if (/overseas/i.test(d.gst_treatment || '')) dr.warn.push('Export invoice (overseas customer) – check the export sales ledger');
+    if (/sez/i.test(d.gst_treatment || '')) dr.warn.push('SEZ customer – check the ledger');
+    if (d.currency_code && d.currency_code !== 'INR') dr.warn.push(`Invoice in ${d.currency_code} (rate ${d.exchange_rate || '?'}) – amounts are in ${d.currency_code}; convert before posting`);
+    return { ...dr, ex: x };
+  }
+  function zPayment(p, gstOf) {
+    const bank = (() => { const want = toks(p.account_name || ''); const bl = L().filter(l => /bank accounts|bank od|bank occ|cash-in-hand/i.test(l.r));
+      let best = '', sc = 0; for (const l of bl) { const lt = toks(l.n); const h = want.filter(w => lt.includes(w)).length / Math.max(want.length || 1, lt.length || 1); if (h > sc) { sc = h; best = l.n; } }
+      return sc >= 0.5 ? best : st().bankLedger || ''; })();
+    let party = findParty(p.customer_name, gstOf[p.customer_id] || ''), newParty = null;
+    if (!party && p.customer_name) newParty = { name: p.customer_name.trim().replace(/\s+/g, ' ').toUpperCase(), group: 'Sundry Debtors', gstin: gstOf[p.customer_id] || '', state: '' };
+    const warn = []; if (!bank) warn.push(`Choose the bank ledger for Zoho account “${p.account_name || ''}”`); if (newParty) warn.push('New party ledger will be created under Sundry Debtors');
+    return { kind: 'bank', v: { type: 'Receipt', date: p.date, no: p.payment_number || p.reference_number || '', party: party || newParty?.name || '', newParty, ledger: bank, total: r2(p.amount), dir: 'in', narration: `Received from ${p.customer_name}${p.reference_number ? ' – ref ' + p.reference_number : ''}${p.payment_mode ? ' (' + p.payment_mode + ')' : ''}` }, warn };
+  }
+  async function zohoFetch(from, to, want) {
+    const s = st(), cfg = zcfg(); if (!cfg?.refreshToken) throw new Error('Connect Zoho Books first.');
+    const seen = new Set(s.entries.map(e => e.src?.zohoId).filter(Boolean));
+    let made = 0, skipped = 0; const gstOf = {};
+    const add = async (id, name, d) => { await addDoc(collection(db, 'clients', s.cid, 'books'), { src: { how: 'zoho', zohoId: id, name }, ex: d.ex || {}, kind: d.kind, v: d.v, warn: d.warn || [], status: 'review', createdAt: serverTimestamp() }); made++; };
+    for (const [what, kind, idk, label] of [['invoices', 'sales', 'invoice_id', 'invoice'], ['creditnotes', 'credit', 'creditnote_id', 'credit note']]) {
+      if (!want[what]) continue;
+      busy(true, `Zoho Books: listing ${what}…`);
+      const list = (await zohoList(cfg, what, from, to, n => busy(true, `Zoho Books: ${n} ${what} found…`))).filter(x => !/^(draft|void)$/i.test(x.status || ''));
+      let i = 0;
+      for (const x of list) {
+        i++; const zid = `${kind}:${x[idk]}`;
+        if (x.customer_id && x.gst_no) gstOf[x.customer_id] = x.gst_no;
+        if (seen.has(zid)) { skipped++; continue; }
+        busy(true, `Zoho Books: reading ${label} ${i} of ${list.length}…`);
+        const d = (await zohoGet(cfg, `${what}/${x[idk]}`))[what === 'invoices' ? 'invoice' : 'creditnote'];
+        if (d.customer_id && d.gst_no) gstOf[d.customer_id] = d.gst_no;
+        await add(zid, `Zoho ${label} ${d.invoice_number || d.creditnote_number || ''}`, zDraft(d, kind));
+      }
+    }
+    if (want.customerpayments) {
+      busy(true, 'Zoho Books: listing payments received…');
+      const list = await zohoList(cfg, 'customerpayments', from, to);
+      for (const p of list) { const zid = `rcpt:${p.payment_id}`; if (seen.has(zid)) { skipped++; continue; } await add(zid, `Zoho payment ${p.payment_number || ''}`, zPayment(p, gstOf)); }
+    }
+    await saveZoho({ lastFrom: from, lastTo: to, lastAt: new Date().toISOString() });
+    busy(false); await load(s.cid);
+    return { made, skipped };
+  }
+  function zohoRow() {
+    const z = zcfg(), s = st();
+    const t = new Date(), f = new Date(t.getFullYear(), t.getMonth() - 1, 1), iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const from = s.zFrom || (z?.lastTo ? iso(new Date(new Date(z.lastTo).getTime() + 864e5)) : iso(f)), to = s.zTo || iso(t);
+    if (!z?.refreshToken) return `<div class="bk-zoho"><b>Zoho Books</b><span class="small muted">Bring this client's invoices, credit notes and payments from Zoho Books for review and posting to Tally.</span><button class="sm" data-act="bkZohoConnect">Connect Zoho Books</button></div>`;
+    return `<div class="bk-zoho"><b>Zoho Books</b><span class="small">${esc(z.orgName || 'Organisation ' + z.orgId)}${z.lastAt ? ` · last fetched ${isoToDisp(z.lastFrom)} – ${isoToDisp(z.lastTo)}` : ''}</span>
+      <label class="small">From <input type="date" id="bkZFrom" value="${from}"></label><label class="small">To <input type="date" id="bkZTo" value="${to}"></label>
+      <label class="chk small"><input type="checkbox" id="bkZInv" checked> Invoices</label><label class="chk small"><input type="checkbox" id="bkZCn" checked> Credit notes</label><label class="chk small"><input type="checkbox" id="bkZPay" ${z.payments === false ? '' : 'checked'}> Payments received</label>
+      <button class="sm primary" data-act="bkZohoFetch" ${m().syncedAt ? '' : 'title="Sync from Tally first so parties and ledgers match"'}>Fetch from Zoho</button><button class="sm ghost" data-act="bkZohoConnect" title="Zoho connection">⚙</button></div>`;
+  }
+  const m = () => meta();
+
   /* ---------- views ---------- */
   B.view = () => {
     const s = st(), list = S.clients.filter(c => !c.exClient).sort((a, b) => dispName(a).localeCompare(dispName(b)));
@@ -365,6 +441,7 @@ export function initBooks(ctx) {
           <select id="bkBank" data-change="bkBank" title="Bank ledger for statements"><option value="">Bank ledger for statements…</option>${banks.map(l => `<option ${l.n === s.bankLedger ? 'selected' : ''}>${esc(l.n)}</option>`).join('')}</select>
           <label class="tf-drop bk-drop">+ Upload bills, receipts, statements<input type="file" multiple accept=".pdf,image/*" data-change="bkFiles"></label>
         </div>
+        ${zohoRow()}
         ${m.syncedAt ? '' : '<p class="small amber-t">Sync from Tally first — entries are matched to your ledgers and to how each party was posted before.</p>'}
       </div>
       <div class="card">
@@ -375,7 +452,7 @@ export function initBooks(ctx) {
           <td class="nowrap">${isoToDisp(v.date) || '<span class="red">—</span>'}</td><td>${esc(v.type || '')}${e.kind === 'bank' ? `<div class="tiny muted">${v.dir === 'in' ? 'money in' : 'money out'}</div>` : ''}</td>
           <td><a href="#" data-act="bkEdit" data-id="${e.id}"><b>${esc(v.party || v.newParty?.name || '— choose —')}</b></a>${v.newParty ? ' <span class="tag amber">new ledger</span>' : ''}${v.no ? `<div class="tiny muted">${e.kind === 'bank' ? 'Ref' : 'Bill'} ${esc(v.no)}</div>` : ''}${e.kind === 'bank' ? `<div class="tiny muted">${esc((v.narration || '').slice(0, 60))}</div>` : ''}</td>
           <td class="small">${esc(v.ledger || '—')}</td><td class="num">${inr(v.total)}</td>
-          <td class="small"><a href="#" data-act="bkDoc" data-id="${e.id}">${esc((e.src?.name || '').slice(0, 26))}</a><div class="tiny muted">${e.src?.how === 'ai' ? 'read by AI' : e.src?.how === 'free' ? 'free reader' : e.src?.how === 'failed' ? 'not read' : ''}</div></td>
+          <td class="small">${e.src?.how === 'zoho' ? `${esc((e.src.name || '').slice(0, 30))}<div class="tiny muted">from Zoho Books</div>` : `<a href="#" data-act="bkDoc" data-id="${e.id}">${esc((e.src?.name || '').slice(0, 26))}</a><div class="tiny muted">${e.src?.how === 'ai' ? 'read by AI' : e.src?.how === 'free' ? 'free reader' : e.src?.how === 'failed' ? 'not read' : ''}</div>`}</td>
           <td class="small">${e.status === 'posted' ? `<span class="tag green">In Tally</span>` : e.msg ? `<span class="red">${esc(e.msg)}</span>` : p.length ? `<span class="amber-t">Missing: ${esc(p.slice(0, 3).join(', '))}</span>` : (e.warn || []).length ? `<span class="amber-t">${esc(e.warn[0])}</span>` : '<span class="tag green">OK</span>'}</td></tr>`; }).join('')
           || `<tr><td colspan="8" class="empty muted">${tab === 'review' ? 'Nothing to review. Upload bills, receipts or a bank statement above.' : tab === 'ready' ? 'Approve entries in “To review” to post them.' : tab === 'posted' ? 'Nothing posted yet.' : 'No errors.'}</td></tr>`}
         </tbody></table></div></div>`;
@@ -418,7 +495,7 @@ export function initBooks(ctx) {
         </div>
         ${dl('bkAll', L().filter(l => !/duties/i.test(l.r)))}${dl('bkDuty', L().filter(l => /duties/i.test(l.r) || /gst/i.test(l.t)))}
         <div class="btns mt"><button class="primary" name="go" value="approve">Approve</button><button name="go" value="next">Approve &amp; next</button><button name="go" value="save">Save draft</button>
-          ${e.src?.how !== 'ai' && ls.get('cadesk.aiKey') ? `<button type="button" data-act="bkReAI" data-id="${id}">Read again with AI</button>` : ''}<button type="button" data-act="closeModal">Close</button></div>
+          ${e.src?.how !== 'ai' && e.src?.how !== 'zoho' && ls.get('cadesk.aiKey') ? `<button type="button" data-act="bkReAI" data-id="${id}">Read again with AI</button>` : ''}<button type="button" data-act="closeModal">Close</button></div>
         <p class="tiny muted">What you choose here is remembered for the next bill of this party${e.kind === 'bank' ? ' / similar narration' : ''}.</p>
       </form></div>`);
     document.querySelector('.modal-box')?.classList.add('wide');
@@ -468,6 +545,47 @@ export function initBooks(ctx) {
     guard(async () => { const n = await addFiles(files, kind); st().tab = 'review'; render(); toast(`${n} entr${n === 1 ? 'y' : 'ies'} ready to review`); });
   };
   A.bkEdit = ({ id }) => guard(() => openEdit(id));
+  A.bkZohoConnect = () => {
+    const z = zcfg() || {};
+    modal(`<h2>Connect Zoho Books — ${esc(dispName(client()))}</h2>
+      <ol class="small" style="margin:0 0 10px 18px;line-height:1.6">
+        <li>Sign in to this client's Zoho account and open <b>api-console.zoho.${z.dc === 'com' ? 'com' : 'in'}</b> → <b>Add Client</b> → <b>Self Client</b> → Create. Copy the <b>Client ID</b> and <b>Client Secret</b> below.</li>
+        <li>In the same Self Client open <b>Generate Code</b>, paste this scope, time 10 minutes, any description → Create, and copy the code:<br><code style="user-select:all">ZohoBooks.invoices.READ,ZohoBooks.creditnotes.READ,ZohoBooks.customerpayments.READ,ZohoBooks.settings.READ</code></li>
+        <li>Paste the code below and click Connect (within 10 minutes). CA Desk only <b>reads</b> from Zoho; nothing is changed there.</li></ol>
+      <form data-form="bkZohoSave" class="grid">
+        <label>Zoho data centre<select name="dc"><option value="in" ${z.dc !== 'com' ? 'selected' : ''}>India (zoho.in)</option><option value="com" ${z.dc === 'com' ? 'selected' : ''}>Global (zoho.com)</option></select></label><label></label>
+        <label class="span2">Client ID<input name="clientId" value="${esc(z.clientId || '')}" required autocomplete="off"></label>
+        <label class="span2">Client Secret<input name="clientSecret" type="password" value="${esc(z.clientSecret || '')}" required autocomplete="off"></label>
+        <label class="span2">Code${z.refreshToken ? ' <span class="muted small">(leave blank to keep the current connection)</span>' : ''}<input name="code" autocomplete="off" ${z.refreshToken ? '' : 'required'} placeholder="1000.xxxx…"></label>
+        ${z.orgs?.length > 1 ? `<label class="span2">Organisation<select name="orgId">${z.orgs.map(o => `<option value="${esc(o.id)}" ${o.id === z.orgId ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select></label>` : ''}
+        <div class="span2 btns"><button class="primary">Connect</button>${z.refreshToken ? '<button type="button" class="danger" data-act="bkZohoOff">Disconnect</button>' : ''}<button type="button" data-act="closeModal">Cancel</button></div></form>`);
+  };
+  F.bkZohoSave = fd => guard(async () => {
+    const z = zcfg() || {}, dc = fd.get('dc'), clientId = String(fd.get('clientId')).trim(), clientSecret = String(fd.get('clientSecret')).trim(), code = String(fd.get('code') || '').trim();
+    if (!zohoReady()) throw new Error('Update the CA Desk Suite extension (Settings → Update now) and reload this page – Zoho Books works through it.');
+    busy(true, 'Connecting to Zoho Books…');
+    try {
+      const refreshToken = code ? await zohoExchange({ dc, clientId, clientSecret, code }) : z.refreshToken;
+      const cfg = { dc, clientId, clientSecret, refreshToken };
+      const orgs = (await zohoOrgs(cfg)).map(o => ({ id: String(o.organization_id), name: o.name, gstin: o.tax_reg_no || '' }));
+      if (!orgs.length) throw new Error('No Zoho Books organisation in this Zoho account.');
+      const own = ownGstins(client());
+      const org = orgs.find(o => o.id === fd.get('orgId')) || orgs.find(o => own.includes(String(o.gstin).toUpperCase())) || orgs[0];
+      await saveZoho({ ...cfg, orgId: org.id, orgName: org.name, orgs, connectedAt: new Date().toISOString(), by: S.profile?.email || '' });
+    } finally { busy(false); }
+    closeModal(); render(); toast(`Zoho Books connected – ${zcfg().orgName}${zcfg().orgs.length > 1 ? ' (change the organisation with ⚙)' : ''}`, 6000);
+  });
+  A.bkZohoOff = () => { if (!confirm('Disconnect Zoho Books for this client? Entries already brought in stay.')) return; guard(async () => { await setDoc(doc(db, 'clients', st().cid, 'booksmeta', 'zoho'), { refreshToken: '', clientSecret: '', updatedAt: serverTimestamp() }, { merge: true }); st().zoho = null; closeModal(); render(); }, 'Disconnected'); };
+  A.bkZohoFetch = () => guard(async () => {
+    const s = st(), g = id => document.getElementById(id);
+    const from = g('bkZFrom')?.value, to = g('bkZTo')?.value; s.zFrom = from; s.zTo = to;
+    if (!from || !to || from > to) throw new Error('Choose the From and To dates.');
+    if (!meta().syncedAt) throw new Error('Sync from Tally first, so Zoho customers and accounts are matched to your Tally ledgers.');
+    const want = { invoices: g('bkZInv')?.checked, creditnotes: g('bkZCn')?.checked, customerpayments: g('bkZPay')?.checked };
+    const r = await zohoFetch(from, to, want).finally(() => busy(false));
+    s.tab = 'review'; s.zFrom = s.zTo = ''; render();
+    toast(`${r.made} entr${r.made === 1 ? 'y' : 'ies'} from Zoho Books ready to review${r.skipped ? ` · ${r.skipped} already brought in before` : ''}`, 7000);
+  });
   A.bkDoc = ({ id }) => guard(async () => { const e = st().entries.find(x => x.id === id), f = await fileOf(e.src.docId); window.open(URL.createObjectURL(f), '_blank'); });
   A.bkReAI = ({ id }) => guard(async () => {
     const s = st(), e = s.entries.find(x => x.id === id); busy(true, 'Reading with AI…');
