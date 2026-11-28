@@ -447,7 +447,7 @@ export function initGstDesk(ctx) {
   A.gdReload = () => location.reload();
   A.gdBridgeUpdate = () => G.bridgeUpdate();
   A.gdBridgeCheck = () => G.bridgeCheck();
-  A.gdToSettings = () => { S.view = 'settings'; render(); setTimeout(() => document.getElementById('gdext')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); };
+  A.gdToSettings = () => { S.view = 'settings'; S.setTab = 'gst'; render(); setTimeout(() => document.getElementById('gdext')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); };
   A.gdAddMaster = ({ g }) => G.addMaster(g);
   A.gdLink = ({ g }) => G.linkMaster(g, document.getElementById('gdl-' + g)?.value || '');
   A.gdSync = () => G.sync({ quiet: false }).then(() => G.refresh());

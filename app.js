@@ -1239,27 +1239,18 @@ const extCard = (compact = false) => {
     ${GD.installCard()}
     <p class="muted small mt">One Chrome extension for everything – nothing to install on the computer. <b>GST Desk</b> (client master linked with your Masters, GST registration filling, bulk GSTR-1/2B/3B downloads, import from GST portal, Tally &amp; GST work, GSTR-1 upload) and the <b>portal helper</b> – fills the user ID and password on GST, Income Tax, TRACES, MCA, EPFO and ESIC when you click Login (you type the CAPTCHA/OTP), lets CA Desk read from Tally and checks filing frequency. It only runs on CA Desk and those portals and never changes Tally data unless you approve entries in CA Desk.</p>`;
 };
+// Settings: one page with a tab per module – opens on the module you are in; every module's settings reachable from anywhere
+const SET_TABS = [['general', 'General'], ['crm', 'CA Desk (CRM)'], ['gst', 'GST Desk'], ['books', 'Books'], ['pay', 'Vetan Payroll']];
+const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
 function vSettings() {
-  return `
+  const tab = S.setTab || ({ gst: 'gst', books: 'books', pay: 'pay' }[S.vert] || 'general');
+  const tabs = `<div class="set-tabs">${SET_TABS.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="setTab" data-t="${k}">${l}</button>`).join('')}</div>`;
+  const body = {
+    general: `
   <section class="card">
     <h2>Firm</h2>
     <form data-form="firm" class="grid narrow"><label>Firm name<input name="firm" value="${esc(S.firm)}" required></label>
       <div class="span2"><button class="primary">Save</button></div></form>
-  </section>
-  <section class="card" id="gdext">
-    <h2>CA Desk Suite — Chrome extension</h2>
-    ${extCard()}
-  </section>
-  <section class="card">
-    <h2>Attach documents from your computer</h2>
-    <p class="muted small">Choose your <b>DATA MANAGEMENT</b> folder. PAN, Aadhaar, incorporation certificates, MOA/AOA, GST registration certificates, TAN, Udyam and other certificates are attached to the right client's Documents tab. Files already attached are skipped, so it is safe to run again.</p>
-    <label class="filebtn primarybtn">Choose DATA MANAGEMENT folder<input type="file" webkitdirectory multiple data-change="folderAttach"></label>
-    ${S.attachReport || ''}
-  </section>
-  <section class="card">
-    <h2>Google Drive</h2>
-    <p class="muted small">Fill master data from a Drive folder that has one sub-folder per client (GST certificate, PAN, TAN, incorporation, deed). Read-only access; re-running only fills blanks and adds new documents.</p>
-    <button class="primary" data-act="driveOpen">Import from Google Drive</button>
   </section>
   <section class="card">
     <h2>Backup &amp; restore</h2>
@@ -1281,7 +1272,42 @@ function vSettings() {
       <label>Temporary password<input name="pw" required minlength="8" value="${genPw()}"></label>
       <div class="span2"><button class="primary">Create staff login</button></div>
     </form>
-  </section>`}`;
+  </section>`}`,
+    crm: `
+  <section class="card">
+    <h2>Attach documents from your computer</h2>
+    <p class="muted small">Choose your <b>DATA MANAGEMENT</b> folder. PAN, Aadhaar, incorporation certificates, MOA/AOA, GST registration certificates, TAN, Udyam and other certificates are attached to the right client's Documents tab. Files already attached are skipped, so it is safe to run again.</p>
+    <label class="filebtn primarybtn">Choose DATA MANAGEMENT folder<input type="file" webkitdirectory multiple data-change="folderAttach"></label>
+    ${S.attachReport || ''}
+  </section>
+  <section class="card">
+    <h2>Google Drive</h2>
+    <p class="muted small">Fill master data from a Drive folder that has one sub-folder per client (GST certificate, PAN, TAN, incorporation, deed). Read-only access; re-running only fills blanks and adds new documents.</p>
+    <button class="primary" data-act="driveOpen">Import from Google Drive</button>
+  </section>
+  <section class="card"><h2>Clients from Excel</h2><p class="muted small">Add or update many clients at once from an Excel sheet.</p><button data-act="go" data-v="import">Open Excel import</button></section>`,
+    gst: `
+  <section class="card" id="gdext">
+    <h2>CA Desk Suite — Chrome extension</h2>
+    ${extCard()}
+  </section>`,
+    books: `
+  <section class="card"><h2>Tally connection &amp; AI</h2>
+    <form data-form="setBooks" class="grid narrow"><label>Tally port<input name="port" inputmode="numeric" value="${esc(lsGet('tallyPort') || '9000')}"></label><label></label>
+      <p class="span2 muted small">TallyPrime: F1 Help → Settings → Connectivity → Client/Server configuration – TallyPrime acts as “Both”, Enable ODBC “Yes”, port as above. CA Desk reads and posts through the CA Desk Suite extension.</p>
+      <label class="span2">Anthropic API key (reading photos / handwriting, Ask AI)<input name="key" type="password" value="${esc(lsGet('cadesk.aiKey'))}" placeholder="sk-ant-…" autocomplete="off"></label>
+      <label>Model<input name="model" value="${esc(lsGet('cadesk.aiModel') || 'claude-sonnet-5-5')}"></label>
+      <label>Reading documents<select name="mode">${[['both', 'Free reader for printed PDFs, AI for photos'], ['free', 'Free reader only'], ['ai', 'AI for everything']].map(([v, l]) => `<option value="${v}" ${(lsGet('cadesk.readMode') || 'both') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <p class="span2 muted small">The key is kept only in this browser on this computer; Anthropic bills its use to you.</p>
+      <div class="span2"><button class="primary">Save</button></div></form></section>
+  <section class="card"><h2>Bank rules &amp; Zoho Books</h2><p class="muted small">Kept per client: Books → Bookkeeping → pick the client → 🏦 Bank import → Rules, or Zoho Books → ⚙.</p><button data-act="go" data-v="books">Open Bookkeeping</button></section>`,
+    pay: `
+  <section class="card"><h2>Vetan Payroll</h2>
+    <form data-form="setPay" class="grid narrow"><label class="span2">Vetan Payroll address<input name="url" value="${esc(PAYROLL_URL())}" placeholder="https://…"></label>
+      <div class="span2"><button class="primary">Save</button></div></form>
+    <p class="muted small">Payroll due dates (payslips, EPF, ESIC, PT, LWF) are in CA Desk → To-do list.</p></section>`,
+  }[tab];
+  return tabs + body;
 }
 async function loadStaff() {
   const el = $('#staffList'); if (!el || LOCAL) return;
@@ -1324,9 +1350,10 @@ const A = {
     const email = prompt('Enter your login email. A password reset link will be sent.');
     if (email) guard(() => sendPasswordResetEmail(auth, email.trim()), 'Reset link sent — check your inbox.');
   },
+  setTab: ({ t: tb }) => { S.setTab = tb; render(); if (tb === 'general') loadStaff(); },
   vert: ({ id }) => { const x = VERTS.find(v => v[0] === id); if (!x) return; S.vert = id; A.go({ v: x[4] }); },
   payUrlSave: () => { const u = document.getElementById('payUrl')?.value.trim(); if (!/^https?:\/\//.test(u || '')) return toast('Enter the full address, starting with https://'); try { localStorage.setItem('cad-payroll-url', u); } catch { /* private mode */ } toast('Saved'); render(); },
-  go: ({ v }) => { S.fab = false; if (v === 'due') { S.dueDay = ''; if (S.dueOpen?.has('*')) S.dueOpen = new Set(); } S.view = v; window.scrollTo(0, 0); S.importRows = v === 'import' ? S.importRows : null; render(); if (v === 'settings') loadStaff(); },
+  go: ({ v }) => { S.fab = false; if (v === 'due') { S.dueDay = ''; if (S.dueOpen?.has('*')) S.dueOpen = new Set(); } if (v === 'settings') S.setTab = null; S.view = v; window.scrollTo(0, 0); S.importRows = v === 'import' ? S.importRows : null; render(); if (v === 'settings') loadStaff(); },
   open: ({ id, tab }) => guard(async () => { await openClient(id, tab || 'master'); render(); }),
   tab: ({ t }) => { S.tab = t; render(); },
   extUpdate: ({ pick }) => GD.update({ pick: !!pick }),   // CA Desk Suite (one extension)
@@ -1683,6 +1710,10 @@ async function setAccess(uid, revoked) {
 
 /* ================= forms ================= */
 const F = {
+  setBooks: fd => { const set = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
+    set('tallyPort', String(fd.get('port') || '').replace(/\D/g, '') || '9000'); set('cadesk.aiKey', String(fd.get('key') || '').trim()); set('cadesk.aiModel', String(fd.get('model') || '').trim() || 'claude-sonnet-5-5'); set('cadesk.readMode', fd.get('mode') || 'both');
+    toast('Saved'); render(); },
+  setPay: fd => { const u = String(fd.get('url') || '').trim(); if (!/^https?:\/\//.test(u)) return toast('Enter the full address, starting with https://'); try { localStorage.setItem('cadesk-payroll-url'.replace('cadesk-', 'cad-'), u); } catch { /* private mode */ } toast('Saved'); render(); },
   login: fd => guard(() => signInWithEmailAndPassword(auth, fd.get('email').trim(), fd.get('pw'))),
   setup: fd => guard(async () => {
     settingUp = true;
