@@ -6,6 +6,7 @@
 // 3. Review every entry (document beside the voucher), approve, then post to Tally. Corrections are learnt.
 import { extractText, toISO } from './extract.js';
 import { tallyPost, tallyEnv, tallyParse, tallyEsc, tallyImport, tallyCompanies } from './tally.js';
+import { isItrOnly } from './compliance.js';
 import { zohoReady, zohoExchange, zohoOrgs, zohoGet, zohoList } from './zoho.js';
 
 const KINDS = [['purchase', 'Purchase bill'], ['sales', 'Sales invoice'], ['expense', 'Expense / receipt'], ['bank', 'Bank statement'], ['contra', 'Contra (cash / bank transfer)']];
@@ -412,11 +413,20 @@ export function initBooks(ctx) {
 
   /* ---------- views ---------- */
   B.view = () => {
-    const s = st(), list = S.clients.filter(c => !c.exClient).sort((a, b) => dispName(a).localeCompare(dispName(b)));
+    const s = st(), grp = s.grp || 'active', cons = s.cons || '';
+    const inGrp = c => grp === 'ex' ? c.exClient : grp === 'itr' ? !c.exClient && isItrOnly(c) : grp === 'all' ? true : !c.exClient && !isItrOnly(c);
+    const base = S.clients.filter(inGrp);
+    const consList = [...new Set(base.map(c => c.constitution || 'Not set'))].sort();
+    const list = base.filter(c => !cons || (c.constitution || 'Not set') === cons).sort((a, b) => dispName(a).localeCompare(dispName(b)));
+    const cnt = g => S.clients.filter(c => g === 'ex' ? c.exClient : g === 'itr' ? !c.exClient && isItrOnly(c) : g === 'all' ? true : !c.exClient && !isItrOnly(c)).length;
     const q = (s.q || '').toLowerCase();
+    const shown = list.filter(c => !q || [dispName(c), c.name, c.pan, c.gstin, ...regsOf(c).map(r => r.gstin)].some(v => (v || '').toLowerCase().includes(q)));
     return `<div class="bk">
-      <aside class="card bk-cl"><input placeholder="Search client…" value="${esc(s.q || '')}" data-change="bkQ" class="bk-q">
-        <div class="bk-list">${list.filter(c => !q || dispName(c).toLowerCase().includes(q)).map(c => `<button class="${c.id === s.cid ? 'on' : ''}" data-act="bkOpen" data-id="${c.id}"><b>${esc(dispName(c))}</b><span>${esc(c.constitution || '')}</span></button>`).join('')}</div></aside>
+      <aside class="card bk-cl"><input placeholder="Search name, PAN, GSTIN…" value="${esc(s.q || '')}" data-change="bkQ" class="bk-q">
+        <div class="bk-grp">${[['active', 'Active'], ['itr', 'ITR'], ['ex', 'Ex-clients'], ['all', 'All']].map(([k, l]) => `<button class="${grp === k ? 'on' : ''}" data-act="bkGrp" data-g="${k}">${l} <b>${cnt(k)}</b></button>`).join('')}</div>
+        <select data-change="bkCons" class="bk-cons"><option value="">All types (${base.length})</option>${consList.map(x => `<option ${x === cons ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+        <div class="small muted bk-n">${shown.length} client${shown.length === 1 ? '' : 's'}</div>
+        <div class="bk-list">${shown.map(c => `<button class="${c.id === s.cid ? 'on' : ''}" data-act="bkOpen" data-id="${c.id}"><b>${esc(dispName(c))}</b><span>${esc(c.constitution || '')}</span></button>`).join('')}</div></aside>
       <section class="bk-main">${s.cid ? (s.loading ? '<div class="card"><p class="muted">Loading…</p></div>' : work()) : `<div class="card bk-empty"><h2>Bookkeeping</h2><p>Pick a client on the left. Then sync its Tally company once, upload bills, receipts and bank statements (PDF or photo — printed or handwritten), review each entry and post them to Tally.</p>${aiCard()}</div>`}</section></div>`;
   };
   function aiCard() {
@@ -511,6 +521,8 @@ export function initBooks(ctx) {
   /* ---------- actions ---------- */
   A.bkOpen = ({ id }) => guard(() => load(id));
   C.bkQ = el => { st().q = el.value; render(); };
+  A.bkGrp = ({ g }) => { const s = st(); s.grp = g; s.cons = ''; render(); };
+  C.bkCons = el => { st().cons = el.value; render(); };
   C.bkMode = el => { ls.set('cadesk.readMode', el.value); render(); };
   C.bkBank = el => { st().bankLedger = el.value; };
   A.bkTab = ({ t }) => { const s = st(); s.tab = t; s.sel = new Set(); render(); };
