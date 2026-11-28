@@ -8,6 +8,7 @@ import { extractText, toISO } from './extract.js';
 import { tallyPost, tallyEnv, tallyParse, tallyEsc, tallyImport, tallyCompanies } from './tally.js';
 import { isItrOnly } from './compliance.js';
 import { initBankImport } from './bankimport.js';
+import { initAiChat } from './aichat.js';
 import { zohoReady, zohoExchange, zohoOrgs, zohoGet, zohoList } from './zoho.js';
 
 const KINDS = [['purchase', 'Purchase bill'], ['sales', 'Sales invoice'], ['expense', 'Expense / receipt'], ['bank', 'Bank statement'], ['contra', 'Contra (cash / bank transfer)']];
@@ -455,8 +456,8 @@ export function initBooks(ctx) {
         ${zohoRow()}
         ${m.syncedAt ? '' : '<p class="small amber-t">Sync from Tally first — entries are matched to your ledgers and to how each party was posted before.</p>'}
       </div>
-      <div class="bk-mode"><button class="${s.mode !== 'bank' ? 'on' : ''}" data-act="bkMode2" data-m="">Bills &amp; entries</button><button class="${s.mode === 'bank' ? 'on' : ''}" data-act="bkMode2" data-m="bank">🏦 Bank import</button></div>
-      ${s.mode === 'bank' ? BI.view() : `<div class="card">
+      <div class="bk-mode"><button class="${s.mode !== 'bank' ? 'on' : ''}" data-act="bkMode2" data-m="">Bills &amp; entries</button><button class="${s.mode === 'bank' ? 'on' : ''}" data-act="bkMode2" data-m="bank">🏦 Bank import</button><button class="${s.mode === 'ai' ? 'on' : ''}" data-act="bkMode2" data-m="ai">💬 Ask AI</button></div>
+      ${s.mode === 'bank' ? BI.view() : s.mode === 'ai' ? AIC.view() : `<div class="card">
         <div class="row-between wrap"><div class="tabs-s">${['review', 'ready', 'error', 'posted'].map(k => `<button class="${tab === k ? 'on' : ''}" data-act="bkTab" data-t="${k}">${STATUS[k]} <b>${cnt(k)}</b></button>`).join('')}</div>
           <div class="btns">${tab === 'review' || tab === 'error' ? `<button class="sm" data-act="bkApprove" ${sel.size ? '' : 'disabled'}>Approve selected</button>` : ''}${tab === 'ready' ? `<button class="sm primary" data-act="bkPost" ${sel.size || cnt('ready') ? '' : 'disabled'}>Post ${sel.size ? sel.size + ' selected' : 'all approved'} to Tally</button>` : ''}${tab !== 'posted' ? `<button class="sm danger" data-act="bkDel" ${sel.size ? '' : 'disabled'}>Delete</button>` : ''}</div></div>
         <div class="reg-wrap"><table class="reg bk-t"><thead><tr><th><input type="checkbox" data-change="bkAll" ${rows.length && rows.every(e => sel.has(e.id)) ? 'checked' : ''}></th><th>Date</th><th>Type</th><th>Party / ledger</th><th>Posted to</th><th class="num">Amount</th><th>Document</th><th>Check</th></tr></thead><tbody>
@@ -526,6 +527,8 @@ export function initBooks(ctx) {
   const BI = initBankImport({ S, A, C, F, esc, toast, modal, closeModal, guard, render, isoToDisp, db, fs, busy,
     k: { st, L, led, meta, saveMeta, opt, draftFromBank, bankFromText, toks } });
   B.onInput = el => BI.onInput(el);
+  const AIC = initAiChat({ S, A, C, F, esc, toast, guard, render, isoToDisp, busy,
+    k: { st, L, led, meta, opt, client, dispName, own: ownGstins, addLedger: l => { st().meta.ledgers = [...L(), l]; saveMeta({ ledgers: L() }); } } });
   C.bkQ = el => { st().q = el.value; render(); };
   A.bkGrp = ({ g }) => { const s = st(); s.grp = g; s.cons = ''; render(); };
   C.bkCons = el => { st().cons = el.value; render(); };
