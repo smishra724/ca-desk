@@ -2164,7 +2164,7 @@ document.addEventListener('input', e => {
   if (e.target.id === 'gq') { S.gq = e.target.value; gqResults(); return; }
   if (e.target.id === 'gdQ') { S.gdQ = e.target.value; const p = e.target.selectionStart; render(); const s = $('#gdQ'); s.focus(); s.setSelectionRange(p, p); return; }
   if (e.target.id === 'dscQ') { S.dscF.q = e.target.value; const p = e.target.selectionStart; render(); const s = $('#dscQ'); s.focus(); s.setSelectionRange(p, p); return; }
-  if (BS.onInput(e.target)) return;
+  if (BS.onInput(e.target) || BK.onInput(e.target)) return;
   if (e.target.id === 'dueQ') {
     S.dueF.q = e.target.value; const pos = e.target.selectionStart; render();
     const s = $('#dueQ'); s.focus(); s.setSelectionRange(pos, pos); return;

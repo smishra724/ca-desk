@@ -781,3 +781,21 @@ body.dragging-gst .dropbar{display:flex}
 .bk-grp button b{display:block;font-size:11px;color:var(--muted,#667085);font-weight:600}
 .bk-grp button.on{background:var(--ink-900,#14213d);border-color:var(--ink-900,#14213d);color:#fff}.bk-grp button.on b{color:#fff;opacity:.8}
 .bk-cons{width:100%;margin:0 0 4px}.bk-n{margin:2px 2px 6px}
+/* bank import */
+.bk-mode{display:inline-flex;gap:4px;background:#eef1f5;padding:4px;border-radius:10px;margin:0 0 12px}
+.bk-mode button{border:0;background:transparent;padding:7px 14px;border-radius:7px;font-weight:600;cursor:pointer;color:#475467}
+.bk-mode button.on{background:#fff;color:var(--ink-900,#14213d);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.bi-stmts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.bi-stmts button{border:1px solid var(--line,#e3e7ee);background:#fff;border-radius:9px;padding:7px 10px;text-align:left;cursor:pointer;display:flex;flex-direction:column}
+.bi-stmts button span{font-size:12px;color:var(--muted,#667085)}.bi-stmts button.on{border-color:var(--saffron,#f0a500);background:#fff8e6}
+.bi-sum{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:10px}
+.bi-sum>div{background:#f7f8fb;border-radius:9px;padding:8px 10px;display:flex;flex-direction:column;min-width:0}
+.bi-sum span{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#667085)}.bi-sum b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bi-sum small{font-size:11px;color:var(--muted,#667085);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bi-sum .green,.bi .green{color:#0b7a43}.bi-sum .red{color:#b42318}
+.bi-bar{gap:8px;margin:8px 0}.bi-bar #biQ{min-width:260px}.bi-bar #biSet{min-width:240px}
+.bi-t td{vertical-align:middle}.bi-n{max-width:420px;font-size:13px}
+.bi-l{width:200px;padding:5px 7px;border:1px solid var(--line,#d0d5dd);border-radius:7px;font:inherit;font-size:13px}
+.bi-l.rule{background:#e3f4ea;border-color:#9fd8b6}.bi-l.auto{background:#e8f1fd;border-color:#a9c7f2}.bi-l:placeholder-shown{background:#fff8e6;border-color:#f0c36d}
+.bi-ty{padding:4px;font-size:12.5px;min-width:92px}
+.bi-t tr.posted td{opacity:.6}.bi-t tr.dup td{background:#fffbeb}
+@media (max-width:900px){.bi-sum{grid-template-columns:repeat(2,1fr)}}

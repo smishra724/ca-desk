@@ -7,6 +7,7 @@
 import { extractText, toISO } from './extract.js';
 import { tallyPost, tallyEnv, tallyParse, tallyEsc, tallyImport, tallyCompanies } from './tally.js';
 import { isItrOnly } from './compliance.js';
+import { initBankImport } from './bankimport.js';
 import { zohoReady, zohoExchange, zohoOrgs, zohoGet, zohoList } from './zoho.js';
 
 const KINDS = [['purchase', 'Purchase bill'], ['sales', 'Sales invoice'], ['expense', 'Expense / receipt'], ['bank', 'Bank statement'], ['contra', 'Contra (cash / bank transfer)']];
@@ -92,7 +93,7 @@ export function initBooks(ctx) {
   const L = () => meta().ledgers || [];
 
   async function load(cid) {
-    const s = st(); s.cid = cid; s.loading = true; s.sel = new Set(); render();
+    const s = st(); if (s.cid !== cid) s.bi = null; s.cid = cid; s.loading = true; s.sel = new Set(); render();
     const [m, e, z] = await Promise.all([getDoc(doc(db, 'clients', cid, 'booksmeta', 'main')), getDocs(collection(db, 'clients', cid, 'books')), getDoc(doc(db, 'clients', cid, 'booksmeta', 'zoho')).catch(() => null)]);
     if (s.cid !== cid) return;
     s.meta = m.exists() ? m.data() : {};
@@ -454,7 +455,8 @@ export function initBooks(ctx) {
         ${zohoRow()}
         ${m.syncedAt ? '' : '<p class="small amber-t">Sync from Tally first — entries are matched to your ledgers and to how each party was posted before.</p>'}
       </div>
-      <div class="card">
+      <div class="bk-mode"><button class="${s.mode !== 'bank' ? 'on' : ''}" data-act="bkMode2" data-m="">Bills &amp; entries</button><button class="${s.mode === 'bank' ? 'on' : ''}" data-act="bkMode2" data-m="bank">🏦 Bank import</button></div>
+      ${s.mode === 'bank' ? BI.view() : `<div class="card">
         <div class="row-between wrap"><div class="tabs-s">${['review', 'ready', 'error', 'posted'].map(k => `<button class="${tab === k ? 'on' : ''}" data-act="bkTab" data-t="${k}">${STATUS[k]} <b>${cnt(k)}</b></button>`).join('')}</div>
           <div class="btns">${tab === 'review' || tab === 'error' ? `<button class="sm" data-act="bkApprove" ${sel.size ? '' : 'disabled'}>Approve selected</button>` : ''}${tab === 'ready' ? `<button class="sm primary" data-act="bkPost" ${sel.size || cnt('ready') ? '' : 'disabled'}>Post ${sel.size ? sel.size + ' selected' : 'all approved'} to Tally</button>` : ''}${tab !== 'posted' ? `<button class="sm danger" data-act="bkDel" ${sel.size ? '' : 'disabled'}>Delete</button>` : ''}</div></div>
         <div class="reg-wrap"><table class="reg bk-t"><thead><tr><th><input type="checkbox" data-change="bkAll" ${rows.length && rows.every(e => sel.has(e.id)) ? 'checked' : ''}></th><th>Date</th><th>Type</th><th>Party / ledger</th><th>Posted to</th><th class="num">Amount</th><th>Document</th><th>Check</th></tr></thead><tbody>
@@ -465,7 +467,7 @@ export function initBooks(ctx) {
           <td class="small">${e.src?.how === 'zoho' ? `${esc((e.src.name || '').slice(0, 30))}<div class="tiny muted">from Zoho Books</div>` : `<a href="#" data-act="bkDoc" data-id="${e.id}">${esc((e.src?.name || '').slice(0, 26))}</a><div class="tiny muted">${e.src?.how === 'ai' ? 'read by AI' : e.src?.how === 'free' ? 'free reader' : e.src?.how === 'failed' ? 'not read' : ''}</div>`}</td>
           <td class="small">${e.status === 'posted' ? `<span class="tag green">In Tally</span>` : e.msg ? `<span class="red">${esc(e.msg)}</span>` : p.length ? `<span class="amber-t">Missing: ${esc(p.slice(0, 3).join(', '))}</span>` : (e.warn || []).length ? `<span class="amber-t">${esc(e.warn[0])}</span>` : '<span class="tag green">OK</span>'}</td></tr>`; }).join('')
           || `<tr><td colspan="8" class="empty muted">${tab === 'review' ? 'Nothing to review. Upload bills, receipts or a bank statement above.' : tab === 'ready' ? 'Approve entries in “To review” to post them.' : tab === 'posted' ? 'Nothing posted yet.' : 'No errors.'}</td></tr>`}
-        </tbody></table></div></div>`;
+        </tbody></table></div></div>`}`;
   }
 
   /* ---------- review modal ---------- */
@@ -520,6 +522,10 @@ export function initBooks(ctx) {
 
   /* ---------- actions ---------- */
   A.bkOpen = ({ id }) => guard(() => load(id));
+  A.bkMode2 = ({ m }) => { st().mode = m; render(); };
+  const BI = initBankImport({ S, A, C, F, esc, toast, modal, closeModal, guard, render, isoToDisp, db, fs, busy,
+    k: { st, L, led, meta, saveMeta, opt, draftFromBank, bankFromText, toks } });
+  B.onInput = el => BI.onInput(el);
   C.bkQ = el => { st().q = el.value; render(); };
   A.bkGrp = ({ g }) => { const s = st(); s.grp = g; s.cons = ''; render(); };
   C.bkCons = el => { st().cons = el.value; render(); };
